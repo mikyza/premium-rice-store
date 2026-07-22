@@ -32,12 +32,19 @@ console.log('🚀 Initializing Premium Rice & Grain E-Commerce Backend...');
 console.log('DEBUG: Booting unified agricultural & hardware architecture...');
 
 // ==========================================
-// 1. OFFLINE UPLOAD CONFIGURATION (MULTER)
+// 1. OFFLINE & ONLINE UPLOAD DIRECTORY CONFIGURATION (MULTER)
 // ==========================================
 const uploadDir = path.join(__dirname, 'public', 'uploads');
+const imagesDir = path.join(__dirname, 'public', 'images');
+
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
   console.log('DEBUG: Created missing upload directory at', uploadDir);
+}
+
+if (!fs.existsSync(imagesDir)) {
+  fs.mkdirSync(imagesDir, { recursive: true });
+  console.log('DEBUG: Created missing images directory at', imagesDir);
 }
 
 const storage = multer.diskStorage({
@@ -178,8 +185,13 @@ async function startServer() {
     };
     
     expressApp.use(cors(corsOptions));
-    expressApp.use(express.json());
-    expressApp.use(express.urlencoded({ extended: true }));
+    expressApp.use(express.json({ limit: '50mb' }));
+    expressApp.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+    // Static Asset Mounts (Supports /uploads, /images, and public root)
+    expressApp.use(express.static(path.join(__dirname, 'public')));
+    expressApp.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
+    expressApp.use('/images', express.static(path.join(__dirname, 'public', 'images')));
 
     await SystemConfig.findOrCreate({ where: { key: 'transport_fee' }, defaults: { value: 250 } });
     await SystemConfig.findOrCreate({ where: { key: 'black_friday' }, defaults: { value: { active: false, endTime: null } } });
@@ -277,8 +289,6 @@ async function startServer() {
     });
 
     initializeFlashSaleEngine(io);
-    
-    expressApp.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 
     io.on('connection', (socket) => {
       if (flashSaleState.active) socket.emit('blackFridayTick', { active: true, endTime: flashSaleState.endTime });
@@ -353,8 +363,7 @@ async function startServer() {
         if (search) {
           whereCondition[Op.or] = [
             { brandName: { [Op.like]: `%${search}%` } },
-            { variety: { [Op.like]: `%${search}%` } },
-            { modelName: { [Op.like]: `%${search}%` } }
+            { variety: { [Op.like]: `%${search}%` } }
           ];
         }
 
@@ -362,14 +371,15 @@ async function startServer() {
         
         const optimizedCatalog = products.map(product => {
           const productObj = product.toJSON();
-          let currentEffectivePrice = productObj.basePrice;
-          if (flashSaleState && flashSaleState.active && productObj.flashSalePrice !== null) {
+          let currentEffectivePrice = productObj.basePrice || productObj.price || 0;
+          if (flashSaleState && flashSaleState.active && productObj.flashSalePrice !== null && productObj.flashSalePrice !== undefined) {
             currentEffectivePrice = productObj.flashSalePrice;
           }
           return {
             ...productObj,
             price: currentEffectivePrice,
-            isBlackFridayApplied: (flashSaleState && flashSaleState.active && productObj.flashSalePrice !== null)
+            imageUrl: productObj.imageUrl || productObj.image || productObj.url || null,
+            isBlackFridayApplied: (flashSaleState && flashSaleState.active && productObj.flashSalePrice !== null && productObj.flashSalePrice !== undefined)
           };
         }).filter(item => !maxPrice || item.price <= Number(maxPrice));
 
@@ -442,8 +452,8 @@ async function startServer() {
             return res.status(422).json({ error: `Inventory failure for product ID: ${targetId}. Insufficient stock.` });
           }
 
-          let purchasePrice = product.basePrice;
-          if (flashSaleState.active && product.flashSalePrice !== null) {
+          let purchasePrice = product.basePrice || product.price || 0;
+          if (flashSaleState.active && product.flashSalePrice !== null && product.flashSalePrice !== undefined) {
             purchasePrice = product.flashSalePrice;
           }
 
@@ -453,9 +463,10 @@ async function startServer() {
 
           builtOrderLineItems.push({ 
             productId: product.id, 
-            name: `${product.brandName} ${product.variety || product.modelName || ''} (${product.weightKg || 0}kg)`,
+            name: `${product.brandName} ${product.variety || ''} (${product.weightKg || 0}kg)`,
             quantity: item.quantity, 
-            priceAtPurchase: purchasePrice 
+            priceAtPurchase: purchasePrice,
+            imageUrl: product.imageUrl || product.image || null
           });
           
           io.emit('stockUpdated', { productId: product.id, newStockQuantity: product.stockQuantity });
@@ -513,7 +524,7 @@ async function startServer() {
       try {
         if (!req.file) return res.status(400).json({ error: 'No file buffered to stream' });
         const fileUrl = `/uploads/${req.file.filename}`;
-        res.json({ url: fileUrl });
+        res.json({ url: fileUrl, imageUrl: fileUrl });
       } catch (err) { res.status(500).json({ error: err.message }); }
     });
 
@@ -522,10 +533,14 @@ async function startServer() {
         console.log("DEBUG: Raw Product Payload:", req.body); 
         const payload = {
           ...req.body,
-          weightKg: Number(req.body.weightKg || 0),
+          brandName: req.body.brandName || req.body.brand || 'Premium Rice',
+          variety: req.body.variety || 'Aromatic Pishori',
+          weightKg: Number(req.body.weightKg || req.body.weight || 0),
           basePrice: Number(req.body.basePrice || req.body.price || 0),
-          price: Number(req.body.basePrice || req.body.price || 0),
-          stockQuantity: Number(req.body.stockQuantity || 0)
+          flashSalePrice: req.body.flashSalePrice !== undefined && req.body.flashSalePrice !== null && req.body.flashSalePrice !== '' ? Number(req.body.flashSalePrice) : null,
+          stockQuantity: Number(req.body.stockQuantity || req.body.stock || 0),
+          imageUrl: req.body.imageUrl || req.body.image || req.body.url || null,
+          isAvailable: req.body.isAvailable !== undefined ? Boolean(req.body.isAvailable) : true
         };
 
         const createdRecord = await RiceProduct.create(payload);
@@ -535,7 +550,7 @@ async function startServer() {
           action: 'CREATE_PRODUCT',
           targetType: 'product',
           targetId: createdRecord.id,
-          changes: { brand: createdRecord.brandName, variety: createdRecord.variety || createdRecord.modelName },
+          changes: { brand: createdRecord.brandName, variety: createdRecord.variety },
           ipAddress: req.ip
         });
         
@@ -556,14 +571,24 @@ async function startServer() {
 
     const editProductHandler = async (req, res) => {
       try {
-        await RiceProduct.update(req.body, { where: { id: req.params.id } });
+        const updatePayload = {
+          ...req.body
+        };
+        if (req.body.price !== undefined && req.body.basePrice === undefined) {
+          updatePayload.basePrice = Number(req.body.price);
+        }
+        if (req.body.image !== undefined && req.body.imageUrl === undefined) {
+          updatePayload.imageUrl = req.body.image;
+        }
+
+        await RiceProduct.update(updatePayload, { where: { id: req.params.id } });
         const updatedProduct = await RiceProduct.findByPk(req.params.id);
         
         await AdminLog.create({
           adminId: req.adminUser.id,
           action: 'EDIT_PRODUCT_SPEC_OR_PRICE',
           targetType: 'product',
-          targetId: updatedProduct.id,
+          targetId: updatedProduct ? updatedProduct.id : req.params.id,
           changes: req.body,
           ipAddress: req.ip
         });
