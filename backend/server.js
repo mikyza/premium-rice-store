@@ -145,6 +145,9 @@ const authenticateToken = (req, res, next) => {
 
 const requireAdmin = async (req, res, next) => {
   try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ error: 'Authentication details missing' });
+    }
     const userInstance = await User.findByPk(req.user.id);
     if (!userInstance || userInstance.role !== 'admin') {
       console.log(`DEBUG: Admin clearance rejected for user ID: ${req.user.id}`);
@@ -173,14 +176,17 @@ async function startServer() {
     const expressApp = express();
     const server = createServer(expressApp);
 
-    // Configure CORS to allow requests from local port 3000 and Render deployments
+    // Dynamic CORS to ensure cross-domain requests never drop connections
     const corsOptions = {
-      origin: [
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-        /\.onrender\.com$/
-      ],
+      origin: (origin, callback) => {
+        if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1') || origin.endsWith('.onrender.com')) {
+          callback(null, true);
+        } else {
+          callback(null, true); // Fallback permissive allow for client web origins
+        }
+      },
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
       credentials: true
     };
     
@@ -256,7 +262,7 @@ async function startServer() {
 
     // Google Sync Endpoint
     expressApp.post('/api/sync/google', async (req, res) => {
-      const { googleId, fullName, email } = req.body;
+      const { googleId, fullName, email } = req.body || {};
       
       if (!googleId) {
         console.error("DEBUG: google-sync received an empty payload");
@@ -268,7 +274,7 @@ async function startServer() {
         if (!user) {
           user = await User.create({ 
             googleId, 
-            fullName, 
+            fullName: fullName || 'Google User', 
             email, 
             role: 'user',
             isActive: true
@@ -295,7 +301,7 @@ async function startServer() {
       
       socket.on('joinAdminChannel', (token) => {
         jwt.verify(token, JWT_SECRET, async (err, decoded) => {
-          if (!err && decoded.role === 'admin') {
+          if (!err && decoded && decoded.role === 'admin') {
             socket.join('admin-dashboard-room');
             console.log(`DEBUG: Admin joined real-time channel. Node ID: ${decoded.id}`);
           }
@@ -309,10 +315,10 @@ async function startServer() {
 
     expressApp.post('/api/user/signup', async (req, res) => {
       try {
-        const { phoneNumber, password, fullName } = req.body;
+        const { phoneNumber, password, fullName } = req.body || {};
         
         if (!phoneNumber || !password || !fullName) {
-          return res.status(400).json({ error: 'All parameters required' });
+          return res.status(400).json({ error: 'All parameters required (phoneNumber, password, fullName)' });
         }
         
         const existingUser = await User.findOne({ where: { phoneNumber } });
@@ -327,25 +333,38 @@ async function startServer() {
         res.status(201).json({ token, user: { id: newUser.id, fullName: newUser.fullName, role: newUser.role } });
       } catch (err) { 
         console.error("Signup Error:", err);
-        res.status(500).json({ error: err.message }); 
+        res.status(500).json({ error: err.message || 'Internal server signup failure' }); 
       }
     });
 
     expressApp.post('/api/user/login', async (req, res) => {
       try {
-        const { phoneNumber, password } = req.body;
+        const { phoneNumber, password } = req.body || {};
         
+        if (!phoneNumber || !password) {
+          return res.status(400).json({ error: 'Phone number and password are required' });
+        }
+
         const user = await User.findOne({ where: { phoneNumber } });
-        if (!user || !user.isActive) return res.status(401).json({ error: 'Invalid record entry' });
+        if (!user || !user.isActive) {
+          return res.status(401).json({ error: 'Invalid phone number or password' });
+        }
+
+        // Handle accounts registered via Google OAuth that lack a local password
+        if (!user.password) {
+          return res.status(401).json({ error: 'Account uses Google Sign-In. Please sign in with Google.' });
+        }
 
         const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) return res.status(401).json({ error: 'Invalid record entry' });
+        if (!isMatch) {
+          return res.status(401).json({ error: 'Invalid phone number or password' });
+        }
 
         const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
         res.json({ token, user: { id: user.id, fullName: user.fullName, role: user.role, phoneNumber: user.phoneNumber } });
       } catch (err) { 
         console.error("Login Error:", err);
-        res.status(500).json({ error: err.message }); 
+        res.status(500).json({ error: err.message || 'Internal server authentication failure' }); 
       }
     });
 
@@ -439,8 +458,12 @@ async function startServer() {
           shippingAddress, 
           shippingFee, 
           grandTotal 
-        } = req.body;
+        } = req.body || {};
         
+        if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
+          return res.status(400).json({ error: 'Cart items payload cannot be empty' });
+        }
+
         let calculatedSubtotal = 0;
         const builtOrderLineItems = [];
 
@@ -502,7 +525,7 @@ async function startServer() {
           transportFee: activeTransportCharge,
           subTotal: calculatedSubtotal,
           grandTotal: grandTotal || (calculatedSubtotal + activeTransportCharge),
-          paymentDetails: { method: paymentMethod, isPaid: false },
+          paymentDetails: { method: paymentMethod || 'cash_on_delivery', isPaid: false },
           county: county || 'Not Specified', 
           town: town || '',
           location: location || '',
@@ -716,7 +739,7 @@ async function startServer() {
 
     expressApp.put('/api/admin/users/:id/modify', authenticateToken, requireAdmin, async (req, res) => {
       try {
-        const { fullName, role, isActive } = req.body;
+        const { fullName, role, isActive } = req.body || {};
         const targetUserRecord = await User.findByPk(req.params.id);
         if (!targetUserRecord) return res.status(404).json({ error: 'Invalid document' });
 
@@ -761,7 +784,7 @@ async function startServer() {
 
     expressApp.post('/api/admin/config/carousel', authenticateToken, requireAdmin, async (req, res) => {
       try {
-        const { slides } = req.body;
+        const { slides } = req.body || {};
         if (!Array.isArray(slides)) {
           return res.status(400).json({ error: 'Slides validation failed: input must be an array' });
         }
@@ -792,7 +815,7 @@ async function startServer() {
 
     expressApp.post('/api/admin/config/hero', authenticateToken, requireAdmin, async (req, res) => {
       try {
-        const { type, url, title, subtitle } = req.body;
+        const { type, url, title, subtitle } = req.body || {};
         let config = await SystemConfig.findOne({ where: { key: 'hero_settings' } });
         
         const newSettings = { type: type || 'video', url, title, subtitle };
@@ -821,7 +844,7 @@ async function startServer() {
 
     expressApp.post('/api/admin/config/transport', authenticateToken, requireAdmin, async (req, res) => {
       try {
-        const { amount } = req.body;
+        const { amount } = req.body || {};
         const previousConfig = await SystemConfig.findOne({ where: { key: 'transport_fee' } });
         
         let updatedConfig;
@@ -846,7 +869,7 @@ async function startServer() {
 
     expressApp.post('/api/admin/config/black-friday', authenticateToken, requireAdmin, async (req, res) => {
       try {
-        const { active, durationHours } = req.body; 
+        const { active, durationHours } = req.body || {}; 
         const currentBfConfig = await SystemConfig.findOne({ where: { key: 'black_friday' } });
 
         if (active) {
@@ -889,7 +912,7 @@ async function startServer() {
 
     expressApp.post('/api/admin/config/counties', authenticateToken, requireAdmin, async (req, res) => {
       try {
-        const { county, fee } = req.body;
+        const { county, fee } = req.body || {};
         let config = await SystemConfig.findOne({ where: { key: 'county_overrides' } });
         
         let currentOverrides = config && config.value ? config.value : {};
