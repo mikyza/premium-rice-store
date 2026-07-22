@@ -52,7 +52,8 @@ export const RiceProduct = sequelize.define('RiceProduct', {
   basePrice: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
   flashSalePrice: { type: DataTypes.DECIMAL(10, 2), allowNull: true },
   stockQuantity: { type: DataTypes.INTEGER, defaultValue: 0 },
-  isAvailable: { type: DataTypes.BOOLEAN, defaultValue: true }
+  isAvailable: { type: DataTypes.BOOLEAN, defaultValue: true },
+  imageUrl: { type: DataTypes.STRING, allowNull: true }
 });
 
 export const Order = sequelize.define('Order', {
