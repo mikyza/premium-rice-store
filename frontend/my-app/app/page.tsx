@@ -6,7 +6,7 @@ import {
   Trash2, Shield, Clock, Search, Edit, Package, Activity, 
   CheckCircle, AlertCircle, Settings, Leaf, ChevronRight,
   ShoppingBag, Users, Image as ImageIcon, Video, Download,
-  MapPin, Eye, RefreshCw, LogOut, Check, AlertTriangle
+  MapPin, Eye, RefreshCw, LogOut, Check, AlertTriangle, Smartphone, CreditCard
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 
@@ -27,6 +27,53 @@ const ALL_47_COUNTIES = [
   "Laikipia", "Nakuru", "Narok", "Kajiado", "Kericho", "Bomet", "Kakamega", "Vihiga", "Bungoma", "Busia", 
   "Siaya", "Kisumu", "Homa Bay", "Migori", "Kisii", "Nyamira", "Nairobi"
 ];
+
+// Regional logistics datasets for dynamic county dropdowns
+const REGIONAL_LOGISTICS_DATA: { [key: string]: { towns: string[], locations: string[], sublocations: string[], streets: string[] } } = {
+  "Nairobi": {
+    towns: ["Westlands", "Kasarani", "Lang'ata", "Starehe", "Dagoretti", "Embakasi", "Makadara", "Kamukunji", "Roysambu", "Mathare"],
+    locations: ["Kilimani", "Kasarani Central", "Karen", "CBD", "Upper Hill", "Industrial Area", "Eastleigh", "Buruburu", "South C", "Runda"],
+    sublocations: ["Mwiki", "Roysambu Sub", "Lavington", "Hurlingham", "South B", "Imara Daima", "Kileleshwa", "Parklands", "Donholm", "Pipeline"],
+    streets: ["Moi Avenue", "Kenyatta Avenue", "Waiyaki Way", "Thika Road Landmark", "Ngong Road", "Enterprise Road", "Argwings Kodhek", "Jogoo Road", "Mombasa Road"]
+  },
+  "Kirinyaga": {
+    towns: ["Mwea East", "Mwea West", "Kerugoya", "Sagana", "Wanguru", "Gichugu", "Ndia"],
+    locations: ["Tebere", "Nyumpa", "Thiba", "Murinduko", "Mutithi", "Kagio", "Kutus"],
+    sublocations: ["Kimbimbi", "Nice Digital City", "Ngurubani", "Makutano", "Kagio Center", "Difatha", "Wamumu"],
+    streets: ["Wanguru Main Street", "Rice Mills Road", "Sagana Highway", "Kimbimbi Stage", "Hospital Road", "Kutus Main Highway", "Embu-Nairobi Road"]
+  },
+  "Kiambu": {
+    towns: ["Thika", "Ruiru", "Githunguri", "Kikuyu", "Limuru", "Kiambu Town", "Juja", "Kabete"],
+    locations: ["Juja Central", "Kahawa Wendani", "Kahawa Sukari", "Ndumberi", "Banana", "Ruaka", "Kiambaa"],
+    sublocations: ["Witeithie", "Membley", "Zimmerman Border", "Muchatha", "Tigoni", "Gachie", "Anmer"],
+    streets: ["Superhighway Frontage", "Biashara Street", "Garissa Road", "Northern Bypass", "Kamiti Road", "Limuru Road", "Thika Main Street"]
+  },
+  "Mombasa": {
+    towns: ["Nyali", "Mvita", "Kisauni", "Likoni", "Changamwe", "Jomvu"],
+    locations: ["Bamburi", "Tudor", "Ganjoni", "Port Reitz", "Kongowea", "Shanzu", "Buxton"],
+    sublocations: ["Mkomani", "Tononoka", "Mikindani", "Bamburi Mtambo", "Nyali Beach", "Magaoni", "Chaani"],
+    streets: ["Moi Avenue Mombasa", "Nkrumah Road", "Links Road", "Malindi Road", "Mama Ngina Drive", "Digo Road", "Nyerere Avenue"]
+  },
+  "Nakuru": {
+    towns: ["Nakuru East", "Nakuru West", "Naivasha", "Gilgil", "Molo", "Njoro", "Subukia"],
+    locations: ["Lanet", "Milimani", "Section 58", "Kiamunyi", "Mai Mahiu", "Kenyatta West"],
+    sublocations: ["Free Area", "Shabab", "White House", "Barnabas", "Pipeline Nakuru", "Karatunga"],
+    streets: ["Kenyatta Avenue Nakuru", "Oginga Odinga Road", "Government Road", "Kanu Street", "Nairobi-Nakuru Highway"]
+  },
+  "Kisumu": {
+    towns: ["Kisumu Central", "Kisumu East", "Kisumu West", "Nyando", "Muhoroni", "Seme"],
+    locations: ["Milimani Kisumu", "Mamboleo", "Kenyatta", "Nyamasaria", "Otonglo", "Kondele"],
+    sublocations: ["Manyatta", "Nyawita", "Migosi", "Polyview", "Tom Mboya", "Riat"],
+    streets: ["Oginga Odinga Street", "Jomo Kenyatta Highway", "Accra Street", "Nyerere Road", "Kakamega Road"]
+  }
+};
+
+const DEFAULT_REGIONAL_LOGISTICS = {
+  towns: ["Central District / Town", "North District", "South District", "East District", "West District", "Municipal Center"],
+  locations: ["Central Location", "Market Center", "Highway Junction", "Administrative Center", "Commercial Zone"],
+  sublocations: ["Town Center Sub-location", "North Ward", "South Ward", "East Ward", "West Ward"],
+  streets: ["Main Street / Highway", "Market Road", "Hospital Road", "School Lane", "Opposite Chief's Camp", "Supermarket Landmark"]
+};
 
 // ==========================================
 // 2. MAIN APPLICATION COMPONENT
@@ -65,11 +112,11 @@ export default function PremiumRiceStore() {
   // --- Checkout Form States ---
   const [checkoutData, setCheckoutData] = useState({
     county: 'Nairobi',
-    town: '',
-    location: '',
-    sublocation: '',
-    shippingAddress: '',
-    paymentMethod: 'mpesa'
+    town: 'Westlands',
+    location: 'CBD',
+    sublocation: 'Mwiki',
+    shippingAddress: 'Moi Avenue',
+    paymentMethod: 'stk'
   });
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   
@@ -91,22 +138,37 @@ export default function PremiumRiceStore() {
   // 3. INITIALIZATION & REAL-TIME WEBSOCKETS
   // ==========================================
   
-  // Dynamic Unpredictable Timer for Hero (5s, 3s, 6s, 8s)
+  // Updated Hero Timer: 5 seconds for Videos, 3.5 seconds (3-4s) for Pictures
   useEffect(() => {
-    const delays = [5000, 3000, 6000, 8000];
-    let timeoutId: NodeJS.Timeout;
+    const mediaArray = [
+      { type: 'video', url: heroSettings?.video1 },
+      { type: 'video', url: heroSettings?.video2 },
+      { type: 'image', url: heroSettings?.img1 },
+      { type: 'image', url: heroSettings?.img2 },
+      { type: 'image', url: heroSettings?.img3 }
+    ].filter(item => item.url && item.url.trim() !== '');
 
-    const tick = () => {
-      const randomDelay = delays[Math.floor(Math.random() * delays.length)];
-      timeoutId = setTimeout(() => {
-        setActiveHeroIndex(prev => prev + 1);
-        tick();
-      }, randomDelay);
-    };
+    const currentMedia = mediaArray.length > 0 ? mediaArray[activeHeroIndex % mediaArray.length] : null;
+    const delay = currentMedia?.type === 'video' ? 5000 : 3500;
 
-    tick();
+    const timeoutId = setTimeout(() => {
+      setActiveHeroIndex(prev => prev + 1);
+    }, delay);
+
     return () => clearTimeout(timeoutId);
-  }, []);
+  }, [activeHeroIndex, heroSettings]);
+
+  // Sync default logistics dropdown values when County changes
+  useEffect(() => {
+    const currentData = REGIONAL_LOGISTICS_DATA[checkoutData.county] || DEFAULT_REGIONAL_LOGISTICS;
+    setCheckoutData(prev => ({
+      ...prev,
+      town: currentData.towns[0],
+      location: currentData.locations[0],
+      sublocation: currentData.sublocations[0],
+      shippingAddress: currentData.streets[0]
+    }));
+  }, [checkoutData.county]);
 
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
@@ -484,30 +546,30 @@ export default function PremiumRiceStore() {
             <p className="text-gray-600 max-w-xl mx-auto text-base">Cultivated in rich soils, aged to perfection, and sorted for unmatched aroma and grain length.</p>
           </div>
           
-          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-8">
-            {products.slice(0, 3).map(p => (
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
+            {products.slice(0, 4).map(p => (
               <div key={p.id} className="bg-white rounded-2xl sm:rounded-3xl shadow-md overflow-hidden border border-emerald-100 hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 flex flex-col group">
-                <div className="h-32 sm:h-60 bg-emerald-50 flex items-center justify-center relative overflow-hidden border-b border-emerald-100">
+                <div className="h-32 sm:h-56 bg-emerald-50 flex items-center justify-center relative overflow-hidden border-b border-emerald-100">
                   {p.imageUrl ? (
                     <img src={p.imageUrl} alt={p.variety} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                   ) : (
-                    <Package className="h-12 w-12 sm:h-24 sm:w-24 text-emerald-300 group-hover:scale-110 transition-transform duration-500" />
+                    <Package className="h-12 w-12 sm:h-20 sm:w-20 text-emerald-300 group-hover:scale-110 transition-transform duration-500" />
                   )}
                   {p.isBlackFridayApplied && <span className="absolute top-2 right-2 sm:top-4 sm:right-4 bg-rose-500 text-white text-[10px] sm:text-xs font-black px-2 py-1 sm:px-3 sm:py-1.5 rounded-full shadow-lg">SALE</span>}
                 </div>
-                <div className="p-3 sm:p-7 flex-1 flex flex-col">
+                <div className="p-3 sm:p-6 flex-1 flex flex-col">
                   <div className="text-[10px] sm:text-xs font-black text-emerald-600 uppercase tracking-widest mb-1">{p.brandName}</div>
-                  <h3 className="font-black text-sm sm:text-2xl mb-1 sm:mb-2 text-gray-900 group-hover:text-emerald-700 transition-colors leading-tight">{p.variety}</h3>
-                  <p className="text-gray-500 text-[10px] sm:text-sm mb-3 sm:mb-6 flex items-center font-medium">
+                  <h3 className="font-black text-sm sm:text-xl mb-1 sm:mb-2 text-gray-900 group-hover:text-emerald-700 transition-colors leading-tight">{p.variety}</h3>
+                  <p className="text-gray-500 text-[10px] sm:text-xs mb-3 sm:mb-6 flex items-center font-medium">
                     <MapPin size={12} className="mr-1 text-emerald-500 hidden sm:block" /> Net Weight: <span className="font-bold text-gray-700 ml-1">{p.weightKg}kg Bag</span>
                   </p>
                   <div className="flex justify-between items-end mt-auto pt-2 sm:pt-4 border-t border-gray-100">
                     <div>
                       {p.isBlackFridayApplied && <span className="text-[10px] sm:text-xs text-rose-500 font-bold line-through block mb-0.5">KES {p.basePrice?.toLocaleString()}</span>}
-                      <span className="text-base sm:text-2xl font-black text-emerald-900">KES {p.price?.toLocaleString()}</span>
+                      <span className="text-sm sm:text-xl font-black text-emerald-900">KES {p.price?.toLocaleString()}</span>
                     </div>
-                    <button onClick={() => addToCart(p)} className="bg-emerald-600 text-white p-2 sm:p-3.5 rounded-xl sm:rounded-2xl hover:bg-emerald-500 transition-all shadow-md hover:shadow-emerald-500/30 font-bold flex items-center text-xs sm:text-base">
-                      <Plus className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-1" /> <span className="hidden sm:inline">Add</span>
+                    <button onClick={() => addToCart(p)} className="bg-emerald-600 text-white p-2 sm:p-3 rounded-xl sm:rounded-2xl hover:bg-emerald-500 transition-all shadow-md hover:shadow-emerald-500/30 font-bold flex items-center text-xs sm:text-sm">
+                      <Plus className="h-4 w-4 sm:h-4 sm:w-4 sm:mr-1" /> <span className="hidden sm:inline">Add</span>
                     </button>
                   </div>
                 </div>
@@ -591,10 +653,14 @@ export default function PremiumRiceStore() {
     const handleCheckout = async () => {
       if (!user) return showToast('Please sign in to place your order', 'error');
       if (!checkoutData.county) return showToast('Please select your delivery county', 'error');
-      if (!checkoutData.town.trim() || !checkoutData.location.trim()) {
-        return showToast('Please enter both Town/District and Location for precise delivery', 'error');
+      if (!checkoutData.town || !checkoutData.location) {
+        return showToast('Please select Town/District and Location from the logistics dropdowns', 'error');
       }
       
+      if (checkoutData.paymentMethod === 'stk') {
+        showToast(`📲 STK Push initiated to ${user.phoneNumber || 'registered mobile'}! Please enter your M-Pesa PIN when prompted.`, 'success');
+      }
+
       setIsCheckingOut(true);
       try {
         const payload = {
@@ -628,6 +694,8 @@ export default function PremiumRiceStore() {
       }
       setIsCheckingOut(false);
     };
+
+    const currentRegionalData = REGIONAL_LOGISTICS_DATA[checkoutData.county] || DEFAULT_REGIONAL_LOGISTICS;
 
     return (
       <div className="max-w-7xl mx-auto py-12 px-4 animate-fadeIn">
@@ -700,63 +768,75 @@ export default function PremiumRiceStore() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Town / District *</label>
-                    <input 
-                      required
-                      type="text" 
-                      placeholder="e.g. Thika / Westlands" 
+                    <select 
                       value={checkoutData.town} 
                       onChange={(e) => setCheckoutData({...checkoutData, town: e.target.value})} 
-                      className="w-full text-black border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-emerald-500 outline-none placeholder-gray-400"
-                    />
+                      className="w-full text-black border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-emerald-500 outline-none"
+                    >
+                      {currentRegionalData.towns.map((t, idx) => <option key={idx} value={t}>{t}</option>)}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Location *</label>
-                    <input 
-                      required
-                      type="text" 
-                      placeholder="e.g. Kasarani" 
+                    <select 
                       value={checkoutData.location} 
                       onChange={(e) => setCheckoutData({...checkoutData, location: e.target.value})} 
-                      className="w-full text-black border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-emerald-500 outline-none placeholder-gray-400"
-                    />
+                      className="w-full text-black border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-emerald-500 outline-none"
+                    >
+                      {currentRegionalData.locations.map((loc, idx) => <option key={idx} value={loc}>{loc}</option>)}
+                    </select>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Sub-Location</label>
-                    <input 
-                      type="text" 
-                      placeholder="e.g. Mwiki" 
+                    <select 
                       value={checkoutData.sublocation} 
                       onChange={(e) => setCheckoutData({...checkoutData, sublocation: e.target.value})} 
-                      className="w-full text-black border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-emerald-500 outline-none placeholder-gray-400"
-                    />
+                      className="w-full text-black border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-emerald-500 outline-none"
+                    >
+                      {currentRegionalData.sublocations.map((sub, idx) => <option key={idx} value={sub}>{sub}</option>)}
+                    </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Payment Channel</label>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Street Address</label>
                     <select 
-                      value={checkoutData.paymentMethod} 
-                      onChange={(e) => setCheckoutData({...checkoutData, paymentMethod: e.target.value})} 
-                      className="w-full text-black border-2 border-gray-200 rounded-xl px-3 py-2.5 bg-white focus:border-emerald-500 outline-none font-bold text-sm"
+                      value={checkoutData.shippingAddress} 
+                      onChange={(e) => setCheckoutData({...checkoutData, shippingAddress: e.target.value})} 
+                      className="w-full text-black border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-emerald-500 outline-none"
                     >
-                      <option value="mpesa">🟢 M-Pesa Express</option>
-                      <option value="cash">💵 Cash on Delivery</option>
-                      <option value="card">💳 Credit/Debit Card</option>
+                      {currentRegionalData.streets.map((str, idx) => <option key={idx} value={str}>{str}</option>)}
                     </select>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Street Address / Landmark</label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. Opposite Naivas Supermarket, House 4B" 
-                    value={checkoutData.shippingAddress} 
-                    onChange={(e) => setCheckoutData({...checkoutData, shippingAddress: e.target.value})} 
-                    className="w-full text-black border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-emerald-500 outline-none placeholder-gray-400"
-                  />
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Payment Method</label>
+                  <select 
+                    value={checkoutData.paymentMethod} 
+                    onChange={(e) => setCheckoutData({...checkoutData, paymentMethod: e.target.value})} 
+                    className="w-full text-black border-2 border-gray-200 rounded-xl px-4 py-3 bg-white focus:border-emerald-500 outline-none font-bold text-sm"
+                  >
+                    <option value="stk">🟢 M-Pesa STK Push Express</option>
+                    <option value="till">🏪 M-Pesa Paybill / Till Number</option>
+                  </select>
                 </div>
+
+                {checkoutData.paymentMethod === 'till' && (
+                  <div className="bg-emerald-950 text-white p-4 rounded-2xl border border-emerald-800 text-center animate-fadeIn shadow-inner">
+                    <span className="text-[10px] text-emerald-400 uppercase font-black tracking-widest block mb-1">MWEA HUB MERCHANDISE PAYBILL</span>
+                    <div className="text-2xl font-mono font-black tracking-wider text-emerald-300">PAYBILL: 889900</div>
+                    <span className="text-xs text-gray-300 font-medium block mt-1">Account Number: <strong className="text-white">MWEA-DIRECT</strong></span>
+                  </div>
+                )}
+
+                {checkoutData.paymentMethod === 'stk' && (
+                  <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200 flex items-center gap-3 text-emerald-900 text-xs font-bold animate-fadeIn">
+                    <Smartphone className="h-6 w-6 text-emerald-600 shrink-0" />
+                    <span>Click confirm below & an STK Push prompt will instantly pop up on your registered mobile number ({user?.phoneNumber || 'Registered Phone'}).</span>
+                  </div>
+                )}
               </div>
 
               <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-100 space-y-2 mb-6 text-sm font-medium">
@@ -1252,7 +1332,7 @@ export default function PremiumRiceStore() {
             <div className="animate-fadeIn space-y-6 max-w-4xl">
               <div>
                 <h2 className="text-2xl font-black text-white">Hero Storefront & Dynamic Media Cycle</h2>
-                <p className="text-gray-400 text-xs mt-1">Configure exactly 2 videos and 3 pictures that will loop unpredictably on the homepage.</p>
+                <p className="text-gray-400 text-xs mt-1">Configure exactly 2 videos and 3 pictures that will loop on the homepage (Videos cycle for 5 seconds, Pictures cycle for 3-4 seconds).</p>
               </div>
 
               <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
@@ -1273,7 +1353,7 @@ export default function PremiumRiceStore() {
                   </div>
 
                   <div className="pt-4 border-t border-gray-800">
-                    <h4 className="text-xs text-emerald-400 font-bold mb-3 uppercase tracking-wider">Video Assets (Max 2)</h4>
+                    <h4 className="text-xs text-emerald-400 font-bold mb-3 uppercase tracking-wider">Video Assets (Max 2 - Displays for 5s each)</h4>
                     <div className="space-y-3">
                       <input type="text" placeholder="YouTube Embed URL 1" value={heroSettings.video1} onChange={e => setHeroSettings({...heroSettings, video1: e.target.value})} className="w-full bg-white text-black font-mono border border-gray-300 rounded-xl px-4 py-2.5 text-xs outline-none focus:border-emerald-500" />
                       <input type="text" placeholder="YouTube Embed URL 2" value={heroSettings.video2} onChange={e => setHeroSettings({...heroSettings, video2: e.target.value})} className="w-full bg-white text-black font-mono border border-gray-300 rounded-xl px-4 py-2.5 text-xs outline-none focus:border-emerald-500" />
@@ -1281,7 +1361,7 @@ export default function PremiumRiceStore() {
                   </div>
 
                   <div className="pt-4 border-t border-gray-800">
-                    <h4 className="text-xs text-emerald-400 font-bold mb-3 uppercase tracking-wider">Image Assets (Max 3)</h4>
+                    <h4 className="text-xs text-emerald-400 font-bold mb-3 uppercase tracking-wider">Image Assets (Max 3 - Displays for 3-4s each)</h4>
                     <div className="space-y-3">
                       <input type="text" placeholder="Image URL 1" value={heroSettings.img1} onChange={e => setHeroSettings({...heroSettings, img1: e.target.value})} className="w-full bg-white text-black font-mono border border-gray-300 rounded-xl px-4 py-2.5 text-xs outline-none focus:border-emerald-500" />
                       <input type="text" placeholder="Image URL 2" value={heroSettings.img2} onChange={e => setHeroSettings({...heroSettings, img2: e.target.value})} className="w-full bg-white text-black font-mono border border-gray-300 rounded-xl px-4 py-2.5 text-xs outline-none focus:border-emerald-500" />
