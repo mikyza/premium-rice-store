@@ -24,7 +24,6 @@ const __dirname = dirname(__filename);
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || 'localhost';
-// Render dynamically assigns a PORT. We default to 5000 locally so it doesn't conflict with your frontend on port 3000.
 const port = parseInt(process.env.PORT || '5000', 10);
 const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
 
@@ -176,13 +175,12 @@ async function startServer() {
     const expressApp = express();
     const server = createServer(expressApp);
 
-    // Dynamic CORS to ensure cross-domain requests never drop connections
     const corsOptions = {
       origin: (origin, callback) => {
         if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1') || origin.endsWith('.onrender.com')) {
           callback(null, true);
         } else {
-          callback(null, true); // Fallback permissive allow for client web origins
+          callback(null, true);
         }
       },
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -194,7 +192,6 @@ async function startServer() {
     expressApp.use(express.json({ limit: '50mb' }));
     expressApp.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-    // Static Asset Mounts (Supports /uploads, /images, and public root)
     expressApp.use(express.static(path.join(__dirname, 'public')));
     expressApp.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
     expressApp.use('/images', express.static(path.join(__dirname, 'public', 'images')));
@@ -202,6 +199,19 @@ async function startServer() {
     await SystemConfig.findOrCreate({ where: { key: 'transport_fee' }, defaults: { value: 250 } });
     await SystemConfig.findOrCreate({ where: { key: 'black_friday' }, defaults: { value: { active: false, endTime: null } } });
     
+    // Seed M-Pesa Payment Details (Till & Paybill numbers)
+    await SystemConfig.findOrCreate({
+      where: { key: 'mpesa_config' },
+      defaults: {
+        value: {
+          paybillNumber: '522522',
+          paybillAccount: 'MWEARICE',
+          tillNumber: '889900',
+          stkEnabled: true
+        }
+      }
+    });
+
     // Seed ALL 47 KENYAN COUNTIES with default transport shipping rates
     const all47Counties = {
       "Mombasa": 500, "Kwale": 550, "Kilifi": 550, "Tana River": 600, "Lamu": 650, 
@@ -217,7 +227,61 @@ async function startServer() {
     };
     await SystemConfig.findOrCreate({ where: { key: 'county_overrides' }, defaults: { value: all47Counties } });
 
-    // Backdrop Video / Hero Picture Config Seeding
+    // Seed Kenyan Cascading Logistics Hierarchy (Counties -> Towns -> Locations -> Sub-locations)
+    const kenyaLogisticsHierarchy = {
+      "Kirinyaga": {
+        "Mwea": {
+          "Wamumu": ["Wamumu Primary Area", "Paddy Field Block A", "Rice Mill Zone"],
+          "Mutithi": ["Mutithi Center", "Kandongu Market", "Kiura Junction"]
+        },
+        "Kerugoya": {
+          "Central": ["Hospital Road", "Town Plaza", "Stadium Area"],
+          "Kaguyu": ["Kaguyu Market", "Upper Hill"]
+        }
+      },
+      "Nairobi": {
+        "Nairobi Central": {
+          "CBD": ["Kenyatta Avenue", "Moi Avenue", "Haile Selassie Ave"],
+          "Ngara": ["Ngara Market", "Chambers Road"]
+        },
+        "Westlands": {
+          "Parklands": ["1st Parklands", "Limuru Road", "City Park"],
+          "Kitisuru": ["Getathuru", "Nyari Estate"]
+        },
+        "Kasarani": {
+          "Roysambu": ["TRM Drive", "Zimmerman", "Lumumba Drive"],
+          "Ruaraka": ["Baba Dogo", "Utalii Area"]
+        }
+      },
+      "Kiambu": {
+        "Thika": {
+          "Township": ["Commercial Street", "Section 9", "Gatuanyaga"],
+          "Juja": ["JKUAT Gate A", "Highpoint", "Kalimoni"]
+        },
+        "Kiambu Town": {
+          "Town Center": ["Indian Bazaar", "Kambui"],
+          "Ndumberi": ["Ndumberi Market", "Kirigiti"]
+        }
+      },
+      "Mombasa": {
+        "Nyali": {
+          "Mswambweni": ["Links Road", "Beach Way Drive"],
+          "Kongowea": ["Kongowea Market Area", "Karama Road"]
+        },
+        "Mvita": {
+          "CBD": ["Nkrumah Road", "Digo Road", "Treasury Square"]
+        }
+      },
+      "Nakuru": {
+        "Nakuru Town East": {
+          "Freehold": ["Freehold Market", "Kenyatta Lane"],
+          "Section 58": ["Hyrax Hill Area", "Phase 2"]
+        }
+      }
+    };
+    await SystemConfig.findOrCreate({ where: { key: 'logistics_hierarchy' }, defaults: { value: kenyaLogisticsHierarchy } });
+
+    // Landing Page Hero Video / Backdrop Config with explicit Rotation Durations (Video: 5s, Pic: 3-4s)
     await SystemConfig.findOrCreate({
       where: { key: 'hero_settings' },
       defaults: {
@@ -225,40 +289,101 @@ async function startServer() {
           type: 'video',
           url: 'https://www.youtube.com/embed/gjZAThNHGwI?start=6&autoplay=1&mute=1&loop=1&playlist=gjZAThNHGwI',
           title: 'Direct From Mwea Paddy Fields',
-          subtitle: '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.'
+          subtitle: '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.',
+          videoDuration: 5,
+          imageDuration: 4
         }
       }
     });
 
-    // Carousel Seeding Core
+    // Homepage Carousel Media Feed with timing metadata
     await SystemConfig.findOrCreate({
       where: { key: 'homepage_carousel' },
       defaults: {
         value: [
           { 
             id: "1", 
-            type: 'image', 
-            url: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=1200&q=80', 
-            title: 'Pure Mwea Pishori Grade 1', 
-            subtitle: 'Unmatched aroma and long-grain perfection harvested from rich Kenyan soils.' 
+            type: 'video', 
+            url: 'https://www.youtube.com/embed/gjZAThNHGwI?start=6&autoplay=1&mute=1&loop=1&playlist=gjZAThNHGwI', 
+            title: 'Mwea Paddy Harvest Live', 
+            subtitle: 'Direct from rich Kenyan soil into your kitchen.',
+            duration: 5
           },
           { 
             id: "2", 
             type: 'image', 
-            url: 'https://images.unsplash.com/photo-1536304929831-ee1ca9d44906?auto=format&fit=crop&w=1200&q=80', 
-            title: 'Wholesale & Bulk Sack Delivery', 
-            subtitle: 'Available in 5kg, 10kg, 25kg, and 50kg sacks with discounted transport rates.' 
+            url: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=1200&q=80', 
+            title: 'Pure Mwea Pishori Grade 1', 
+            subtitle: 'Unmatched aroma and long-grain perfection.',
+            duration: 4
           },
           { 
             id: "3", 
             type: 'image', 
+            url: 'https://images.unsplash.com/photo-1536304929831-ee1ca9d44906?auto=format&fit=crop&w=1200&q=80', 
+            title: 'Wholesale & Bulk Sack Delivery', 
+            subtitle: 'Available in 5kg, 10kg, 25kg, and 50kg sacks with discounted transport.',
+            duration: 3
+          },
+          { 
+            id: "4", 
+            type: 'image', 
             url: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=1200&q=80', 
             title: 'Premium Imported Basmati', 
-            subtitle: 'Aged to perfection for fluffy, non-sticky ceremonial cooking.' 
+            subtitle: 'Aged to perfection for fluffy, non-sticky ceremonial cooking.',
+            duration: 4
           }
         ]
       }
     });
+
+    // Ensure 4 Featured Grain Products exist in Catalog
+    const existingFeaturedCount = await RiceProduct.count();
+    if (existingFeaturedCount === 0) {
+      await RiceProduct.bulkCreate([
+        {
+          brandName: 'Pure Mwea Pishori Grade 1',
+          variety: 'Aromatic Pishori',
+          weightKg: 5,
+          basePrice: 1250,
+          flashSalePrice: 1100,
+          stockQuantity: 150,
+          imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=800&q=80',
+          isAvailable: true
+        },
+        {
+          brandName: 'Super Aromatic Basmati',
+          variety: 'Long Grain Basmati',
+          weightKg: 10,
+          basePrice: 2400,
+          flashSalePrice: 2150,
+          stockQuantity: 80,
+          imageUrl: 'https://images.unsplash.com/photo-1536304929831-ee1ca9d44906?auto=format&fit=crop&w=800&q=80',
+          isAvailable: true
+        },
+        {
+          brandName: 'Biryani Special Feast Grain',
+          variety: 'Kaisari Long Grain',
+          weightKg: 25,
+          basePrice: 5200,
+          flashSalePrice: 4800,
+          stockQuantity: 40,
+          imageUrl: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=800&q=80',
+          isAvailable: true
+        },
+        {
+          brandName: 'Whole Grain Brown Pishori',
+          variety: 'Brown Nutritious Rice',
+          weightKg: 5,
+          basePrice: 1400,
+          flashSalePrice: 1250,
+          stockQuantity: 60,
+          imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=800&q=80',
+          isAvailable: true
+        }
+      ]);
+      console.log('🌾 Seeded default 4 Featured Grain selection products into catalog.');
+    }
 
     // Google Sync Endpoint
     expressApp.post('/api/sync/google', async (req, res) => {
@@ -350,7 +475,6 @@ async function startServer() {
           return res.status(401).json({ error: 'Invalid phone number or password' });
         }
 
-        // Handle accounts registered via Google OAuth that lack a local password
         if (!user.password) {
           return res.status(401).json({ error: 'Account uses Google Sign-In. Please sign in with Google.' });
         }
@@ -406,6 +530,34 @@ async function startServer() {
       } catch (err) { res.status(500).json({ error: err.message }); }
     });
 
+    // --- FEATURED GRAIN SELECTION (Returns exactly 4 curated products) ---
+    expressApp.get('/api/products/featured', async (req, res) => {
+      try {
+        const featuredProducts = await RiceProduct.findAll({
+          where: { isAvailable: true },
+          limit: 4,
+          order: [['id', 'ASC']]
+        });
+
+        const formatted = featuredProducts.map(p => {
+          const pObj = p.toJSON();
+          let currentPrice = pObj.basePrice || pObj.price || 0;
+          if (flashSaleState && flashSaleState.active && pObj.flashSalePrice) {
+            currentPrice = pObj.flashSalePrice;
+          }
+          return {
+            ...pObj,
+            price: currentPrice,
+            imageUrl: pObj.imageUrl || pObj.image || null
+          };
+        });
+
+        res.json(formatted);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     expressApp.get('/api/config/carousel', async (req, res) => {
       try {
         const config = await SystemConfig.findOne({ where: { key: 'homepage_carousel' } });
@@ -433,6 +585,31 @@ async function startServer() {
       }
     });
 
+    // --- CASCADING LOGISTICS & LOCATIONS ENDPOINT ---
+    expressApp.get('/api/config/locations', async (req, res) => {
+      try {
+        const config = await SystemConfig.findOne({ where: { key: 'logistics_hierarchy' } });
+        res.json(config ? config.value : {});
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- M-PESA PAYMENT DETAILS CONFIG ENDPOINT ---
+    expressApp.get('/api/config/payment-methods', async (req, res) => {
+      try {
+        const config = await SystemConfig.findOne({ where: { key: 'mpesa_config' } });
+        res.json(config ? config.value : {
+          paybillNumber: '522522',
+          paybillAccount: 'MWEARICE',
+          tillNumber: '889900',
+          stkEnabled: true
+        });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     // --- ORDERS & PAYMENTS ---
     expressApp.get('/api/orders/my-orders', authenticateToken, async (req, res) => {
       try {
@@ -450,11 +627,13 @@ async function startServer() {
       try {
         const { 
           cartItems, 
-          paymentMethod, 
+          paymentMethod, // Supported: 'mpesa_stk', 'mpesa_till', 'mpesa_paybill', 'cash_on_delivery'
+          mpesaPhoneNumber,
           county, 
           town, 
           location, 
           sublocation, 
+          streetAddress,
           shippingAddress, 
           shippingFee, 
           grandTotal 
@@ -516,8 +695,14 @@ async function startServer() {
           town: town || 'Not Specified',
           location: location || 'Not Specified',
           sublocation: sublocation || 'Not Specified',
-          details: shippingAddress || `${sublocation || ''}, ${location || ''}, ${town || ''}, ${county || ''}`
+          streetAddress: streetAddress || 'Not Specified',
+          details: shippingAddress || `${streetAddress || ''}, ${sublocation || ''}, ${location || ''}, ${town || ''}, ${county || ''}`
         };
+
+        // STK Push Log Trigger for M-Pesa STK push
+        if (paymentMethod === 'mpesa_stk') {
+          console.log(`📱 M-Pesa STK Push Triggered for ${mpesaPhoneNumber || 'registered mobile number'}. Amount: KES ${grandTotal || (calculatedSubtotal + activeTransportCharge)}`);
+        }
 
         const generatedOrder = await Order.create({
           userId: req.user.id,
@@ -525,7 +710,11 @@ async function startServer() {
           transportFee: activeTransportCharge,
           subTotal: calculatedSubtotal,
           grandTotal: grandTotal || (calculatedSubtotal + activeTransportCharge),
-          paymentDetails: { method: paymentMethod || 'cash_on_delivery', isPaid: false },
+          paymentDetails: { 
+            method: paymentMethod || 'mpesa_stk', 
+            isPaid: false,
+            mpesaNumber: mpesaPhoneNumber || null
+          },
           county: county || 'Not Specified', 
           town: town || '',
           location: location || '',
@@ -782,6 +971,7 @@ async function startServer() {
       } catch (err) { res.status(500).json({ error: err.message }); }
     });
 
+    // ADMIN: Update Homepage Media Carousel Feed & Rotation Timings (Videos: 5s, Images: 3-4s)
     expressApp.post('/api/admin/config/carousel', authenticateToken, requireAdmin, async (req, res) => {
       try {
         const { slides } = req.body || {};
@@ -789,11 +979,17 @@ async function startServer() {
           return res.status(400).json({ error: 'Slides validation failed: input must be an array' });
         }
 
+        // Apply default timing parameters if absent (5s for videos, 4s for images)
+        const processedSlides = slides.map(slide => ({
+          ...slide,
+          duration: slide.duration || (slide.type === 'video' ? 5 : 4)
+        }));
+
         let config = await SystemConfig.findOne({ where: { key: 'homepage_carousel' } });
         if (!config) {
-          config = await SystemConfig.create({ key: 'homepage_carousel', value: slides });
+          config = await SystemConfig.create({ key: 'homepage_carousel', value: processedSlides });
         } else {
-          config.value = slides;
+          config.value = processedSlides;
           config.changed('value', true);
           await config.save();
         }
@@ -802,7 +998,7 @@ async function startServer() {
           adminId: req.adminUser.id,
           action: 'UPDATE_CAROUSEL_CONFIG',
           targetType: 'config',
-          changes: { slides },
+          changes: { slides: processedSlides },
           ipAddress: req.ip
         });
 
@@ -813,12 +1009,21 @@ async function startServer() {
       }
     });
 
+    // ADMIN: Update Hero Video / Picture Backdrop Settings
     expressApp.post('/api/admin/config/hero', authenticateToken, requireAdmin, async (req, res) => {
       try {
-        const { type, url, title, subtitle } = req.body || {};
+        const { type, url, title, subtitle, videoDuration, imageDuration } = req.body || {};
         let config = await SystemConfig.findOne({ where: { key: 'hero_settings' } });
         
-        const newSettings = { type: type || 'video', url, title, subtitle };
+        const newSettings = { 
+          type: type || 'video', 
+          url, 
+          title, 
+          subtitle,
+          videoDuration: videoDuration || 5,
+          imageDuration: imageDuration || 4
+        };
+
         if (!config) {
           config = await SystemConfig.create({ key: 'hero_settings', value: newSettings });
         } else {
@@ -837,6 +1042,41 @@ async function startServer() {
 
         io.emit('heroUpdated', config.value);
         res.json({ message: 'Storefront hero backdrop synchronized successfully', hero: config.value });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // ADMIN: Update M-Pesa Payment Method Details (Paybill & Till)
+    expressApp.post('/api/admin/config/payment-methods', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const { paybillNumber, paybillAccount, tillNumber, stkEnabled } = req.body || {};
+        let config = await SystemConfig.findOne({ where: { key: 'mpesa_config' } });
+        
+        const updatedMpesaConfig = {
+          paybillNumber: paybillNumber || '522522',
+          paybillAccount: paybillAccount || 'MWEARICE',
+          tillNumber: tillNumber || '889900',
+          stkEnabled: stkEnabled !== undefined ? Boolean(stkEnabled) : true
+        };
+
+        if (!config) {
+          config = await SystemConfig.create({ key: 'mpesa_config', value: updatedMpesaConfig });
+        } else {
+          config.value = updatedMpesaConfig;
+          config.changed('value', true);
+          await config.save();
+        }
+
+        await AdminLog.create({
+          adminId: req.adminUser.id,
+          action: 'UPDATE_MPESA_CONFIG',
+          targetType: 'config',
+          changes: updatedMpesaConfig,
+          ipAddress: req.ip
+        });
+
+        res.json({ message: 'M-Pesa payment configuration synchronized successfully', config: config.value });
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
