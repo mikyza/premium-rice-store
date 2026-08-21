@@ -116,7 +116,8 @@ export default function PremiumRiceStore() {
     location: 'CBD',
     sublocation: 'Mwiki',
     shippingAddress: 'Moi Avenue',
-    paymentMethod: 'stk'
+    paymentMethod: 'stk',
+    stkPhoneNumber: ''
   });
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   
@@ -138,7 +139,6 @@ export default function PremiumRiceStore() {
   // 3. INITIALIZATION & REAL-TIME WEBSOCKETS
   // ==========================================
   
-  // Updated Hero Timer: 5 seconds for Videos, 3.5 seconds (3-4s) for Pictures
   useEffect(() => {
     const mediaArray = [
       { type: 'video', url: heroSettings?.video1 },
@@ -169,6 +169,13 @@ export default function PremiumRiceStore() {
       shippingAddress: currentData.streets[0]
     }));
   }, [checkoutData.county]);
+
+  // Populate user STK phone number on load
+  useEffect(() => {
+    if (user && !checkoutData.stkPhoneNumber) {
+      setCheckoutData(prev => ({ ...prev, stkPhoneNumber: user.phoneNumber }));
+    }
+  }, [user]);
 
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
@@ -657,8 +664,10 @@ export default function PremiumRiceStore() {
         return showToast('Please select Town/District and Location from the logistics dropdowns', 'error');
       }
       
-      if (checkoutData.paymentMethod === 'stk') {
-        showToast(`📲 STK Push initiated to ${user.phoneNumber || 'registered mobile'}! Please enter your M-Pesa PIN when prompted.`, 'success');
+      const targetPhone = checkoutData.paymentMethod === 'stk' ? (checkoutData.stkPhoneNumber || user?.phoneNumber) : user?.phoneNumber;
+      
+      if (checkoutData.paymentMethod === 'stk' && !targetPhone) {
+        return showToast('Please provide a valid M-Pesa phone number for STK Push', 'error');
       }
 
       setIsCheckingOut(true);
@@ -666,6 +675,7 @@ export default function PremiumRiceStore() {
         const payload = {
           cartItems: cart.map(item => ({ productId: item.productId, quantity: item.quantity })),
           paymentMethod: checkoutData.paymentMethod,
+          phoneNumber: targetPhone,
           county: checkoutData.county,
           town: checkoutData.town,
           location: checkoutData.location,
@@ -682,7 +692,22 @@ export default function PremiumRiceStore() {
         });
 
         if (res.ok) {
-          showToast('🌾 Order placed successfully! Direct logistics dispatched.', 'success');
+          const data = await res.json();
+          
+          if (checkoutData.paymentMethod === 'stk') {
+            showToast(`📲 STK Push successfully initiated to ${targetPhone}! Please enter your M-Pesa PIN when prompted.`, 'success');
+            // Additional call if your backend handles STK separately using the order ID
+            try {
+               await fetch(`${API_BASE_URL}/payments/stkpush`, {
+                 method: 'POST',
+                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                 body: JSON.stringify({ orderId: data.id || data.order?.id, amount: cartTotal, phoneNumber: targetPhone })
+               }).catch(() => {});
+            } catch (err) {}
+          } else {
+            showToast('🌾 Order placed successfully! Direct logistics dispatched.', 'success');
+          }
+
           setCart([]);
           setView('profile');
         } else {
@@ -824,7 +849,7 @@ export default function PremiumRiceStore() {
                 </div>
 
                 {checkoutData.paymentMethod === 'till' && (
-                  <div className="bg-emerald-950 text-white p-4 rounded-2xl border border-emerald-800 text-center animate-fadeIn shadow-inner">
+                  <div className="bg-emerald-950 text-white p-4 rounded-2xl border border-emerald-800 text-center animate-fadeIn shadow-inner mt-2">
                     <span className="text-[10px] text-emerald-400 uppercase font-black tracking-widest block mb-1">MWEA HUB MERCHANDISE PAYBILL</span>
                     <div className="text-2xl font-mono font-black tracking-wider text-emerald-300">PAYBILL: 889900</div>
                     <span className="text-xs text-gray-300 font-medium block mt-1">Account Number: <strong className="text-white">MWEA-DIRECT</strong></span>
@@ -832,11 +857,37 @@ export default function PremiumRiceStore() {
                 )}
 
                 {checkoutData.paymentMethod === 'stk' && (
-                  <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200 flex items-center gap-3 text-emerald-900 text-xs font-bold animate-fadeIn">
-                    <Smartphone className="h-6 w-6 text-emerald-600 shrink-0" />
-                    <span>Click confirm below & an STK Push prompt will instantly pop up on your registered mobile number ({user?.phoneNumber || 'Registered Phone'}).</span>
+                  <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200 flex flex-col gap-3 text-emerald-900 text-xs font-bold animate-fadeIn mt-2">
+                    <div className="flex items-start gap-3">
+                      <Smartphone className="h-6 w-6 text-emerald-600 shrink-0" />
+                      <span className="leading-relaxed">An STK Push prompt will instantly pop up on the mobile number below. Please enter your M-Pesa PIN when prompted.</span>
+                    </div>
+                    <div className="mt-1">
+                      <label className="block text-[10px] font-black uppercase text-emerald-800 mb-1">M-Pesa Mobile Number</label>
+                      <input 
+                        type="tel"
+                        value={checkoutData.stkPhoneNumber}
+                        onChange={(e) => setCheckoutData({...checkoutData, stkPhoneNumber: e.target.value})}
+                        placeholder="e.g. 254712345678"
+                        className="w-full bg-white text-black border border-emerald-300 rounded-xl px-4 py-2.5 text-sm font-bold focus:border-emerald-500 outline-none"
+                      />
+                    </div>
                   </div>
                 )}
+              </div>
+
+              {/* Complete Location Details Visibility View */}
+              <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-100 mb-6 text-sm">
+                <h3 className="font-black text-emerald-900 mb-3 border-b border-emerald-200 pb-2 flex items-center">
+                  <MapPin className="h-4 w-4 mr-1.5 text-emerald-600" /> Confirmed Delivery Logistics
+                </h3>
+                <ul className="space-y-1.5 text-gray-700 font-medium">
+                  <li className="flex justify-between"><span className="text-gray-500">County:</span> <strong className="text-right">{checkoutData.county}</strong></li>
+                  <li className="flex justify-between"><span className="text-gray-500">Town/District:</span> <strong className="text-right">{checkoutData.town}</strong></li>
+                  <li className="flex justify-between"><span className="text-gray-500">Location:</span> <strong className="text-right">{checkoutData.location}</strong></li>
+                  <li className="flex justify-between"><span className="text-gray-500">Sub-location:</span> <strong className="text-right">{checkoutData.sublocation}</strong></li>
+                  <li className="flex justify-between"><span className="text-gray-500">Street Address:</span> <strong className="text-right">{checkoutData.shippingAddress}</strong></li>
+                </ul>
               </div>
 
               <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-100 space-y-2 mb-6 text-sm font-medium">
@@ -856,10 +907,19 @@ export default function PremiumRiceStore() {
                 <button 
                   onClick={handleCheckout} 
                   disabled={isCheckingOut}
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-black text-base flex justify-center items-center shadow-lg hover:shadow-emerald-500/30 transition-all transform hover:-translate-y-0.5"
+                  className={`w-full py-4 rounded-2xl font-black text-base flex justify-center items-center shadow-lg transition-all transform hover:-translate-y-0.5 ${
+                    checkoutData.paymentMethod === 'stk'
+                      ? 'bg-emerald-500 hover:bg-emerald-400 text-white hover:shadow-emerald-500/40'
+                      : 'bg-emerald-600 hover:bg-emerald-500 text-white hover:shadow-emerald-500/30'
+                  }`}
                 >
-                  {isCheckingOut ? <Activity className="animate-spin mr-2 h-5 w-5" /> : <CheckCircle className="mr-2 h-5 w-5" />}
-                  Confirm Order & Pay KES {cartTotal.toLocaleString()}
+                  {isCheckingOut ? (
+                    <><Activity className="animate-spin mr-2 h-5 w-5" /> Processing Order...</>
+                  ) : checkoutData.paymentMethod === 'stk' ? (
+                    <><Smartphone className="mr-2 h-5 w-5" /> Initiate STK Push & Pay KES {cartTotal.toLocaleString()}</>
+                  ) : (
+                    <><CheckCircle className="mr-2 h-5 w-5" /> Confirm Order & Pay KES {cartTotal.toLocaleString()}</>
+                  )}
                 </button>
               )}
             </div>
