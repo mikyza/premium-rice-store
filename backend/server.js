@@ -13,6 +13,7 @@ import multer from 'multer';
 import fs from 'fs';
 import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
+import axios from 'axios';
 
 dotenv.config();
 
@@ -27,8 +28,12 @@ const hostname = process.env.HOSTNAME || 'localhost';
 const port = parseInt(process.env.PORT || '5000', 10);
 const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
 
+// Pay Hero Credentials Configuration
+const PAYHERO_BASIC_AUTH = process.env.PAYHERO_BASIC_AUTH || 'Basic cnBqZHU3YWJyWG03SWdqcDBI\nBF:NHFvR\nV32XR99cDq\nGf3igKB3R0A5vRtgTMJ7Jpfm';
+const PAYHERO_CHANNEL_ID = Number(process.env.PAYHERO_CHANNEL_ID || 11668);
+
 console.log('🚀 Initializing Premium Rice & Grain E-Commerce Backend...');
-console.log('DEBUG: Booting unified agricultural & hardware architecture...');
+console.log('DEBUG: Booting unified agricultural & hardware architecture with Pay Hero Integration...');
 
 // ==========================================
 // 1. OFFLINE & ONLINE UPLOAD DIRECTORY CONFIGURATION (MULTER)
@@ -227,7 +232,7 @@ async function startServer() {
     };
     await SystemConfig.findOrCreate({ where: { key: 'county_overrides' }, defaults: { value: all47Counties } });
 
-    // Seed Kenyan Cascading Logistics Hierarchy (Counties -> Towns -> Locations -> Sub-locations)
+    // Seed Kenyan Cascading Logistics Hierarchy
     const kenyaLogisticsHierarchy = {
       "Kirinyaga": {
         "Mwea": {
@@ -281,7 +286,7 @@ async function startServer() {
     };
     await SystemConfig.findOrCreate({ where: { key: 'logistics_hierarchy' }, defaults: { value: kenyaLogisticsHierarchy } });
 
-    // Landing Page Hero Video / Backdrop Config with explicit Rotation Durations (Video: 5s, Pic: 3-4s)
+    // Landing Page Hero Video / Backdrop Config
     await SystemConfig.findOrCreate({
       where: { key: 'hero_settings' },
       defaults: {
@@ -296,7 +301,7 @@ async function startServer() {
       }
     });
 
-    // Homepage Carousel Media Feed with timing metadata
+    // Homepage Carousel Media Feed
     await SystemConfig.findOrCreate({
       where: { key: 'homepage_carousel' },
       defaults: {
@@ -337,7 +342,7 @@ async function startServer() {
       }
     });
 
-    // Ensure 4 Featured Grain Products exist in Catalog
+    // Ensure Featured Grain Products exist
     const existingFeaturedCount = await RiceProduct.count();
     if (existingFeaturedCount === 0) {
       await RiceProduct.bulkCreate([
@@ -435,7 +440,7 @@ async function startServer() {
     });
 
     // ==========================================
-    // 6. PUBLIC REST API CONTROLLERS
+    // 6. PUBLIC REST API CONTROLLERS & PAYMENTS
     // ==========================================
 
     expressApp.post('/api/user/signup', async (req, res) => {
@@ -530,7 +535,6 @@ async function startServer() {
       } catch (err) { res.status(500).json({ error: err.message }); }
     });
 
-    // --- FEATURED GRAIN SELECTION (Returns exactly 4 curated products) ---
     expressApp.get('/api/products/featured', async (req, res) => {
       try {
         const featuredProducts = await RiceProduct.findAll({
@@ -585,7 +589,6 @@ async function startServer() {
       }
     });
 
-    // --- CASCADING LOGISTICS & LOCATIONS ENDPOINT ---
     expressApp.get('/api/config/locations', async (req, res) => {
       try {
         const config = await SystemConfig.findOne({ where: { key: 'logistics_hierarchy' } });
@@ -595,7 +598,6 @@ async function startServer() {
       }
     });
 
-    // --- M-PESA PAYMENT DETAILS CONFIG ENDPOINT ---
     expressApp.get('/api/config/payment-methods', async (req, res) => {
       try {
         const config = await SystemConfig.findOne({ where: { key: 'mpesa_config' } });
@@ -610,7 +612,6 @@ async function startServer() {
       }
     });
 
-    // --- ORDERS & PAYMENTS ---
     expressApp.get('/api/orders/my-orders', authenticateToken, async (req, res) => {
       try {
         const orders = await Order.findAll({
@@ -623,6 +624,7 @@ async function startServer() {
       }
     });
 
+    // --- CREATE ORDER & TRIGGER PAY HERO STK PUSH ---
     expressApp.post('/api/orders/create', authenticateToken, async (req, res) => {
       try {
         const { 
@@ -699,17 +701,14 @@ async function startServer() {
           details: shippingAddress || `${streetAddress || ''}, ${sublocation || ''}, ${location || ''}, ${town || ''}, ${county || ''}`
         };
 
-        // STK Push Log Trigger for M-Pesa STK push
-        if (paymentMethod === 'mpesa_stk') {
-          console.log(`📱 M-Pesa STK Push Triggered for ${mpesaPhoneNumber || 'registered mobile number'}. Amount: KES ${grandTotal || (calculatedSubtotal + activeTransportCharge)}`);
-        }
+        const finalOrderTotal = Number(grandTotal || (calculatedSubtotal + activeTransportCharge));
 
         const generatedOrder = await Order.create({
           userId: req.user.id,
           items: builtOrderLineItems,
           transportFee: activeTransportCharge,
           subTotal: calculatedSubtotal,
-          grandTotal: grandTotal || (calculatedSubtotal + activeTransportCharge),
+          grandTotal: finalOrderTotal,
           paymentDetails: { 
             method: paymentMethod || 'mpesa_stk', 
             isPaid: false,
@@ -723,9 +722,116 @@ async function startServer() {
           status: 'pending' 
         });
 
+        // Pay Hero M-Pesa STK Push Trigger
+        let stkInitiated = false;
+        let stkMessage = '';
+
+        if (paymentMethod === 'mpesa_stk') {
+          const targetPhone = mpesaPhoneNumber || req.user.phoneNumber;
+          const hostUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+          const callbackEndpoint = `${hostUrl}/api/payments/payhero/callback`;
+
+          try {
+            console.log(`📱 Triggering Pay Hero STK Push for Order #${generatedOrder.id} to ${targetPhone}...`);
+            
+            const payheroResponse = await axios.post(
+              'https://backend.payhero.co.ke/api/v2/payments',
+              {
+                amount: finalOrderTotal,
+                phone_number: targetPhone,
+                channel_id: PAYHERO_CHANNEL_ID,
+                provider: 'm-pesa',
+                external_reference: `ORD-${generatedOrder.id}`,
+                callback_url: callbackEndpoint
+              },
+              {
+                headers: {
+                  'Authorization': PAYHERO_BASIC_AUTH,
+                  'Content-Type': 'application/json'
+                }
+              }
+            );
+
+            stkInitiated = true;
+            stkMessage = 'STK Push prompt sent to handset successfully.';
+            console.log(`✅ Pay Hero Response for Order #${generatedOrder.id}:`, payheroResponse.data);
+          } catch (stkError) {
+            stkMessage = 'Failed to trigger M-Pesa prompt automatically.';
+            console.error(`❌ Pay Hero STK Push Error for Order #${generatedOrder.id}:`, stkError.response ? stkError.response.data : stkError.message);
+          }
+        }
+
         io.to('admin-dashboard-room').emit('newOrderAlert', generatedOrder);
-        res.status(201).json(generatedOrder);
-      } catch (err) { res.status(500).json({ error: err.message }); }
+        res.status(201).json({
+          ...generatedOrder.toJSON(),
+          stkPromptSent: stkInitiated,
+          stkStatusMessage: stkMessage
+        });
+
+      } catch (err) { 
+        console.error("Order Creation Error:", err);
+        res.status(500).json({ error: err.message }); 
+      }
+    });
+
+    // --- PAY HERO REAL-TIME PAYMENT CALLBACK / WEBHOOK ---
+    expressApp.post('/api/payments/payhero/callback', async (req, res) => {
+      try {
+        console.log('🔔 Pay Hero Callback Notification Received:', JSON.stringify(req.body, null, 2));
+
+        const body = req.body || {};
+        const responseObj = body.response || body;
+
+        // Parse external reference and transaction status
+        const externalRef = responseObj.external_reference || responseObj.ExternalReference || body.external_reference || body.ExternalReference;
+        const statusStr = responseObj.status || responseObj.Status || body.status || body.Status;
+        const mpesaReceipt = responseObj.mpesa_code || responseObj.MpesaReceiptNumber || body.mpesa_code || body.MpesaReceiptNumber || null;
+
+        if (externalRef && String(externalRef).startsWith('ORD-')) {
+          const orderId = String(externalRef).replace('ORD-', '');
+          const order = await Order.findByPk(orderId);
+
+          if (order) {
+            const isPaymentSuccessful = String(statusStr).toUpperCase() === 'SUCCESS' || body.success === true;
+
+            const existingPaymentDetails = order.paymentDetails || {};
+            order.paymentDetails = {
+              ...existingPaymentDetails,
+              isPaid: isPaymentSuccessful,
+              mpesaReceipt: mpesaReceipt,
+              paidAt: isPaymentSuccessful ? new Date() : null,
+              rawCallback: body
+            };
+
+            if (isPaymentSuccessful) {
+              order.status = 'paid';
+              console.log(`🎉 Payment VERIFIED for Order #${order.id}. M-Pesa Receipt: ${mpesaReceipt}`);
+            } else {
+              console.log(`⚠️ Payment FAILED/CANCELLED for Order #${order.id}`);
+            }
+
+            await order.save();
+
+            // Real-time notification to WebSockets
+            io.to('admin-dashboard-room').emit('paymentReceived', {
+              orderId: order.id,
+              status: order.status,
+              isPaid: isPaymentSuccessful,
+              mpesaReceipt: mpesaReceipt
+            });
+
+            io.emit('orderStatusUpdated', order);
+          } else {
+            console.warn(`⚠️ Received callback for non-existent Order ID: ${orderId}`);
+          }
+        }
+
+        // Always reply 200 OK to acknowledge receipt to Pay Hero
+        res.status(200).json({ status: 'SUCCESS', message: 'Callback received and processed successfully' });
+      } catch (err) {
+        console.error('❌ Error processing Pay Hero Callback:', err);
+        res.status(200).json({ status: 'ERROR', message: err.message });
+      }
     });
 
     // ==========================================
@@ -971,7 +1077,6 @@ async function startServer() {
       } catch (err) { res.status(500).json({ error: err.message }); }
     });
 
-    // ADMIN: Update Homepage Media Carousel Feed & Rotation Timings (Videos: 5s, Images: 3-4s)
     expressApp.post('/api/admin/config/carousel', authenticateToken, requireAdmin, async (req, res) => {
       try {
         const { slides } = req.body || {};
@@ -979,7 +1084,6 @@ async function startServer() {
           return res.status(400).json({ error: 'Slides validation failed: input must be an array' });
         }
 
-        // Apply default timing parameters if absent (5s for videos, 4s for images)
         const processedSlides = slides.map(slide => ({
           ...slide,
           duration: slide.duration || (slide.type === 'video' ? 5 : 4)
@@ -1009,7 +1113,6 @@ async function startServer() {
       }
     });
 
-    // ADMIN: Update Hero Video / Picture Backdrop Settings
     expressApp.post('/api/admin/config/hero', authenticateToken, requireAdmin, async (req, res) => {
       try {
         const { type, url, title, subtitle, videoDuration, imageDuration } = req.body || {};
@@ -1047,7 +1150,6 @@ async function startServer() {
       }
     });
 
-    // ADMIN: Update M-Pesa Payment Method Details (Paybill & Till)
     expressApp.post('/api/admin/config/payment-methods', authenticateToken, requireAdmin, async (req, res) => {
       try {
         const { paybillNumber, paybillAccount, tillNumber, stkEnabled } = req.body || {};
@@ -1193,13 +1295,13 @@ async function startServer() {
     // 8. DEFAULT FALLBACK ROUTE
     // ==========================================
     expressApp.get('/', (req, res) => {
-      res.json({ status: 'Online', message: '🌾 Premium Rice & Grain API Architecture is running seamlessly.' });
+      res.json({ status: 'Online', message: '🌾 Premium Rice & Grain API Architecture is running seamlessly with Pay Hero Kenya.' });
     });
 
     server.listen(port, () => {
       console.log(`\n=============================================================`);
       console.log(`🌾 Premium Rice & Grain Standalone API Architecture Is Live`);
-      console.log(`📡 Serving REST API & WebSockets on port ${port}`);
+      console.log(`📡 Serving REST API, WebSockets & Pay Hero Callbacks on port ${port}`);
       console.log(`=============================================================\n`);
     });
 
