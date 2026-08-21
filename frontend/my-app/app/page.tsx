@@ -123,7 +123,7 @@ export default function PremiumRiceStore() {
   
   // --- Auth Form States ---
   const [isLogin, setIsLogin] = useState(true);
-  const [formData, setFormData] = useState({ phoneNumber: '', password: '', fullName: '' });
+  const [formData, setFormData] = useState({ phoneNumber: '', email: '', password: '', fullName: '' });
   
   // --- Admin Workspace States ---
   const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'users' | 'carousel' | 'config' | 'logs'>('inventory');
@@ -1071,10 +1071,16 @@ export default function PremiumRiceStore() {
           
           <form className="space-y-4" onSubmit={handleSubmit}>
             {!isLogin && (
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Full Name</label>
-                <input required type="text" placeholder="Full Name" onChange={(e) => setFormData({...formData, fullName: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
-              </div>
+              <>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Full Name</label>
+                  <input required type="text" placeholder="Full Name" onChange={(e) => setFormData({...formData, fullName: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Email Address</label>
+                  <input required type="email" placeholder="Email Address" onChange={(e) => setFormData({...formData, email: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                </div>
+              </>
             )}
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Phone Number</label>
