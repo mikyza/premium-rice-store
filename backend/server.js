@@ -677,7 +677,7 @@ async function startServer() {
         console.log(`📱 Direct Pay Hero STK Push triggered for ${targetPhone}, Amount: KES ${targetAmount}, Ref: ${ref}`);
 
         const payheroResponse = await axios.post(
-          'https://backend.payhero.co.ke/api/v2/payments',
+          'https://backend.payhero.co.ke/api/v2/payments/initiate-stk-push',
           {
             amount: Number(targetAmount),
             phone_number: targetPhone,
@@ -823,7 +823,7 @@ async function startServer() {
             console.log(`📱 Triggering Pay Hero STK Push for Order #${generatedOrder.id} to ${targetPhone}...`);
             
             const payheroResponse = await axios.post(
-              'https://backend.payhero.co.ke/api/v2/payments',
+              'https://backend.payhero.co.ke/api/v2/payments/initiate-stk-push',
               {
                 amount: finalOrderTotal,
                 phone_number: targetPhone,
