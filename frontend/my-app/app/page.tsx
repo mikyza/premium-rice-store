@@ -123,9 +123,12 @@ export default function PremiumRiceStore() {
   
   // --- Auth Form States ---
   const [isLogin, setIsLogin] = useState(true);
+  const [formData, setFormData] = useState({ phoneNumber: '', email: '', password: '', fullName: '' });
+
+  // --- Forgot Password States ---
   const [isForgotPassword, setIsForgotPassword] = useState(false);
-  const [resetStep, setResetStep] = useState<'request' | 'reset'>('request');
-  const [formData, setFormData] = useState({ phoneNumber: '', email: '', password: '', fullName: '', resetToken: '', newPassword: '' });
+  const [otpStep, setOtpStep] = useState(false);
+  const [resetData, setResetData] = useState({ email: '', otp: '', newPassword: '' });
   
   // --- Admin Workspace States ---
   const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'users' | 'carousel' | 'config' | 'logs'>('inventory');
@@ -1030,52 +1033,6 @@ export default function PremiumRiceStore() {
   };
 
   const renderAuth = () => {
-    const handleResetRequest = async (e: React.FormEvent) => {
-      e.preventDefault();
-      try {
-        const res = await fetch(`${API_BASE_URL}/user/forgot-password`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phoneNumber: formData.phoneNumber })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          showToast('Password reset code sent to your phone!', 'success');
-          setResetStep('reset');
-        } else {
-          showToast(data.error || 'Failed to initiate reset', 'error');
-        }
-      } catch (err) {
-        showToast('Network error', 'error');
-      }
-    };
-
-    const handlePasswordReset = async (e: React.FormEvent) => {
-      e.preventDefault();
-      try {
-        const res = await fetch(`${API_BASE_URL}/user/reset-password`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-             phoneNumber: formData.phoneNumber,
-             resetToken: formData.resetToken,
-             newPassword: formData.newPassword
-          })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          showToast('Password reset successful! Please sign in.', 'success');
-          setIsForgotPassword(false);
-          setIsLogin(true);
-          setResetStep('request');
-        } else {
-          showToast(data.error || 'Failed to reset password', 'error');
-        }
-      } catch (err) {
-        showToast('Network error', 'error');
-      }
-    };
-
     const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       const endpoint = isLogin ? '/user/login' : '/user/signup';
@@ -1106,96 +1063,155 @@ export default function PremiumRiceStore() {
       }
     };
 
+    const handleForgotPasswordRequest = async (e: React.FormEvent) => {
+      e.preventDefault();
+      try {
+        const res = await fetch(`${API_BASE_URL}/user/forgot-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: resetData.email })
+        });
+        const data = await res.json();
+        
+        if (res.ok) {
+          showToast('OTP sent to your email successfully', 'success');
+          setOtpStep(true);
+        } else {
+          showToast(data.error || 'Failed to send OTP request', 'error');
+        }
+      } catch (err) {
+        showToast('Network error during OTP request', 'error');
+      }
+    };
+
+    const handlePasswordReset = async (e: React.FormEvent) => {
+      e.preventDefault();
+      try {
+        const res = await fetch(`${API_BASE_URL}/user/reset-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            email: resetData.email, 
+            otp: resetData.otp, 
+            newPassword: resetData.newPassword 
+          })
+        });
+        const data = await res.json();
+        
+        if (res.ok) {
+          showToast('Password reset successfully. You can now sign in.', 'success');
+          setIsForgotPassword(false);
+          setOtpStep(false);
+          setResetData({ email: '', otp: '', newPassword: '' });
+          setIsLogin(true);
+        } else {
+          showToast(data.error || 'Failed to reset password', 'error');
+        }
+      } catch (err) {
+        showToast('Network error during password reset', 'error');
+      }
+    };
+
     return (
       <div className="min-h-[75vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-emerald-50/40">
         <div className="max-w-md w-full bg-white p-8 sm:p-10 rounded-3xl shadow-xl border border-emerald-100 animate-fadeIn">
-          <div className="text-center mb-8">
-            <div className="bg-emerald-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Shield className="h-8 w-8 text-emerald-600" />
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-black text-emerald-950">
-               {isForgotPassword ? 'Reset Password' : (isLogin ? 'Welcome Back' : 'Create Account')}
-            </h2>
-            <p className="text-gray-500 mt-1 text-sm font-medium">
-               {isForgotPassword 
-                 ? (resetStep === 'request' ? 'Enter your phone number to receive a reset code.' : 'Enter the reset code and your new password.')
-                 : (isLogin ? 'Sign in to track orders and manage deliveries.' : 'Register to order wholesale Mwea grains.')}
-            </p>
-          </div>
           
           {isForgotPassword ? (
-            <form className="space-y-4" onSubmit={resetStep === 'request' ? handleResetRequest : handlePasswordReset}>
-              {resetStep === 'request' ? (
+            <>
+              <div className="text-center mb-8">
+                <div className="bg-emerald-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Shield className="h-8 w-8 text-emerald-600" />
+                </div>
+                <h2 className="text-2xl sm:text-3xl font-black text-emerald-950">Reset Password</h2>
+                <p className="text-gray-500 mt-1 text-sm font-medium">
+                  {otpStep ? 'Enter the secure OTP sent to your email and your new password.' : 'Enter your account email to receive a password reset OTP.'}
+                </p>
+              </div>
+
+              {!otpStep ? (
+                <form className="space-y-4" onSubmit={handleForgotPasswordRequest}>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Email Address</label>
+                    <input required type="email" placeholder="Email Address" value={resetData.email} onChange={(e) => setResetData({...resetData, email: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  </div>
+                  <button type="submit" className="w-full py-4 px-4 rounded-xl shadow-lg font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all transform hover:-translate-y-0.5 mt-6">
+                    Request Secure OTP
+                  </button>
+                </form>
+              ) : (
+                <form className="space-y-4" onSubmit={handlePasswordReset}>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Email Address</label>
+                    <input required type="email" disabled value={resetData.email} className="text-gray-500 bg-gray-100 w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold outline-none cursor-not-allowed" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">One-Time Password (OTP)</label>
+                    <input required type="text" placeholder="Enter OTP" value={resetData.otp} onChange={(e) => setResetData({...resetData, otp: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">New Password</label>
+                    <input required type="password" placeholder="••••••••" value={resetData.newPassword} onChange={(e) => setResetData({...resetData, newPassword: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  </div>
+                  <button type="submit" className="w-full py-4 px-4 rounded-xl shadow-lg font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all transform hover:-translate-y-0.5 mt-6">
+                    Update Password
+                  </button>
+                </form>
+              )}
+              
+              <div className="mt-8 text-center border-t border-gray-100 pt-6">
+                <button onClick={() => { setIsForgotPassword(false); setOtpStep(false); }} className="text-emerald-700 hover:text-emerald-500 font-bold text-xs uppercase tracking-wider transition-colors">
+                  Return to Sign In
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-center mb-8">
+                <div className="bg-emerald-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Shield className="h-8 w-8 text-emerald-600" />
+                </div>
+                <h2 className="text-2xl sm:text-3xl font-black text-emerald-950">{isLogin ? 'Welcome Back' : 'Create Account'}</h2>
+                <p className="text-gray-500 mt-1 text-sm font-medium">{isLogin ? 'Sign in to track orders and manage deliveries.' : 'Register to order wholesale Mwea grains.'}</p>
+              </div>
+              
+              <form className="space-y-4" onSubmit={handleSubmit}>
+                {!isLogin && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Full Name</label>
+                      <input required type="text" placeholder="Full Name" onChange={(e) => setFormData({...formData, fullName: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Email Address</label>
+                      <input required type="email" placeholder="Email Address" onChange={(e) => setFormData({...formData, email: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                    </div>
+                  </>
+                )}
                 <div>
                   <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Phone Number</label>
                   <input required type="tel" placeholder="0712345678" onChange={(e) => setFormData({...formData, phoneNumber: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
                 </div>
-              ) : (
-                <>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Phone Number</label>
-                    <input required type="tel" value={formData.phoneNumber} disabled className="text-black bg-gray-100 w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold outline-none" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Reset Code</label>
-                    <input required type="text" placeholder="Enter 6-digit code" onChange={(e) => setFormData({...formData, resetToken: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">New Password</label>
-                    <input required type="password" placeholder="••••••••" onChange={(e) => setFormData({...formData, newPassword: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
-                  </div>
-                </>
-              )}
-              <button type="submit" className="w-full py-4 px-4 rounded-xl shadow-lg font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all transform hover:-translate-y-0.5 mt-6">
-                {resetStep === 'request' ? 'Send Reset Code' : 'Update Password'}
-              </button>
-              <button type="button" onClick={() => { setIsForgotPassword(false); setResetStep('request'); }} className="w-full py-4 px-4 rounded-xl shadow-md font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all mt-3">
-                Back to Sign In
-              </button>
-            </form>
-          ) : (
-            <form className="space-y-4" onSubmit={handleSubmit}>
-              {!isLogin && (
-                <>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Full Name</label>
-                    <input required type="text" placeholder="Full Name" onChange={(e) => setFormData({...formData, fullName: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Email Address</label>
-                    <input required type="email" placeholder="Email Address" onChange={(e) => setFormData({...formData, email: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
-                  </div>
-                </>
-              )}
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Phone Number</label>
-                <input required type="tel" placeholder="0712345678" onChange={(e) => setFormData({...formData, phoneNumber: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Password</label>
-                <input required type="password" placeholder="••••••••" onChange={(e) => setFormData({...formData, password: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
-              </div>
-              
-              {isLogin && (
-                <div className="flex justify-end pt-1">
-                  <button type="button" onClick={() => setIsForgotPassword(true)} className="text-xs font-bold text-emerald-600 hover:text-emerald-500 transition-colors">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Password</label>
+                  <input required type="password" placeholder="••••••••" onChange={(e) => setFormData({...formData, password: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                </div>
+                
+                <button type="submit" className="w-full py-4 px-4 rounded-xl shadow-lg font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all transform hover:-translate-y-0.5 mt-6">
+                  {isLogin ? 'Sign In' : 'Register Account'}
+                </button>
+              </form>
+
+              <div className="mt-8 text-center border-t border-gray-100 pt-6 flex flex-col space-y-3">
+                {isLogin && (
+                  <button onClick={() => setIsForgotPassword(true)} className="text-rose-600 hover:text-rose-500 font-bold text-xs uppercase tracking-wider transition-colors block w-full mb-1">
                     Forgot Password?
                   </button>
-                </div>
-              )}
-
-              <button type="submit" className="w-full py-4 px-4 rounded-xl shadow-lg font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all transform hover:-translate-y-0.5 mt-6">
-                {isLogin ? 'Sign In' : 'Register Account'}
-              </button>
-            </form>
-          )}
-
-          {!isForgotPassword && (
-            <div className="mt-8 text-center border-t border-gray-100 pt-6">
-              <button onClick={() => setIsLogin(!isLogin)} className="text-emerald-700 hover:text-emerald-500 font-bold text-xs uppercase tracking-wider transition-colors">
-                {isLogin ? "Need an account? Register Here" : "Already registered? Sign In"}
-              </button>
-            </div>
+                )}
+                <button onClick={() => setIsLogin(!isLogin)} className="text-emerald-700 hover:text-emerald-500 font-bold text-xs uppercase tracking-wider transition-colors">
+                  {isLogin ? "Need an account? Register Here" : "Already registered? Sign In"}
+                </button>
+              </div>
+            </>
           )}
         </div>
       </div>
