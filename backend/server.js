@@ -38,7 +38,7 @@ const getPayHeroAuthHeader = () => {
     const creds = `${process.env.PAYHERO_API_KEY.trim()}:${process.env.PAYHERO_API_SECRET.trim()}`;
     return `Basic ${Buffer.from(creds).toString('base64')}`;
   }
-  const fallbackRaw = 'Basic cnBqZHU3YWJyWG03SWdqcDBI\nBF:NHFvR\nV32XR99cDq\nGf3igKB3R0A5vRtgTMJ7Jpfm'
+  const fallbackRaw = 'Basic cnBqZHU3YWJyWG03SWdqcDBI\\nBF:NHFvR\\nV32XR99cDq\\nGf3igKB3R0A5vRtgTMJ7Jpfm'
     .replace(/[\r\n\s]+/g, '');
   return fallbackRaw.startsWith('Basic') ? fallbackRaw : `Basic ${fallbackRaw}`;
 };
