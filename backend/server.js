@@ -28,8 +28,21 @@ const hostname = process.env.HOSTNAME || 'localhost';
 const port = parseInt(process.env.PORT || '5000', 10);
 const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
 
-// Pay Hero Credentials Configuration
-const PAYHERO_BASIC_AUTH = process.env.PAYHERO_BASIC_AUTH || 'Basic cnBqZHU3YWJyWG03SWdqcDBI\nBF:NHFvR\nV32XR99cDq\nGf3igKB3R0A5vRtgTMJ7Jpfm';
+// Pay Hero Credentials Configuration (Cleaned to prevent 401 newline string corruption)
+const getPayHeroAuthHeader = () => {
+  if (process.env.PAYHERO_BASIC_AUTH) {
+    const cleanAuth = process.env.PAYHERO_BASIC_AUTH.replace(/[\r\n\s]+/g, '');
+    return cleanAuth.startsWith('Basic ') ? cleanAuth : `Basic ${cleanAuth}`;
+  }
+  if (process.env.PAYHERO_API_KEY && process.env.PAYHERO_API_SECRET) {
+    const creds = `${process.env.PAYHERO_API_KEY.trim()}:${process.env.PAYHERO_API_SECRET.trim()}`;
+    return `Basic ${Buffer.from(creds).toString('base64')}`;
+  }
+  const fallbackRaw = 'Basic cnBqZHU3YWJyWG03SWdqcDBI\nBF:NHFvR\nV32XR99cDq\nGf3igKB3R0A5vRtgTMJ7Jpfm'
+    .replace(/[\r\n\s]+/g, '');
+  return fallbackRaw.startsWith('Basic') ? fallbackRaw : `Basic ${fallbackRaw}`;
+};
+
 const PAYHERO_CHANNEL_ID = Number(process.env.PAYHERO_CHANNEL_ID || 11668);
 
 console.log('🚀 Initializing Premium Rice & Grain E-Commerce Backend...');
@@ -136,14 +149,19 @@ const authenticateToken = (req, res, next) => {
     token = req.query.token;
   }
   
-  if (!token) {
+  // Clean raw token string to prevent literal "null", "undefined", or quoted string errors
+  if (token) {
+    token = token.trim().replace(/^["']|["']$/g, '');
+  }
+
+  if (!token || token === 'null' || token === 'undefined' || token === '') {
     console.log('DEBUG: Auth failed - Missing token');
     return res.status(401).json({ error: 'Access token missing' });
   }
 
   jwt.verify(token, JWT_SECRET, (err, decodedUser) => {
     if (err) {
-      console.log('DEBUG: Auth failed - Invalid token');
+      console.log(`DEBUG: Auth failed - Invalid token (${err.message})`);
       return res.status(403).json({ error: 'Token invalid or expired' });
     }
     req.user = decodedUser;
@@ -641,7 +659,7 @@ async function startServer() {
       }
     });
 
-    // --- DIRECT M-PESA STK PUSH ROUTE (Fixes 404 error) ---
+    // --- DIRECT M-PESA STK PUSH ROUTE ---
     const handleStkPushRequest = async (req, res) => {
       try {
         const { phoneNumber, phone, amount, orderId, external_reference } = req.body || {};
@@ -670,7 +688,7 @@ async function startServer() {
           },
           {
             headers: {
-              'Authorization': PAYHERO_BASIC_AUTH,
+              'Authorization': getPayHeroAuthHeader(),
               'Content-Type': 'application/json'
             }
           }
@@ -816,7 +834,7 @@ async function startServer() {
               },
               {
                 headers: {
-                  'Authorization': PAYHERO_BASIC_AUTH,
+                  'Authorization': getPayHeroAuthHeader(),
                   'Content-Type': 'application/json'
                 }
               }
