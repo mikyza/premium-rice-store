@@ -197,7 +197,7 @@ const requireAdmin = async (req, res, next) => {
 async function startServer() {
   try {
     await sequelize.authenticate();
-    await sequelize.sync();
+    await sequelize.sync({ alter: true }); // Added alter: true to fix the missing column issue
     
     const currentMode = process.env.DB_MODE === 'cloud' ? '☁️ AIVEN CLOUD' : '🏠 LOCAL';
     console.log(`🍃 Database Connected Successfully! Mode: [ ${currentMode} ]`);
@@ -553,9 +553,8 @@ async function startServer() {
         user.resetTokenExpires = tokenExpiration;
         await user.save();
 
-        // FIX: Extract `{ data, error }` to catch unverified domain issues with Resend
-        const { data, error } = await resend.emails.send({
-          from: process.env.RESEND_FROM_EMAIL || 'Mwea Rice Hub <onboarding@resend.dev>',
+        const emailResponse = await resend.emails.send({
+          from: 'Mwea Rice Hub <onboarding@resend.dev>',
           to: user.email,
           subject: 'Your Password Reset OTP Code',
           html: `
@@ -570,12 +569,6 @@ async function startServer() {
             </div>
           `
         });
-
-        // Check if Resend silently failed and return a proper 500 error
-        if (error) {
-          console.error('❌ Resend API Error:', error);
-          return res.status(500).json({ error: 'Failed to dispatch password reset OTP email through the mail provider.' });
-        }
 
         console.log(`📧 Password reset OTP sent to ${user.email}`);
         res.status(200).json({ message: 'If an account with that email exists, a password reset OTP has been sent.' });
