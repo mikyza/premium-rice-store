@@ -14,6 +14,7 @@ import fs from 'fs';
 import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
+import { Resend } from 'resend';
 
 dotenv.config();
 
@@ -27,6 +28,9 @@ const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || 'localhost';
 const port = parseInt(process.env.PORT || '5000', 10);
 const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
+
+// Resend Email Client Initialization
+const resend = new Resend(process.env.RESEND_API_KEY || 're_dR7G9AZb_MQdHKVHqAj44JSQF6gxZmEab');
 
 // Pay Hero Credentials Configuration (Cleaned to prevent 401 newline string corruption)
 const getPayHeroAuthHeader = () => {
@@ -149,7 +153,6 @@ const authenticateToken = (req, res, next) => {
     token = req.query.token;
   }
   
-  // Clean raw token string to prevent literal "null", "undefined", or quoted string errors
   if (token) {
     token = token.trim().replace(/^["']|["']$/g, '');
   }
@@ -226,7 +229,6 @@ async function startServer() {
     await SystemConfig.findOrCreate({ where: { key: 'transport_fee' }, defaults: { value: 250 } });
     await SystemConfig.findOrCreate({ where: { key: 'black_friday' }, defaults: { value: { active: false, endTime: null } } });
     
-    // Seed M-Pesa Payment Details (Till & Paybill numbers)
     await SystemConfig.findOrCreate({
       where: { key: 'mpesa_config' },
       defaults: {
@@ -239,7 +241,6 @@ async function startServer() {
       }
     });
 
-    // Seed ALL 47 KENYAN COUNTIES with default transport shipping rates
     const all47Counties = {
       "Mombasa": 500, "Kwale": 550, "Kilifi": 550, "Tana River": 600, "Lamu": 650, 
       "Taita-Taveta": 550, "Garissa": 600, "Wajir": 700, "Mandera": 800, "Marsabit": 700, 
@@ -254,7 +255,6 @@ async function startServer() {
     };
     await SystemConfig.findOrCreate({ where: { key: 'county_overrides' }, defaults: { value: all47Counties } });
 
-    // Seed Kenyan Cascading Logistics Hierarchy
     const kenyaLogisticsHierarchy = {
       "Kirinyaga": {
         "Mwea": {
@@ -308,7 +308,6 @@ async function startServer() {
     };
     await SystemConfig.findOrCreate({ where: { key: 'logistics_hierarchy' }, defaults: { value: kenyaLogisticsHierarchy } });
 
-    // Landing Page Hero Video / Backdrop Config
     await SystemConfig.findOrCreate({
       where: { key: 'hero_settings' },
       defaults: {
@@ -323,7 +322,6 @@ async function startServer() {
       }
     });
 
-    // Homepage Carousel Media Feed
     await SystemConfig.findOrCreate({
       where: { key: 'homepage_carousel' },
       defaults: {
@@ -364,7 +362,6 @@ async function startServer() {
       }
     });
 
-    // Ensure Featured Grain Products exist
     const existingFeaturedCount = await RiceProduct.count();
     if (existingFeaturedCount === 0) {
       await RiceProduct.bulkCreate([
@@ -412,7 +409,6 @@ async function startServer() {
       console.log('🌾 Seeded default 4 Featured Grain selection products into catalog.');
     }
 
-    // Google Sync Endpoint
     expressApp.post('/api/sync/google', async (req, res) => {
       const { googleId, fullName, email } = req.body || {};
       
@@ -529,6 +525,96 @@ async function startServer() {
       } catch (err) { 
         console.error("Login Error:", err);
         res.status(500).json({ error: err.message || 'Internal server authentication failure' }); 
+      }
+    });
+
+    // --- FORGOT PASSWORD (OTP GENERATION & EMAIL VIA RESEND) ---
+    expressApp.post('/api/user/forgot-password', async (req, res) => {
+      try {
+        const { email } = req.body || {};
+        if (!email) {
+          return res.status(400).json({ error: 'Email address is required' });
+        }
+
+        const user = await User.findOne({ where: { email } });
+        
+        // Prevent email enumeration attacks by returning uniform success
+        if (!user) {
+          return res.status(200).json({ 
+            message: 'If an account with that email exists, a password reset OTP has been sent.' 
+          });
+        }
+
+        // Generate a 6-digit numeric OTP code
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const tokenExpiration = Date.now() + 10 * 60 * 1000; // Valid for 10 minutes
+
+        user.resetToken = otpCode;
+        user.resetTokenExpires = tokenExpiration;
+        await user.save();
+
+        const emailResponse = await resend.emails.send({
+          from: 'Mwea Rice Hub <onboarding@resend.dev>',
+          to: user.email,
+          subject: 'Your Password Reset OTP Code',
+          html: `
+            <div style="font-family: Arial, sans-serif; padding: 24px; color: #333; max-width: 600px; margin: auto; background: #f9f9f9; border-radius: 8px;">
+              <h2 style="color: #2e7d32;">Password Reset OTP</h2>
+              <p>Hello ${user.fullName || 'Valued Customer'},</p>
+              <p>You requested a password reset for your Mwea Rice Hub account. Use the 6-digit OTP code below to proceed:</p>
+              <div style="background: #e8f5e9; color: #2e7d32; font-size: 32px; font-weight: bold; text-align: center; padding: 16px; border-radius: 6px; letter-spacing: 6px; margin: 20px 0;">
+                ${otpCode}
+              </div>
+              <p style="font-size: 13px; color: #666;">This code is valid for 10 minutes. If you did not request this, please ignore this email.</p>
+            </div>
+          `
+        });
+
+        console.log(`📧 Password reset OTP sent to ${user.email}`);
+        res.status(200).json({ message: 'If an account with that email exists, a password reset OTP has been sent.' });
+      } catch (err) {
+        console.error('❌ Forgot Password OTP Error:', err);
+        res.status(500).json({ error: 'Failed to dispatch password reset OTP email' });
+      }
+    });
+
+    // --- RESET PASSWORD WITH OTP ---
+    expressApp.post('/api/user/reset-password', async (req, res) => {
+      try {
+        const { email, otp, token, newPassword } = req.body || {};
+        const verificationCode = otp || token;
+
+        if (!email || !verificationCode || !newPassword) {
+          return res.status(400).json({ error: 'Email, OTP code, and new password are required' });
+        }
+
+        if (newPassword.length < 6) {
+          return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+        }
+
+        const user = await User.findOne({ 
+          where: { 
+            email, 
+            resetToken: String(verificationCode).trim(),
+            resetTokenExpires: { [Op.gt]: Date.now() } 
+          } 
+        });
+
+        if (!user) {
+          return res.status(400).json({ error: 'Invalid or expired OTP code' });
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+        user.password = hashedPassword;
+        user.resetToken = null;
+        user.resetTokenExpires = null;
+        await user.save();
+
+        res.status(200).json({ message: 'Password has been reset successfully. You can now login with your new password.' });
+      } catch (err) {
+        console.error('❌ Reset Password OTP Error:', err);
+        res.status(500).json({ error: 'Internal server error while resetting password' });
       }
     });
 
@@ -675,7 +761,8 @@ async function startServer() {
         const callbackEndpoint = `${hostUrl}/api/payments/payhero/callback`;
 
         console.log(`📱 Direct Pay Hero STK Push triggered for ${targetPhone}, Amount: KES ${targetAmount}, Ref: ${ref}`);
-const payheroResponse = await axios.post(
+
+        const payheroResponse = await axios.post(
           'https://backend.payhero.co.ke/api/v2/payments',
           {
             amount: Number(targetAmount),
@@ -706,6 +793,7 @@ const payheroResponse = await axios.post(
         });
       }
     };
+
     expressApp.post('/api/payments/stkpush', handleStkPushRequest);
     expressApp.post('/api/payments/stk-push', handleStkPushRequest);
     expressApp.post('/api/payment/stkpush', handleStkPushRequest);
@@ -715,7 +803,7 @@ const payheroResponse = await axios.post(
       try {
         const { 
           cartItems, 
-          paymentMethod, // Supported: 'mpesa_stk', 'mpesa_till', 'mpesa_paybill', 'cash_on_delivery'
+          paymentMethod, 
           mpesaPhoneNumber,
           county, 
           town, 
@@ -808,7 +896,6 @@ const payheroResponse = await axios.post(
           status: 'pending' 
         });
 
-        // Pay Hero M-Pesa STK Push Trigger
         let stkInitiated = false;
         let stkMessage = '';
 
@@ -821,7 +908,7 @@ const payheroResponse = await axios.post(
             console.log(`📱 Triggering Pay Hero STK Push for Order #${generatedOrder.id} to ${targetPhone}...`);
             
             const payheroResponse = await axios.post(
-              'https://backend.payhero.co.ke/api/v2/payments/initiate-stk-push',
+              'https://backend.payhero.co.ke/api/v2/payments',
               {
                 amount: finalOrderTotal,
                 phone_number: targetPhone,
@@ -868,7 +955,6 @@ const payheroResponse = await axios.post(
         const body = req.body || {};
         const responseObj = body.response || body;
 
-        // Parse external reference and transaction status
         const externalRef = responseObj.external_reference || responseObj.ExternalReference || body.external_reference || body.ExternalReference;
         const statusStr = responseObj.status || responseObj.Status || body.status || body.Status;
         const mpesaReceipt = responseObj.mpesa_code || responseObj.MpesaReceiptNumber || body.mpesa_code || body.MpesaReceiptNumber || null;
@@ -898,7 +984,6 @@ const payheroResponse = await axios.post(
 
             await order.save();
 
-            // Real-time notification to WebSockets
             io.to('admin-dashboard-room').emit('paymentReceived', {
               orderId: order.id,
               status: order.status,
@@ -912,7 +997,6 @@ const payheroResponse = await axios.post(
           }
         }
 
-        // Always reply 200 OK to acknowledge receipt to Pay Hero
         res.status(200).json({ status: 'SUCCESS', message: 'Callback received and processed successfully' });
       } catch (err) {
         console.error('❌ Error processing Pay Hero Callback:', err);
