@@ -136,6 +136,39 @@ export default function PremiumRiceStore() {
   const [shopSearch, setShopSearch] = useState('');
 
   // ==========================================
+  // ACCOUNT-SCOPED CART LOGIC
+  // ==========================================
+  const getAccountCartKey = (u: any) => {
+    return u ? `mwea_hub_cart_${u.id || u.phoneNumber}` : 'mwea_hub_cart_guest';
+  };
+
+  // Load account-specific cart whenever user session changes
+  useEffect(() => {
+    try {
+      const storageKey = getAccountCartKey(user);
+      const savedCart = localStorage.getItem(storageKey);
+      if (savedCart) {
+        setCart(JSON.parse(savedCart));
+      } else {
+        setCart([]);
+      }
+    } catch (err) {
+      console.error("Failed to parse account cart from storage:", err);
+      setCart([]);
+    }
+  }, [user]);
+
+  // Sync current cart changes strictly to the active user account key
+  useEffect(() => {
+    try {
+      const storageKey = getAccountCartKey(user);
+      localStorage.setItem(storageKey, JSON.stringify(cart));
+    } catch (err) {
+      console.error("Failed to save account cart to storage:", err);
+    }
+  }, [cart, user]);
+
+  // ==========================================
   // 3. INITIALIZATION & REAL-TIME WEBSOCKETS
   // ==========================================
   
@@ -178,11 +211,15 @@ export default function PremiumRiceStore() {
   }, [user]);
 
   useEffect(() => {
-    const savedToken = localStorage.getItem('token');
-    const savedUser = localStorage.getItem('user');
-    if (savedToken && savedUser) {
-      setToken(savedToken);
-      setUser(JSON.parse(savedUser));
+    try {
+      const savedToken = localStorage.getItem('token');
+      const savedUser = localStorage.getItem('user');
+      if (savedToken && savedUser) {
+        setToken(savedToken);
+        setUser(JSON.parse(savedUser));
+      }
+    } catch (err) {
+      console.error("Error reading saved authentication state:", err);
     }
 
     fetchProducts();
@@ -190,41 +227,46 @@ export default function PremiumRiceStore() {
     fetchHero();
     fetchCountiesConfig();
 
-    const newSocket = io(SOCKET_URL);
-    setSocket(newSocket);
+    let newSocket: Socket | null = null;
+    try {
+      newSocket = io(SOCKET_URL);
+      setSocket(newSocket);
 
-    newSocket.on('blackFridayTick', (data: any) => {
-      setFlashSale({ active: data.active, endTime: data.endTime, msRemaining: data.msRemaining });
-    });
-    
-    newSocket.on('blackFridayEnded', () => {
-      setFlashSale({ active: false, endTime: null, msRemaining: 0 });
-      fetchProducts();
-    });
+      newSocket.on('blackFridayTick', (data: any) => {
+        setFlashSale({ active: data.active, endTime: data.endTime, msRemaining: data.msRemaining });
+      });
+      
+      newSocket.on('blackFridayEnded', () => {
+        setFlashSale({ active: false, endTime: null, msRemaining: 0 });
+        fetchProducts();
+      });
 
-    newSocket.on('blackFridayStarted', (data: any) => {
-      setFlashSale({ active: data.active, endTime: data.endTime, msRemaining: 0 });
-      fetchProducts();
-    });
+      newSocket.on('blackFridayStarted', (data: any) => {
+        setFlashSale({ active: data.active, endTime: data.endTime, msRemaining: 0 });
+        fetchProducts();
+      });
 
-    newSocket.on('stockUpdated', (data: any) => {
-      setProducts(prev => prev.map(p => p.id === data.productId ? { ...p, stockQuantity: data.newStockQuantity } : p));
-    });
+      newSocket.on('stockUpdated', (data: any) => {
+        setProducts(prev => prev.map(p => p.id === data.productId ? { ...p, stockQuantity: data.newStockQuantity } : p));
+      });
 
-    newSocket.on('heroUpdated', (newHero: any) => {
-      setHeroSettings(newHero);
-    });
+      newSocket.on('heroUpdated', (newHero: any) => {
+        setHeroSettings(newHero);
+      });
 
-    newSocket.on('carouselUpdated', (newSlides: any[]) => {
-      setCarousel(newSlides);
-    });
+      newSocket.on('carouselUpdated', (newSlides: any[]) => {
+        setCarousel(newSlides);
+      });
 
-    newSocket.on('orderStatusUpdated', (updatedOrder: any) => {
-      setMyOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-      setAdminOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-    });
+      newSocket.on('orderStatusUpdated', (updatedOrder: any) => {
+        setMyOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+        setAdminOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+      });
+    } catch (err) {
+      console.error("Real-time socket initialization failed:", err);
+    }
 
-    return () => { newSocket.disconnect(); };
+    return () => { if (newSocket) newSocket.disconnect(); };
   }, []);
 
   useEffect(() => {
@@ -251,7 +293,7 @@ export default function PremiumRiceStore() {
   }, [view, adminTab, token]);
 
   // ==========================================
-  // 4. API HELPERS & DATA FETCHERS
+  // 4. API HELPERS & DATA FETCHERS WITH ERROR HANDLING
   // ==========================================
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -261,29 +303,54 @@ export default function PremiumRiceStore() {
   const fetchProducts = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/products/catalog`);
-      if (res.ok) setProducts(await res.json());
-    } catch (err) { console.error("Failed to fetch catalog", err); }
+      if (res.ok) {
+        setProducts(await res.json());
+      } else {
+        showToast('Unable to load current grain catalog', 'error');
+      }
+    } catch (err) {
+      console.error("Failed to fetch catalog", err);
+      showToast('Network error while loading grain catalog', 'error');
+    }
   };
 
   const fetchCarousel = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/config/carousel`);
-      if (res.ok) setCarousel(await res.json());
-    } catch (err) { console.error("Failed to fetch carousel", err); }
+      if (res.ok) {
+        setCarousel(await res.json());
+      } else {
+        console.error("Carousel config response not ok");
+      }
+    } catch (err) { 
+      console.error("Failed to fetch carousel", err); 
+    }
   };
 
   const fetchHero = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/config/hero`);
-      if (res.ok) setHeroSettings(await res.json());
-    } catch (err) { console.error("Failed to fetch hero settings", err); }
+      if (res.ok) {
+        setHeroSettings(await res.json());
+      } else {
+        console.error("Hero config response not ok");
+      }
+    } catch (err) { 
+      console.error("Failed to fetch hero settings", err); 
+    }
   };
 
   const fetchCountiesConfig = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/config/counties`);
-      if (res.ok) setCountyOverrides(await res.json());
-    } catch (err) { console.error("Failed to fetch county overrides", err); }
+      if (res.ok) {
+        setCountyOverrides(await res.json());
+      } else {
+        console.error("County overrides response not ok");
+      }
+    } catch (err) { 
+      console.error("Failed to fetch county overrides", err); 
+    }
   };
 
   const fetchMyOrders = async () => {
@@ -291,8 +358,15 @@ export default function PremiumRiceStore() {
       const res = await fetch(`${API_BASE_URL}/orders/my-orders`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) setMyOrders(await res.json());
-    } catch (err) { console.error("Failed to fetch user orders", err); }
+      if (res.ok) {
+        setMyOrders(await res.json());
+      } else {
+        showToast('Failed to fetch your order history', 'error');
+      }
+    } catch (err) {
+      console.error("Failed to fetch user orders", err);
+      showToast('Network error fetching your order history', 'error');
+    }
   };
 
   const fetchAdminOrders = async () => {
@@ -300,8 +374,14 @@ export default function PremiumRiceStore() {
       const res = await fetch(`${API_BASE_URL}/admin/orders`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) setAdminOrders(await res.json());
-    } catch (err) { showToast('Error fetching orders', 'error'); }
+      if (res.ok) {
+        setAdminOrders(await res.json());
+      } else {
+        showToast('Error fetching administrator orders', 'error');
+      }
+    } catch (err) { 
+      showToast('Network connection error while fetching orders', 'error'); 
+    }
   };
 
   const fetchAdminUsers = async () => {
@@ -309,8 +389,14 @@ export default function PremiumRiceStore() {
       const res = await fetch(`${API_BASE_URL}/admin/users`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) setAdminUsers(await res.json());
-    } catch (err) { showToast('Error fetching users', 'error'); }
+      if (res.ok) {
+        setAdminUsers(await res.json());
+      } else {
+        showToast('Error fetching user accounts registry', 'error');
+      }
+    } catch (err) { 
+      showToast('Network error while fetching registered users', 'error'); 
+    }
   };
 
   const fetchAdminLogs = async () => {
@@ -318,15 +404,26 @@ export default function PremiumRiceStore() {
       const res = await fetch(`${API_BASE_URL}/admin/logs`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) setAdminLogs(await res.json());
-    } catch (err) { showToast('Error fetching system logs', 'error'); }
+      if (res.ok) {
+        setAdminLogs(await res.json());
+      } else {
+        showToast('Error fetching database audit logs', 'error');
+      }
+    } catch (err) { 
+      showToast('Network error while fetching system logs', 'error'); 
+    }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    try {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+    } catch (e) {
+      console.error("Error clearing local storage:", e);
+    }
     setToken(null);
     setUser(null);
+    setCart([]); // Reset active cart view on logout
     setView('home');
     showToast('Logged out successfully');
   };
@@ -351,10 +448,10 @@ export default function PremiumRiceStore() {
           showToast('Cannot add more than available stock', 'error');
           return prev;
         }
-        showToast('Cart updated');
+        showToast('Cart updated for your account');
         return prev.map(item => item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item);
       }
-      showToast('Added to bag');
+      showToast('Added to bag for your account');
       return [...prev, { productId: product.id, product, quantity: 1, price: product.price }];
     });
   };
@@ -414,7 +511,7 @@ export default function PremiumRiceStore() {
             {user ? (
               <div className="flex items-center space-x-4 pl-4 border-l border-emerald-800">
                 <button onClick={() => setView('profile')} className="flex items-center text-sm font-bold bg-emerald-800/50 hover:bg-emerald-800 px-4 py-2 rounded-xl transition-all">
-                  <UserIcon className="h-4 w-4 mr-2 text-emerald-400" /> {user.fullName.split(' ')[0]}
+                  <UserIcon className="h-4 w-4 mr-2 text-emerald-400" /> {user.fullName ? user.fullName.split(' ')[0] : 'Account'}
                 </button>
                 <button onClick={handleLogout} className="p-2 text-emerald-300 hover:text-rose-400 hover:bg-emerald-950 rounded-lg transition-colors" title="Sign Out">
                   <LogOut className="h-5 w-5" />
@@ -696,14 +793,15 @@ export default function PremiumRiceStore() {
           
           if (checkoutData.paymentMethod === 'stk') {
             showToast(`📲 STK Push successfully initiated to ${targetPhone}! Please enter your M-Pesa PIN when prompted.`, 'success');
-            // Additional call if your backend handles STK separately using the order ID
             try {
                await fetch(`${API_BASE_URL}/payments/stkpush`, {
                  method: 'POST',
                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                  body: JSON.stringify({ orderId: data.id || data.order?.id, amount: cartTotal, phoneNumber: targetPhone })
-               }).catch(() => {});
-            } catch (err) {}
+               });
+            } catch (err) {
+               console.error("STK trigger request error:", err);
+            }
           } else {
             showToast('🌾 Order placed successfully! Direct logistics dispatched.', 'success');
           }
@@ -942,8 +1040,12 @@ export default function PremiumRiceStore() {
         const data = await res.json();
         
         if (res.ok) {
-          localStorage.setItem('token', data.token);
-          localStorage.setItem('user', JSON.stringify(data.user));
+          try {
+            localStorage.setItem('token', data.token);
+            localStorage.setItem('user', JSON.stringify(data.user));
+          } catch (storageErr) {
+            console.error("Local storage update error:", storageErr);
+          }
           setToken(data.token);
           setUser(data.user);
           showToast(`Welcome back, ${data.user.fullName}!`, 'success');
@@ -1168,8 +1270,11 @@ export default function PremiumRiceStore() {
                       showToast('New grain product initialized in database!', 'success');
                       setNewProduct({ brandName: '', variety: '', weightKg: '', basePrice: '', stockQuantity: '', imageUrl: '' });
                       fetchProducts();
+                    } else {
+                      const errData = await res.json();
+                      showToast(errData.error || 'Failed to initialize new product', 'error');
                     }
-                  } catch (err) { showToast('Error initializing product', 'error'); }
+                  } catch (err) { showToast('Error initializing product in server', 'error'); }
                 }} className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <input required type="text" placeholder="Brand (e.g. Mwea Pishori)" value={newProduct.brandName} onChange={e=>setNewProduct({...newProduct, brandName:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
                   <input required type="text" placeholder="Variety (e.g. Grade 1 Aromatic)" value={newProduct.variety} onChange={e=>setNewProduct({...newProduct, variety:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
@@ -1195,13 +1300,21 @@ export default function PremiumRiceStore() {
                     <input type="text" placeholder="Image URL" value={editingProduct.imageUrl || ''} onChange={e=>setEditingProduct({...editingProduct, imageUrl:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono md:col-span-2" />
                   </div>
                   <button onClick={async () => {
-                    await fetch(`${API_BASE_URL}/admin/products/${editingProduct.id}`, {
-                      method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                      body: JSON.stringify(editingProduct)
-                    });
-                    showToast('Product specifications modified', 'success');
-                    setEditingProduct(null);
-                    fetchProducts();
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/admin/products/${editingProduct.id}`, {
+                        method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify(editingProduct)
+                      });
+                      if (res.ok) {
+                        showToast('Product specifications modified', 'success');
+                        setEditingProduct(null);
+                        fetchProducts();
+                      } else {
+                        showToast('Failed to modify product record', 'error');
+                      }
+                    } catch (err) {
+                      showToast('Network error while modifying product', 'error');
+                    }
                   }} className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs hover:bg-emerald-500 mr-3">Save Changes</button>
                 </div>
               )}
@@ -1235,9 +1348,17 @@ export default function PremiumRiceStore() {
                             <button onClick={() => setEditingProduct(p)} className="text-gray-400 hover:text-emerald-400 p-2 bg-[#1f1f1f] rounded-xl mr-2 transition-colors" title="Edit"><Edit size={14}/></button>
                             <button onClick={async () => {
                               if (confirm(`Permanently delete ${p.brandName} ${p.variety}?`)) {
-                                await fetch(`${API_BASE_URL}/admin/products/${p.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
-                                showToast('Product wiped from database', 'success');
-                                fetchProducts();
+                                try {
+                                  const res = await fetch(`${API_BASE_URL}/admin/products/${p.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+                                  if (res.ok) {
+                                    showToast('Product wiped from database', 'success');
+                                    fetchProducts();
+                                  } else {
+                                    showToast('Failed to delete product', 'error');
+                                  }
+                                } catch (err) {
+                                  showToast('Network error deleting product', 'error');
+                                }
                               }
                             }} className="text-gray-400 hover:text-rose-500 p-2 bg-[#1f1f1f] rounded-xl transition-colors" title="Delete"><Trash2 size={14}/></button>
                           </td>
@@ -1312,12 +1433,20 @@ export default function PremiumRiceStore() {
                         value={order.status} 
                         onChange={async (e) => {
                           const newStatus = e.target.value;
-                          await fetch(`${API_BASE_URL}/admin/orders/${order.id}/status`, {
-                            method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                            body: JSON.stringify({ status: newStatus })
-                          });
-                          showToast(`Order #${order.id} updated to ${newStatus}`, 'success');
-                          fetchAdminOrders();
+                          try {
+                            const res = await fetch(`${API_BASE_URL}/admin/orders/${order.id}/status`, {
+                              method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                              body: JSON.stringify({ status: newStatus })
+                            });
+                            if (res.ok) {
+                              showToast(`Order #${order.id} updated to ${newStatus}`, 'success');
+                              fetchAdminOrders();
+                            } else {
+                              showToast('Failed to update order status', 'error');
+                            }
+                          } catch (err) {
+                            showToast('Network error updating order status', 'error');
+                          }
                         }}
                         className="bg-white text-black border-2 border-gray-300 rounded-xl px-4 py-2.5 text-xs outline-none font-black cursor-pointer"
                       >
@@ -1358,22 +1487,38 @@ export default function PremiumRiceStore() {
                           <div className="flex gap-2 ml-auto sm:ml-0">
                             <button onClick={async () => {
                               const newRole = u.role === 'admin' ? 'user' : 'admin';
-                              await fetch(`${API_BASE_URL}/admin/users/${u.id}/modify`, {
-                                method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                body: JSON.stringify({ role: newRole })
-                              });
-                              showToast(`Updated ${u.fullName} clearance to ${newRole}`, 'success');
-                              fetchAdminUsers();
+                              try {
+                                const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}/modify`, {
+                                  method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                  body: JSON.stringify({ role: newRole })
+                                });
+                                if (res.ok) {
+                                  showToast(`Updated ${u.fullName} clearance to ${newRole}`, 'success');
+                                  fetchAdminUsers();
+                                } else {
+                                  showToast('Failed to toggle user role', 'error');
+                                }
+                              } catch (err) {
+                                showToast('Network error while toggling role', 'error');
+                              }
                             }} className="text-xs bg-[#242424] hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-xl font-bold transition-all">
                               Toggle Role
                             </button>
                             <button onClick={async () => {
                               if (confirm(`Are you sure you want to permanently delete user ${u.fullName}?`)) {
-                                await fetch(`${API_BASE_URL}/admin/users/${u.id}`, {
-                                  method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
-                                });
-                                showToast(`User ${u.fullName} deleted securely`, 'success');
-                                fetchAdminUsers();
+                                try {
+                                  const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}`, {
+                                    method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
+                                  });
+                                  if (res.ok) {
+                                    showToast(`User ${u.fullName} deleted securely`, 'success');
+                                    fetchAdminUsers();
+                                  } else {
+                                    showToast('Failed to delete user account', 'error');
+                                  }
+                                } catch (err) {
+                                  showToast('Network error while deleting user', 'error');
+                                }
                               }
                             }} className="text-xs bg-rose-950/40 hover:bg-rose-900 text-rose-400 border border-rose-900/50 px-3 py-1.5 rounded-xl font-bold transition-all flex items-center">
                               <Trash2 size={12} className="mr-1"/> Delete
@@ -1430,11 +1575,19 @@ export default function PremiumRiceStore() {
                   </div>
 
                   <button onClick={async () => {
-                    await fetch(`${API_BASE_URL}/admin/config/hero`, {
-                      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                      body: JSON.stringify(heroSettings)
-                    });
-                    showToast('Hero media array committed and synced!', 'success');
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/admin/config/hero`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify(heroSettings)
+                      });
+                      if (res.ok) {
+                        showToast('Hero media array committed and synced!', 'success');
+                      } else {
+                        showToast('Failed to deploy carousel configuration', 'error');
+                      }
+                    } catch (err) {
+                      showToast('Network error while deploying carousel configuration', 'error');
+                    }
                   }} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-4 rounded-xl font-bold text-sm shadow-lg">
                     Deploy Carousel Configuration
                   </button>
@@ -1456,15 +1609,31 @@ export default function PremiumRiceStore() {
                   <p className="text-xs text-gray-400 mb-6">Instantly trigger sitewide discounted pricing via real-time websockets.</p>
                   {flashSale.active ? (
                     <button onClick={async () => {
-                      await fetch(`${API_BASE_URL}/admin/config/black-friday`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ active: false }) });
-                      showToast('Flash Sale terminated manually', 'success');
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/admin/config/black-friday`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ active: false }) });
+                        if (res.ok) {
+                          showToast('Flash Sale terminated manually', 'success');
+                        } else {
+                          showToast('Failed to terminate Flash Sale', 'error');
+                        }
+                      } catch (err) {
+                        showToast('Network error while terminating Flash Sale', 'error');
+                      }
                     }} className="w-full bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-500/40 py-3.5 rounded-2xl text-xs font-black">
                       Terminate Flash Sale
                     </button>
                   ) : (
                     <button onClick={async () => {
-                      await fetch(`${API_BASE_URL}/admin/config/black-friday`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ active: true, durationHours: 24 }) });
-                      showToast('24H Flash Sale Launched!', 'success');
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/admin/config/black-friday`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ active: true, durationHours: 24 }) });
+                        if (res.ok) {
+                          showToast('24H Flash Sale Launched!', 'success');
+                        } else {
+                          showToast('Failed to deploy Flash Sale event', 'error');
+                        }
+                      } catch (err) {
+                        showToast('Network error while deploying Flash Sale', 'error');
+                      }
                     }} className="w-full bg-rose-600 hover:bg-rose-500 text-white py-3.5 rounded-2xl text-xs font-black shadow-lg shadow-rose-950/50">
                       Deploy 24-Hour Flash Sale Event
                     </button>
@@ -1477,8 +1646,16 @@ export default function PremiumRiceStore() {
                   <div className="flex gap-3">
                     <input type="number" value={baseTransportFee} onChange={e => setBaseTransportFee(Number(e.target.value))} className="w-full bg-white text-black border border-gray-300 rounded-xl px-4 py-3 text-sm font-mono font-bold" />
                     <button onClick={async () => {
-                      await fetch(`${API_BASE_URL}/admin/config/transport`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ amount: baseTransportFee }) });
-                      showToast('Default transport fee saved', 'success');
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/admin/config/transport`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ amount: baseTransportFee }) });
+                        if (res.ok) {
+                          showToast('Default transport fee saved', 'success');
+                        } else {
+                          showToast('Failed to save transport fee', 'error');
+                        }
+                      } catch (err) {
+                        showToast('Network error while saving transport fee', 'error');
+                      }
                     }} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 rounded-xl font-bold text-xs shrink-0">Commit Rate</button>
                   </div>
                 </div>
@@ -1503,11 +1680,19 @@ export default function PremiumRiceStore() {
                           }}
                           onBlur={async (e) => {
                             const val = Number(e.target.value);
-                            await fetch(`${API_BASE_URL}/admin/config/counties`, {
-                              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                              body: JSON.stringify({ county: c, fee: val })
-                            });
-                            showToast(`Updated ${c} delivery rate to KES ${val}`, 'success');
+                            try {
+                              const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                body: JSON.stringify({ county: c, fee: val })
+                              });
+                              if (res.ok) {
+                                showToast(`Updated ${c} delivery rate to KES ${val}`, 'success');
+                              } else {
+                                showToast(`Failed to update ${c} rate`, 'error');
+                              }
+                            } catch (err) {
+                              showToast(`Network error updating ${c} rate`, 'error');
+                            }
                           }}
                           className="w-16 bg-white text-black border border-gray-400 rounded-lg px-2 py-1 text-xs text-right font-mono font-bold outline-none focus:border-emerald-500"
                         />
