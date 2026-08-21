@@ -553,8 +553,9 @@ async function startServer() {
         user.resetTokenExpires = tokenExpiration;
         await user.save();
 
-        const emailResponse = await resend.emails.send({
-          from: 'Mwea Rice Hub <onboarding@resend.dev>',
+        // FIX: Extract `{ data, error }` to catch unverified domain issues with Resend
+        const { data, error } = await resend.emails.send({
+          from: process.env.RESEND_FROM_EMAIL || 'Mwea Rice Hub <onboarding@resend.dev>',
           to: user.email,
           subject: 'Your Password Reset OTP Code',
           html: `
@@ -569,6 +570,12 @@ async function startServer() {
             </div>
           `
         });
+
+        // Check if Resend silently failed and return a proper 500 error
+        if (error) {
+          console.error('❌ Resend API Error:', error);
+          return res.status(500).json({ error: 'Failed to dispatch password reset OTP email through the mail provider.' });
+        }
 
         console.log(`📧 Password reset OTP sent to ${user.email}`);
         res.status(200).json({ message: 'If an account with that email exists, a password reset OTP has been sent.' });
