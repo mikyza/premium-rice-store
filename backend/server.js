@@ -130,8 +130,12 @@ function startFlashSaleCountdown(io) {
 // 4. MIDDLEWARES
 // ==========================================
 const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+  let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : authHeader;
+  if (!token && req.query && req.query.token) {
+    token = req.query.token;
+  }
+  
   if (!token) {
     console.log('DEBUG: Auth failed - Missing token');
     return res.status(401).json({ error: 'Access token missing' });
@@ -445,19 +449,23 @@ async function startServer() {
 
     expressApp.post('/api/user/signup', async (req, res) => {
       try {
-        const { phoneNumber, password, fullName } = req.body || {};
+        const { phoneNumber, email, password, fullName } = req.body || {};
         
-        if (!phoneNumber || !password || !fullName) {
-          return res.status(400).json({ error: 'All parameters required (phoneNumber, password, fullName)' });
+        if (!password || !fullName || (!phoneNumber && !email)) {
+          return res.status(400).json({ error: 'Full name, password, and at least a phone number or email are required' });
         }
         
-        const existingUser = await User.findOne({ where: { phoneNumber } });
+        const searchCondition = [];
+        if (phoneNumber) searchCondition.push({ phoneNumber });
+        if (email) searchCondition.push({ email });
+
+        const existingUser = await User.findOne({ where: { [Op.or]: searchCondition } });
         if (existingUser) {
-          return res.status(409).json({ error: 'Mobile registration payload matches active record' });
+          return res.status(409).json({ error: 'User registration payload matches an active account' });
         }
 
         const hashedPassword = await bcrypt.hash(password, 12);
-        const newUser = await User.create({ phoneNumber, password: hashedPassword, fullName });
+        const newUser = await User.create({ phoneNumber, email, password: hashedPassword, fullName });
         
         const token = jwt.sign({ id: newUser.id, role: newUser.role }, JWT_SECRET, { expiresIn: '7d' });
         res.status(201).json({ token, user: { id: newUser.id, fullName: newUser.fullName, role: newUser.role } });
@@ -469,15 +477,24 @@ async function startServer() {
 
     expressApp.post('/api/user/login', async (req, res) => {
       try {
-        const { phoneNumber, password } = req.body || {};
+        const { phoneNumber, email, identifier, password } = req.body || {};
+        const loginIdentifier = phoneNumber || email || identifier;
         
-        if (!phoneNumber || !password) {
-          return res.status(400).json({ error: 'Phone number and password are required' });
+        if (!loginIdentifier || !password) {
+          return res.status(400).json({ error: 'Phone number or email and password are required' });
         }
 
-        const user = await User.findOne({ where: { phoneNumber } });
+        const user = await User.findOne({ 
+          where: { 
+            [Op.or]: [
+              { phoneNumber: loginIdentifier },
+              { email: loginIdentifier }
+            ]
+          } 
+        });
+
         if (!user || !user.isActive) {
-          return res.status(401).json({ error: 'Invalid phone number or password' });
+          return res.status(401).json({ error: 'Invalid credentials or account disabled' });
         }
 
         if (!user.password) {
@@ -486,11 +503,11 @@ async function startServer() {
 
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
-          return res.status(401).json({ error: 'Invalid phone number or password' });
+          return res.status(401).json({ error: 'Invalid credentials or account disabled' });
         }
 
         const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-        res.json({ token, user: { id: user.id, fullName: user.fullName, role: user.role, phoneNumber: user.phoneNumber } });
+        res.json({ token, user: { id: user.id, fullName: user.fullName, role: user.role, phoneNumber: user.phoneNumber, email: user.email } });
       } catch (err) { 
         console.error("Login Error:", err);
         res.status(500).json({ error: err.message || 'Internal server authentication failure' }); 
@@ -623,6 +640,59 @@ async function startServer() {
         res.status(500).json({ error: err.message }); 
       }
     });
+
+    // --- DIRECT M-PESA STK PUSH ROUTE (Fixes 404 error) ---
+    const handleStkPushRequest = async (req, res) => {
+      try {
+        const { phoneNumber, phone, amount, orderId, external_reference } = req.body || {};
+        const targetPhone = phoneNumber || phone;
+        const targetAmount = amount || 10;
+        const ref = external_reference || (orderId ? `ORD-${orderId}` : `STK-${Date.now()}`);
+
+        if (!targetPhone) {
+          return res.status(400).json({ error: 'Phone number parameter is required for STK push' });
+        }
+
+        const hostUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+        const callbackEndpoint = `${hostUrl}/api/payments/payhero/callback`;
+
+        console.log(`📱 Direct Pay Hero STK Push triggered for ${targetPhone}, Amount: KES ${targetAmount}, Ref: ${ref}`);
+
+        const payheroResponse = await axios.post(
+          'https://backend.payhero.co.ke/api/v2/payments',
+          {
+            amount: Number(targetAmount),
+            phone_number: targetPhone,
+            channel_id: PAYHERO_CHANNEL_ID,
+            provider: 'm-pesa',
+            external_reference: ref,
+            callback_url: callbackEndpoint
+          },
+          {
+            headers: {
+              'Authorization': PAYHERO_BASIC_AUTH,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        res.status(200).json({
+          success: true,
+          message: 'STK push prompt dispatched successfully',
+          data: payheroResponse.data
+        });
+      } catch (stkError) {
+        console.error('❌ Direct STK Push Processing Failure:', stkError.response ? stkError.response.data : stkError.message);
+        res.status(500).json({
+          success: false,
+          error: stkError.response?.data?.message || stkError.message || 'Failed to dispatch M-Pesa STK Push'
+        });
+      }
+    };
+
+    expressApp.post('/api/payments/stkpush', handleStkPushRequest);
+    expressApp.post('/api/payments/stk-push', handleStkPushRequest);
+    expressApp.post('/api/payment/stkpush', handleStkPushRequest);
 
     // --- CREATE ORDER & TRIGGER PAY HERO STK PUSH ---
     expressApp.post('/api/orders/create', authenticateToken, async (req, res) => {
