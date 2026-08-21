@@ -38,11 +38,14 @@ export { sequelize };
 // ==========================================
 export const User = sequelize.define('User', {
   phoneNumber: { type: DataTypes.STRING, unique: true, allowNull: true },
+  email: { type: DataTypes.STRING, unique: true, allowNull: true },
   password: { type: DataTypes.STRING, allowNull: true },
   fullName: { type: DataTypes.STRING, allowNull: false },
   googleId: { type: DataTypes.STRING, unique: true, allowNull: true },
   role: { type: DataTypes.STRING, defaultValue: 'user' },
-  isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
+  isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
+  resetToken: { type: DataTypes.STRING, allowNull: true },
+  resetTokenExpires: { type: DataTypes.BIGINT, allowNull: true }
 });
 
 export const RiceProduct = sequelize.define('RiceProduct', {
@@ -63,6 +66,10 @@ export const Order = sequelize.define('Order', {
   grandTotal: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
   paymentDetails: { type: DataTypes.JSON, allowNull: false },
   county: { type: DataTypes.STRING, defaultValue: 'Not Specified' },
+  town: { type: DataTypes.STRING, allowNull: true },
+  location: { type: DataTypes.STRING, allowNull: true },
+  sublocation: { type: DataTypes.STRING, allowNull: true },
+  shippingAddress: { type: DataTypes.JSON, allowNull: true },
   status: { type: DataTypes.STRING, defaultValue: 'pending' }
 });
 
