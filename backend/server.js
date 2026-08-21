@@ -675,9 +675,8 @@ async function startServer() {
         const callbackEndpoint = `${hostUrl}/api/payments/payhero/callback`;
 
         console.log(`📱 Direct Pay Hero STK Push triggered for ${targetPhone}, Amount: KES ${targetAmount}, Ref: ${ref}`);
-
-        const payheroResponse = await axios.post(
-          'https://backend.payhero.co.ke/api/v2/payments/initiate-stk-push',
+const payheroResponse = await axios.post(
+          'https://backend.payhero.co.ke/api/v2/payments',
           {
             amount: Number(targetAmount),
             phone_number: targetPhone,
@@ -707,7 +706,6 @@ async function startServer() {
         });
       }
     };
-
     expressApp.post('/api/payments/stkpush', handleStkPushRequest);
     expressApp.post('/api/payments/stk-push', handleStkPushRequest);
     expressApp.post('/api/payment/stkpush', handleStkPushRequest);
