@@ -123,7 +123,9 @@ export default function PremiumRiceStore() {
   
   // --- Auth Form States ---
   const [isLogin, setIsLogin] = useState(true);
-  const [formData, setFormData] = useState({ phoneNumber: '', email: '', password: '', fullName: '' });
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [resetStep, setResetStep] = useState<'request' | 'reset'>('request');
+  const [formData, setFormData] = useState({ phoneNumber: '', email: '', password: '', fullName: '', resetToken: '', newPassword: '' });
   
   // --- Admin Workspace States ---
   const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'users' | 'carousel' | 'config' | 'logs'>('inventory');
@@ -1028,6 +1030,52 @@ export default function PremiumRiceStore() {
   };
 
   const renderAuth = () => {
+    const handleResetRequest = async (e: React.FormEvent) => {
+      e.preventDefault();
+      try {
+        const res = await fetch(`${API_BASE_URL}/user/forgot-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phoneNumber: formData.phoneNumber })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast('Password reset code sent to your phone!', 'success');
+          setResetStep('reset');
+        } else {
+          showToast(data.error || 'Failed to initiate reset', 'error');
+        }
+      } catch (err) {
+        showToast('Network error', 'error');
+      }
+    };
+
+    const handlePasswordReset = async (e: React.FormEvent) => {
+      e.preventDefault();
+      try {
+        const res = await fetch(`${API_BASE_URL}/user/reset-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+             phoneNumber: formData.phoneNumber,
+             resetToken: formData.resetToken,
+             newPassword: formData.newPassword
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast('Password reset successful! Please sign in.', 'success');
+          setIsForgotPassword(false);
+          setIsLogin(true);
+          setResetStep('request');
+        } else {
+          showToast(data.error || 'Failed to reset password', 'error');
+        }
+      } catch (err) {
+        showToast('Network error', 'error');
+      }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       const endpoint = isLogin ? '/user/login' : '/user/signup';
@@ -1065,42 +1113,90 @@ export default function PremiumRiceStore() {
             <div className="bg-emerald-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
               <Shield className="h-8 w-8 text-emerald-600" />
             </div>
-            <h2 className="text-2xl sm:text-3xl font-black text-emerald-950">{isLogin ? 'Welcome Back' : 'Create Account'}</h2>
-            <p className="text-gray-500 mt-1 text-sm font-medium">{isLogin ? 'Sign in to track orders and manage deliveries.' : 'Register to order wholesale Mwea grains.'}</p>
+            <h2 className="text-2xl sm:text-3xl font-black text-emerald-950">
+               {isForgotPassword ? 'Reset Password' : (isLogin ? 'Welcome Back' : 'Create Account')}
+            </h2>
+            <p className="text-gray-500 mt-1 text-sm font-medium">
+               {isForgotPassword 
+                 ? (resetStep === 'request' ? 'Enter your phone number to receive a reset code.' : 'Enter the reset code and your new password.')
+                 : (isLogin ? 'Sign in to track orders and manage deliveries.' : 'Register to order wholesale Mwea grains.')}
+            </p>
           </div>
           
-          <form className="space-y-4" onSubmit={handleSubmit}>
-            {!isLogin && (
-              <>
+          {isForgotPassword ? (
+            <form className="space-y-4" onSubmit={resetStep === 'request' ? handleResetRequest : handlePasswordReset}>
+              {resetStep === 'request' ? (
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Full Name</label>
-                  <input required type="text" placeholder="Full Name" onChange={(e) => setFormData({...formData, fullName: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Phone Number</label>
+                  <input required type="tel" placeholder="0712345678" onChange={(e) => setFormData({...formData, phoneNumber: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Email Address</label>
-                  <input required type="email" placeholder="Email Address" onChange={(e) => setFormData({...formData, email: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Phone Number</label>
+                    <input required type="tel" value={formData.phoneNumber} disabled className="text-black bg-gray-100 w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Reset Code</label>
+                    <input required type="text" placeholder="Enter 6-digit code" onChange={(e) => setFormData({...formData, resetToken: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">New Password</label>
+                    <input required type="password" placeholder="••••••••" onChange={(e) => setFormData({...formData, newPassword: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  </div>
+                </>
+              )}
+              <button type="submit" className="w-full py-4 px-4 rounded-xl shadow-lg font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all transform hover:-translate-y-0.5 mt-6">
+                {resetStep === 'request' ? 'Send Reset Code' : 'Update Password'}
+              </button>
+              <button type="button" onClick={() => { setIsForgotPassword(false); setResetStep('request'); }} className="w-full py-4 px-4 rounded-xl shadow-md font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all mt-3">
+                Back to Sign In
+              </button>
+            </form>
+          ) : (
+            <form className="space-y-4" onSubmit={handleSubmit}>
+              {!isLogin && (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Full Name</label>
+                    <input required type="text" placeholder="Full Name" onChange={(e) => setFormData({...formData, fullName: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Email Address</label>
+                    <input required type="email" placeholder="Email Address" onChange={(e) => setFormData({...formData, email: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  </div>
+                </>
+              )}
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Phone Number</label>
+                <input required type="tel" placeholder="0712345678" onChange={(e) => setFormData({...formData, phoneNumber: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Password</label>
+                <input required type="password" placeholder="••••••••" onChange={(e) => setFormData({...formData, password: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+              </div>
+              
+              {isLogin && (
+                <div className="flex justify-end pt-1">
+                  <button type="button" onClick={() => setIsForgotPassword(true)} className="text-xs font-bold text-emerald-600 hover:text-emerald-500 transition-colors">
+                    Forgot Password?
+                  </button>
                 </div>
-              </>
-            )}
-            <div>
-              <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Phone Number</label>
-              <input required type="tel" placeholder="0712345678" onChange={(e) => setFormData({...formData, phoneNumber: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Password</label>
-              <input required type="password" placeholder="••••••••" onChange={(e) => setFormData({...formData, password: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
-            </div>
-            
-            <button type="submit" className="w-full py-4 px-4 rounded-xl shadow-lg font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all transform hover:-translate-y-0.5 mt-6">
-              {isLogin ? 'Sign In' : 'Register Account'}
-            </button>
-          </form>
+              )}
 
-          <div className="mt-8 text-center border-t border-gray-100 pt-6">
-            <button onClick={() => setIsLogin(!isLogin)} className="text-emerald-700 hover:text-emerald-500 font-bold text-xs uppercase tracking-wider transition-colors">
-              {isLogin ? "Need an account? Register Here" : "Already registered? Sign In"}
-            </button>
-          </div>
+              <button type="submit" className="w-full py-4 px-4 rounded-xl shadow-lg font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all transform hover:-translate-y-0.5 mt-6">
+                {isLogin ? 'Sign In' : 'Register Account'}
+              </button>
+            </form>
+          )}
+
+          {!isForgotPassword && (
+            <div className="mt-8 text-center border-t border-gray-100 pt-6">
+              <button onClick={() => setIsLogin(!isLogin)} className="text-emerald-700 hover:text-emerald-500 font-bold text-xs uppercase tracking-wider transition-colors">
+                {isLogin ? "Need an account? Register Here" : "Already registered? Sign In"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
