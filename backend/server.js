@@ -29,8 +29,8 @@ const hostname = process.env.HOSTNAME || 'localhost';
 const port = parseInt(process.env.PORT || '5000', 10);
 const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
 
-// Resend Email Client Initialization - Updated with your active API Key
-const resend = new Resend(process.env.RESEND_API_KEY || 're_bxf9jB7Q_5xgb1TGELRmp2v3vK36Vxeg7');
+// Resend Email Client Initialization
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Pay Hero Credentials Configuration (Cleaned to prevent 401 newline string corruption)
 const getPayHeroAuthHeader = () => {
