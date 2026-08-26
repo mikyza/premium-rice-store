@@ -506,7 +506,6 @@ export default function PremiumRiceStore() {
   );
 
   const renderHome = () => {
-    // Media collection mapping from Settings
     const mediaArray = [
       { type: 'video', url: heroSettings?.video1 },
       { type: 'video', url: heroSettings?.video2 },
@@ -1674,6 +1673,7 @@ export default function PremiumRiceStore() {
                         const res = await fetch(`${API_BASE_URL}/admin/config/black-friday`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ active: false }) });
                         if (res.ok) {
                           showToast('Flash Sale terminated manually', 'success');
+                          setFlashSale({ active: false, endTime: null, msRemaining: 0 });
                         } else {
                           showToast('Failed to terminate Flash Sale', 'error');
                         }
@@ -1686,4 +1686,184 @@ export default function PremiumRiceStore() {
                   ) : (
                     <button onClick={async () => {
                       try {
-                        const res = await fetch(`${API_BASE_URL}/admin/config/black-friday`, { method: 'POST', headers: { 'Content-Type':
+                        const res = await fetch(`${API_BASE_URL}/admin/config/black-friday`, { 
+                          method: 'POST', 
+                          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
+                          body: JSON.stringify({ active: true, durationHours: 24 }) 
+                        });
+                        if (res.ok) {
+                          showToast('Flash Sale activated sitewide!', 'success');
+                          setFlashSale(prev => ({ ...prev, active: true }));
+                          fetchProducts();
+                        } else {
+                          showToast('Failed to activate Flash Sale', 'error');
+                        }
+                      } catch (err) {
+                        showToast('Network error while activating Flash Sale', 'error');
+                      }
+                    }} className="w-full bg-rose-600 hover:bg-rose-500 text-white py-3.5 rounded-2xl text-xs font-black shadow-lg">
+                      Launch Flash Harvest Sale
+                    </button>
+                  )}
+                </div>
+
+                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
+                  <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">🚚 County Logistics Rate Overrides</h3>
+                  <p className="text-xs text-gray-400 mb-4">Set specific delivery transport fees for any of the 47 counties.</p>
+                  
+                  <div className="space-y-3 max-h-72 overflow-y-auto pr-2">
+                    <div className="flex gap-2 mb-2">
+                      <input type="number" id="baseTransportInput" placeholder="Base Transport Fee (KES)" defaultValue={baseTransportFee} className="bg-white border border-gray-300 text-black font-bold px-4 py-2.5 rounded-xl text-xs flex-1 outline-none" />
+                      <button onClick={async () => {
+                        const val = Number((document.getElementById('baseTransportInput') as HTMLInputElement)?.value || 250);
+                        try {
+                          const res = await fetch(`${API_BASE_URL}/admin/config/transport`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                            body: JSON.stringify({ baseFee: val })
+                          });
+                          if (res.ok) {
+                            setBaseTransportFee(val);
+                            showToast('Base transport fee updated successfully', 'success');
+                          } else {
+                            showToast('Failed to update base fee', 'error');
+                          }
+                        } catch(e) { showToast('Network error', 'error'); }
+                      }} className="bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-xs font-bold">Set Base</button>
+                    </div>
+
+                    {ALL_47_COUNTIES.slice(0, 10).map(c => (
+                      <div key={c} className="flex items-center justify-between bg-[#1a1a1a] p-3 rounded-xl border border-gray-800">
+                        <span className="text-xs font-bold text-gray-300">{c} County</span>
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="number" 
+                            placeholder={countyOverrides[c] !== undefined ? countyOverrides[c].toString() : baseTransportFee.toString()}
+                            id={`override_${c}`}
+                            className="w-24 bg-white text-black font-bold px-3 py-1.5 rounded-lg text-xs outline-none"
+                          />
+                          <button onClick={async () => {
+                            const feeVal = Number((document.getElementById(`override_${c}`) as HTMLInputElement)?.value);
+                            if (isNaN(feeVal)) return;
+                            try {
+                              const res = await fetch(`${API_BASE_URL}/admin/config/county-fee`, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                body: JSON.stringify({ county: c, fee: feeVal })
+                              });
+                              if (res.ok) {
+                                setCountyOverrides(prev => ({ ...prev, [c]: feeVal }));
+                                showToast(`Transport fee for ${c} updated to KES ${feeVal}`, 'success');
+                              } else {
+                                showToast('Failed to update county fee', 'error');
+                              }
+                            } catch(e) { showToast('Network error', 'error'); }
+                          }} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Save</button>
+                        </div>
+                      </div>
+                    ))}
+                    <p className="text-[10px] text-gray-500 text-center italic mt-2">Showing key counties. All 47 counties supported via backend dispatch engine.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {adminTab === 'logs' && (
+            <div className="animate-fadeIn space-y-6">
+              <div className="flex justify-between items-center border-b border-gray-800 pb-6">
+                <div>
+                  <h2 className="text-2xl font-black text-white">System & Database Audit Logs</h2>
+                  <p className="text-gray-400 text-xs mt-1">Real-time security logs, login activities, and database mutations.</p>
+                </div>
+                <button onClick={fetchAdminLogs} className="bg-gray-800 hover:bg-gray-700 text-gray-200 px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center">
+                  <RefreshCw size={14} className="mr-2" /> Refresh Logs
+                </button>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 font-mono text-xs overflow-x-auto space-y-2">
+                {adminLogs.length === 0 ? (
+                  <div className="text-center py-12 text-gray-500 font-sans">No audit log entries recorded or access restricted.</div>
+                ) : (
+                  adminLogs.map((log: any, idx: number) => (
+                    <div key={idx} className="p-3 bg-[#1a1a1a] rounded-xl border border-gray-800/80 flex items-start gap-3">
+                      <span className="text-emerald-400 font-bold shrink-0">[{new Date(log.createdAt || Date.now()).toLocaleTimeString()}]</span>
+                      <span className="text-gray-300 flex-1">{log.action || log.message || JSON.stringify(log)}</span>
+                      <span className="text-gray-500 text-[10px] shrink-0">{log.ipAddress || log.user || 'System'}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  };
+
+  // ==========================================
+  // 7. MAIN RENDER WRAPPER
+  // ==========================================
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col font-sans selection:bg-emerald-500 selection:text-white">
+      {renderNav()}
+
+      <main className="flex-1">
+        {view === 'home' && renderHome()}
+        {view === 'shop' && renderShop()}
+        {view === 'cart' && renderCart()}
+        {view === 'login' && renderAuth()}
+        {view === 'profile' && renderProfile()}
+        {view === 'admin' && renderAdmin()}
+      </main>
+
+      {/* Toast Notification Banner */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 animate-bounce">
+          <div className={`px-6 py-4 rounded-2xl shadow-2xl font-bold text-sm flex items-center gap-3 border ${
+            toast.type === 'error' 
+              ? 'bg-rose-950 text-rose-200 border-rose-500/50' 
+              : 'bg-emerald-950 text-emerald-200 border-emerald-500/50'
+          }`}>
+            {toast.type === 'error' ? <AlertCircle className="h-5 w-5 text-rose-400 shrink-0" /> : <CheckCircle className="h-5 w-5 text-emerald-400 shrink-0" />}
+            <span>{toast.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Footer */}
+      <footer className="bg-emerald-950 text-emerald-300 py-12 px-4 border-t border-emerald-900 mt-20">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
+          <div>
+            <div className="flex items-center space-x-2 mb-4">
+              <Leaf className="h-6 w-6 text-emerald-400" />
+              <span className="font-black text-xl text-white">MWEA HUB</span>
+            </div>
+            <p className="text-xs text-emerald-400/80 leading-relaxed font-medium">Direct agricultural logistics connecting Mwea paddy fields directly to households and wholesale markets across all 47 Kenyan counties.</p>
+          </div>
+          <div>
+            <h4 className="font-bold text-white mb-3 text-sm uppercase tracking-wider">Grain Catalog</h4>
+            <ul className="space-y-2 text-xs text-emerald-400/80 font-medium">
+              <li><button onClick={() => setView('shop')} className="hover:text-white transition-colors">Grade 1 Aromatic Pishori</button></li>
+              <li><button onClick={() => setView('shop')} className="hover:text-white transition-colors">Basmati Special Sacks</button></li>
+              <li><button onClick={() => setView('shop')} className="hover:text-white transition-colors">Wholesale Paddy Bags</button></li>
+            </ul>
+          </div>
+          <div>
+            <h4 className="font-bold text-white mb-3 text-sm uppercase tracking-wider">Logistics & Support</h4>
+            <ul className="space-y-2 text-xs text-emerald-400/80 font-medium">
+              <li><button onClick={() => setView('cart')} className="hover:text-white transition-colors">M-Pesa STK Push Checkout</button></li>
+              <li><button onClick={() => setView('profile')} className="hover:text-white transition-colors">Live Order Tracking</button></li>
+              <li><span className="text-emerald-400">Support Hotline: +254 700 000000</span></li>
+            </ul>
+          </div>
+          <div>
+            <h4 className="font-bold text-white mb-3 text-sm uppercase tracking-wider">Compliance & Security</h4>
+            <p className="text-xs text-emerald-400/80 leading-relaxed font-medium">Secured with end-to-end audit logging, JWT authentication, and direct Safaricom M-Pesa API integration.</p>
+          </div>
+        </div>
+        <div className="max-w-7xl mx-auto pt-8 border-t border-emerald-900/60 text-center text-xs text-emerald-500 font-medium">
+          &copy; {new Date().getFullYear()} Mwea Hub Direct Rice Logistics. All rights reserved.
+        </div>
+      </footer>
+    </div>
+  );
+}
