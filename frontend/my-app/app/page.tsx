@@ -8,7 +8,6 @@ import {
   ShoppingBag, Users, Image as ImageIcon, Video, Download,
   MapPin, Eye, RefreshCw, LogOut, Check, AlertTriangle, Smartphone, CreditCard
 } from 'lucide-react';
-import { io, Socket } from 'socket.io-client';
 
 // ==========================================
 // 1. SYSTEM CONFIGURATION & CONSTANTS
@@ -107,7 +106,6 @@ export default function PremiumRiceStore() {
   const [flashSale, setFlashSale] = useState({ active: false, endTime: null as string | null, msRemaining: 0 });
   const [baseTransportFee, setBaseTransportFee] = useState(250);
   const [countyOverrides, setCountyOverrides] = useState<{ [key: string]: number }>({});
-  const [socket, setSocket] = useState<Socket | null>(null);
 
   // --- Checkout Form States ---
   const [checkoutData, setCheckoutData] = useState({
@@ -174,7 +172,7 @@ export default function PremiumRiceStore() {
   }, [cart, user]);
 
   // ==========================================
-  // 3. INITIALIZATION & REAL-TIME WEBSOCKETS
+  // 3. INITIALIZATION & DATA FETCHING
   // ==========================================
   
   useEffect(() => {
@@ -231,62 +229,7 @@ export default function PremiumRiceStore() {
     fetchCarousel();
     fetchHero();
     fetchCountiesConfig();
-
-    let newSocket: Socket | null = null;
-    try {
-      newSocket = io(SOCKET_URL);
-      setSocket(newSocket);
-
-      newSocket.on('blackFridayTick', (data: any) => {
-        setFlashSale({ active: data.active, endTime: data.endTime, msRemaining: data.msRemaining });
-      });
-      
-      newSocket.on('blackFridayEnded', () => {
-        setFlashSale({ active: false, endTime: null, msRemaining: 0 });
-        fetchProducts();
-      });
-
-      newSocket.on('blackFridayStarted', (data: any) => {
-        setFlashSale({ active: data.active, endTime: data.endTime, msRemaining: 0 });
-        fetchProducts();
-      });
-
-      newSocket.on('stockUpdated', (data: any) => {
-        setProducts(prev => prev.map(p => p.id === data.productId ? { ...p, stockQuantity: data.newStockQuantity } : p));
-      });
-
-      newSocket.on('heroUpdated', (newHero: any) => {
-        setHeroSettings(newHero);
-      });
-
-      newSocket.on('carouselUpdated', (newSlides: any[]) => {
-        setCarousel(newSlides);
-      });
-
-      newSocket.on('orderStatusUpdated', (updatedOrder: any) => {
-        setMyOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-        setAdminOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-      });
-    } catch (err) {
-      console.error("Real-time socket initialization failed:", err);
-    }
-
-    return () => { if (newSocket) newSocket.disconnect(); };
   }, []);
-
-  useEffect(() => {
-    if (socket && user?.role === 'admin' && token) {
-      socket.emit('joinAdminChannel', token);
-      
-      socket.on('lowStockAlert', (data: any) => {
-        showToast(`Low Stock Warning: ${data.name} has only ${data.remainingStock} bags left!`, 'error');
-      });
-      socket.on('newOrderAlert', (data: any) => {
-        showToast(`New Order Received! Order #${data.id}`, 'success');
-        fetchAdminOrders();
-      });
-    }
-  }, [socket, user, token]);
 
   useEffect(() => {
     if (view === 'profile' && token) fetchMyOrders();
@@ -1743,145 +1686,4 @@ export default function PremiumRiceStore() {
                   ) : (
                     <button onClick={async () => {
                       try {
-                        const res = await fetch(`${API_BASE_URL}/admin/config/black-friday`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ active: true, durationHours: 24 }) });
-                        if (res.ok) {
-                          showToast('24H Flash Sale Launched!', 'success');
-                        } else {
-                          showToast('Failed to deploy Flash Sale event', 'error');
-                        }
-                      } catch (err) {
-                        showToast('Network error while deploying Flash Sale', 'error');
-                      }
-                    }} className="w-full bg-rose-600 hover:bg-rose-500 text-white py-3.5 rounded-2xl text-xs font-black shadow-lg shadow-rose-950/50">
-                      Deploy 24-Hour Flash Sale Event
-                    </button>
-                  )}
-                </div>
-
-                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                  <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">🚚 Default Transport Rate</h3>
-                  <p className="text-xs text-gray-400 mb-4">Base shipping fee for counties without custom overrides.</p>
-                  <div className="flex gap-3">
-                    <input type="number" value={baseTransportFee} onChange={e => setBaseTransportFee(Number(e.target.value))} className="w-full bg-white text-black border border-gray-300 rounded-xl px-4 py-3 text-sm font-mono font-bold" />
-                    <button onClick={async () => {
-                      try {
-                        const res = await fetch(`${API_BASE_URL}/admin/config/transport`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ amount: baseTransportFee }) });
-                        if (res.ok) {
-                          showToast('Default transport fee saved', 'success');
-                        } else {
-                          showToast('Failed to save transport fee', 'error');
-                        }
-                      } catch (err) {
-                        showToast('Network error while saving transport fee', 'error');
-                      }
-                    }} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 rounded-xl font-bold text-xs shrink-0">Commit Rate</button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                <h3 className="font-bold text-sm text-white uppercase tracking-wider mb-1">Kenya 47 Counties Regional Overrides Matrix</h3>
-                <p className="text-xs text-gray-400 mb-6">Assign specific transport shipping rates for each county in Kenya.</p>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-96 overflow-y-auto pr-2">
-                  {ALL_47_COUNTIES.map(c => (
-                    <div key={c} className="flex justify-between items-center bg-[#1c1c1c] p-3 rounded-2xl border border-gray-800/80">
-                      <span className="text-xs text-gray-300 font-bold">{c}</span>
-                      <div className="flex items-center gap-1">
-                        <span className="text-[10px] text-gray-500 font-mono">KES</span>
-                        <input 
-                          type="number" 
-                          value={countyOverrides[c] !== undefined ? countyOverrides[c] : baseTransportFee} 
-                          onChange={e => {
-                            const val = Number(e.target.value);
-                            setCountyOverrides({...countyOverrides, [c]: val});
-                          }}
-                          onBlur={async (e) => {
-                            const val = Number(e.target.value);
-                            try {
-                              const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
-                                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                body: JSON.stringify({ county: c, fee: val })
-                              });
-                              if (res.ok) {
-                                showToast(`Updated ${c} delivery rate to KES ${val}`, 'success');
-                              } else {
-                                showToast(`Failed to update ${c} rate`, 'error');
-                              }
-                            } catch (err) {
-                              showToast(`Network error updating ${c} rate`, 'error');
-                            }
-                          }}
-                          className="w-16 bg-white text-black border border-gray-400 rounded-lg px-2 py-1 text-xs text-right font-mono font-bold outline-none focus:border-emerald-500"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {adminTab === 'logs' && (
-            <div className="animate-fadeIn space-y-6">
-              <div>
-                <h2 className="text-2xl font-black text-white">System Logs & Audit Trail</h2>
-                <p className="text-gray-400 text-xs mt-1">Real-time database writes, administrative actions, and security events.</p>
-              </div>
-              
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 font-mono text-xs space-y-2.5 max-h-[600px] overflow-y-auto">
-                {adminLogs.length === 0 ? (
-                  <div className="text-gray-500 py-6 text-center">No audit logs recorded in system ledger yet.</div>
-                ) : adminLogs.map(log => (
-                  <div key={log.id} className="flex items-start gap-3 text-gray-300 bg-[#1a1a1a] p-3.5 rounded-xl border border-gray-800/60">
-                    <span className="text-emerald-500 font-bold">[{log.action}]</span>
-                    <span className="text-gray-400">{new Date(log.createdAt).toLocaleTimeString()}</span>
-                    <span className="text-gray-200 flex-1">Admin {log.Admin?.fullName || `#${log.adminId}`} modified {log.targetType} #{log.targetId}</span>
-                    <span className="text-gray-500 text-[10px]">{log.ipAddress}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </main>
-      </div>
-    );
-  };
-
-  return (
-    <div className="min-h-screen bg-gray-50 font-sans flex flex-col selection:bg-emerald-200 selection:text-emerald-900">
-      {toast && (
-        <div className={`fixed top-24 right-4 sm:right-8 z-50 px-6 py-4 rounded-2xl shadow-2xl font-bold text-sm flex items-center transform transition-all duration-300 animate-fadeIn ${toast.type === 'error' ? 'bg-rose-500 text-white' : 'bg-emerald-600 text-white'}`}>
-          {toast.type === 'error' ? <AlertCircle className="mr-3 h-5 w-5 shrink-0" /> : <CheckCircle className="mr-3 h-5 w-5 shrink-0" />}
-          {toast.message}
-        </div>
-      )}
-
-      {renderNav()}
-
-      <main className="flex-1">
-        {view === 'home' && renderHome()}
-        {view === 'shop' && renderShop()}
-        {view === 'cart' && renderCart()}
-        {view === 'login' && renderAuth()}
-        {view === 'admin' && renderAdmin()}
-        {view === 'profile' && renderProfile()}
-      </main>
-
-      <footer className="bg-emerald-950 text-emerald-100 py-12 border-t border-emerald-900 mt-auto">
-        <div className="max-w-7xl mx-auto px-4 text-center">
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <Leaf className="h-6 w-6 text-emerald-400" />
-            <span className="font-black text-xl tracking-tight text-white">MWEA HUB</span>
-          </div>
-          <p className="text-xs text-emerald-300 max-w-md mx-auto leading-relaxed">
-            Premium Agricultural Grain E-Commerce Infrastructure. Direct logistics across all 47 Counties in Kenya. Powered by relational database backends and real-time websockets.
-          </p>
-          <div className="mt-8 pt-6 border-t border-emerald-900/80 text-[11px] text-emerald-500 font-mono">
-            © {new Date().getFullYear()} MWEA HUB / RICEDIRECT • ALL RIGHTS RESERVED
-          </div>
-        </div>
-      </footer>
-    </div>
-  );
-}
+                        const res = await fetch(`${API_BASE_URL}/admin/config/black-friday`, { method: 'POST', headers: { 'Content-Type':
