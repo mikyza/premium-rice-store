@@ -8,6 +8,7 @@ import {
   ShoppingBag, Users, Image as ImageIcon, Video, Download,
   MapPin, Eye, RefreshCw, LogOut, Check, AlertTriangle, Smartphone, CreditCard
 } from 'lucide-react';
+import { io, Socket } from 'socket.io-client';
 
 // ==========================================
 // 1. SYSTEM CONFIGURATION & CONSTANTS
@@ -106,6 +107,7 @@ export default function PremiumRiceStore() {
   const [flashSale, setFlashSale] = useState({ active: false, endTime: null as string | null, msRemaining: 0 });
   const [baseTransportFee, setBaseTransportFee] = useState(250);
   const [countyOverrides, setCountyOverrides] = useState<{ [key: string]: number }>({});
+  const [socket, setSocket] = useState<Socket | null>(null);
 
   // --- Checkout Form States ---
   const [checkoutData, setCheckoutData] = useState({
@@ -121,12 +123,9 @@ export default function PremiumRiceStore() {
   
   // --- Auth Form States ---
   const [isLogin, setIsLogin] = useState(true);
-  const [formData, setFormData] = useState({ phoneNumber: '', email: '', password: '', fullName: '' });
-
-  // --- Forgot Password States ---
   const [isForgotPassword, setIsForgotPassword] = useState(false);
-  const [otpStep, setOtpStep] = useState(false);
-  const [resetData, setResetData] = useState({ email: '', otp: '', newPassword: '' });
+  const [resetStep, setResetStep] = useState<'request' | 'reset'>('request');
+  const [formData, setFormData] = useState({ phoneNumber: '', email: '', password: '', fullName: '', resetToken: '', newPassword: '' });
   
   // --- Admin Workspace States ---
   const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'users' | 'carousel' | 'config' | 'logs'>('inventory');
@@ -172,7 +171,7 @@ export default function PremiumRiceStore() {
   }, [cart, user]);
 
   // ==========================================
-  // 3. INITIALIZATION & DATA FETCHING
+  // 3. INITIALIZATION & REAL-TIME WEBSOCKETS
   // ==========================================
   
   useEffect(() => {
@@ -229,7 +228,62 @@ export default function PremiumRiceStore() {
     fetchCarousel();
     fetchHero();
     fetchCountiesConfig();
+
+    let newSocket: Socket | null = null;
+    try {
+      newSocket = io(SOCKET_URL);
+      setSocket(newSocket);
+
+      newSocket.on('blackFridayTick', (data: any) => {
+        setFlashSale({ active: data.active, endTime: data.endTime, msRemaining: data.msRemaining });
+      });
+      
+      newSocket.on('blackFridayEnded', () => {
+        setFlashSale({ active: false, endTime: null, msRemaining: 0 });
+        fetchProducts();
+      });
+
+      newSocket.on('blackFridayStarted', (data: any) => {
+        setFlashSale({ active: data.active, endTime: data.endTime, msRemaining: 0 });
+        fetchProducts();
+      });
+
+      newSocket.on('stockUpdated', (data: any) => {
+        setProducts(prev => prev.map(p => p.id === data.productId ? { ...p, stockQuantity: data.newStockQuantity } : p));
+      });
+
+      newSocket.on('heroUpdated', (newHero: any) => {
+        setHeroSettings(newHero);
+      });
+
+      newSocket.on('carouselUpdated', (newSlides: any[]) => {
+        setCarousel(newSlides);
+      });
+
+      newSocket.on('orderStatusUpdated', (updatedOrder: any) => {
+        setMyOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+        setAdminOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+      });
+    } catch (err) {
+      console.error("Real-time socket initialization failed:", err);
+    }
+
+    return () => { if (newSocket) newSocket.disconnect(); };
   }, []);
+
+  useEffect(() => {
+    if (socket && user?.role === 'admin' && token) {
+      socket.emit('joinAdminChannel', token);
+      
+      socket.on('lowStockAlert', (data: any) => {
+        showToast(`Low Stock Warning: ${data.name} has only ${data.remainingStock} bags left!`, 'error');
+      });
+      socket.on('newOrderAlert', (data: any) => {
+        showToast(`New Order Received! Order #${data.id}`, 'success');
+        fetchAdminOrders();
+      });
+    }
+  }, [socket, user, token]);
 
   useEffect(() => {
     if (view === 'profile' && token) fetchMyOrders();
@@ -506,6 +560,7 @@ export default function PremiumRiceStore() {
   );
 
   const renderHome = () => {
+    // Media collection mapping from Settings
     const mediaArray = [
       { type: 'video', url: heroSettings?.video1 },
       { type: 'video', url: heroSettings?.video2 },
@@ -975,6 +1030,52 @@ export default function PremiumRiceStore() {
   };
 
   const renderAuth = () => {
+    const handleResetRequest = async (e: React.FormEvent) => {
+      e.preventDefault();
+      try {
+        const res = await fetch(`${API_BASE_URL}/user/forgot-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phoneNumber: formData.phoneNumber })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast('Password reset code sent to your phone!', 'success');
+          setResetStep('reset');
+        } else {
+          showToast(data.error || 'Failed to initiate reset', 'error');
+        }
+      } catch (err) {
+        showToast('Network error', 'error');
+      }
+    };
+
+    const handlePasswordReset = async (e: React.FormEvent) => {
+      e.preventDefault();
+      try {
+        const res = await fetch(`${API_BASE_URL}/user/reset-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+             phoneNumber: formData.phoneNumber,
+             resetToken: formData.resetToken,
+             newPassword: formData.newPassword
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast('Password reset successful! Please sign in.', 'success');
+          setIsForgotPassword(false);
+          setIsLogin(true);
+          setResetStep('request');
+        } else {
+          showToast(data.error || 'Failed to reset password', 'error');
+        }
+      } catch (err) {
+        showToast('Network error', 'error');
+      }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       const endpoint = isLogin ? '/user/login' : '/user/signup';
@@ -1005,155 +1106,96 @@ export default function PremiumRiceStore() {
       }
     };
 
-    const handleForgotPasswordRequest = async (e: React.FormEvent) => {
-      e.preventDefault();
-      try {
-        const res = await fetch(`${API_BASE_URL}/user/forgot-password`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: resetData.email })
-        });
-        const data = await res.json();
-        
-        if (res.ok) {
-          showToast('OTP sent to your email successfully', 'success');
-          setOtpStep(true);
-        } else {
-          showToast(data.error || 'Failed to send OTP request', 'error');
-        }
-      } catch (err) {
-        showToast('Network error during OTP request', 'error');
-      }
-    };
-
-    const handlePasswordReset = async (e: React.FormEvent) => {
-      e.preventDefault();
-      try {
-        const res = await fetch(`${API_BASE_URL}/user/reset-password`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            email: resetData.email, 
-            otp: resetData.otp, 
-            newPassword: resetData.newPassword 
-          })
-        });
-        const data = await res.json();
-        
-        if (res.ok) {
-          showToast('Password reset successfully. You can now sign in.', 'success');
-          setIsForgotPassword(false);
-          setOtpStep(false);
-          setResetData({ email: '', otp: '', newPassword: '' });
-          setIsLogin(true);
-        } else {
-          showToast(data.error || 'Failed to reset password', 'error');
-        }
-      } catch (err) {
-        showToast('Network error during password reset', 'error');
-      }
-    };
-
     return (
       <div className="min-h-[75vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-emerald-50/40">
         <div className="max-w-md w-full bg-white p-8 sm:p-10 rounded-3xl shadow-xl border border-emerald-100 animate-fadeIn">
+          <div className="text-center mb-8">
+            <div className="bg-emerald-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Shield className="h-8 w-8 text-emerald-600" />
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-black text-emerald-950">
+               {isForgotPassword ? 'Reset Password' : (isLogin ? 'Welcome Back' : 'Create Account')}
+            </h2>
+            <p className="text-gray-500 mt-1 text-sm font-medium">
+               {isForgotPassword 
+                 ? (resetStep === 'request' ? 'Enter your phone number to receive a reset code.' : 'Enter the reset code and your new password.')
+                 : (isLogin ? 'Sign in to track orders and manage deliveries.' : 'Register to order wholesale Mwea grains.')}
+            </p>
+          </div>
           
           {isForgotPassword ? (
-            <>
-              <div className="text-center mb-8">
-                <div className="bg-emerald-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Shield className="h-8 w-8 text-emerald-600" />
-                </div>
-                <h2 className="text-2xl sm:text-3xl font-black text-emerald-950">Reset Password</h2>
-                <p className="text-gray-500 mt-1 text-sm font-medium">
-                  {otpStep ? 'Enter the secure OTP sent to your email and your new password.' : 'Enter your account email to receive a password reset OTP.'}
-                </p>
-              </div>
-
-              {!otpStep ? (
-                <form className="space-y-4" onSubmit={handleForgotPasswordRequest}>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Email Address</label>
-                    <input required type="email" placeholder="Email Address" value={resetData.email} onChange={(e) => setResetData({...resetData, email: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
-                  </div>
-                  <button type="submit" className="w-full py-4 px-4 rounded-xl shadow-lg font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all transform hover:-translate-y-0.5 mt-6">
-                    Request Secure OTP
-                  </button>
-                </form>
-              ) : (
-                <form className="space-y-4" onSubmit={handlePasswordReset}>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Email Address</label>
-                    <input required type="email" disabled value={resetData.email} className="text-gray-500 bg-gray-100 w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold outline-none cursor-not-allowed" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">One-Time Password (OTP)</label>
-                    <input required type="text" placeholder="Enter OTP" value={resetData.otp} onChange={(e) => setResetData({...resetData, otp: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">New Password</label>
-                    <input required type="password" placeholder="••••••••" value={resetData.newPassword} onChange={(e) => setResetData({...resetData, newPassword: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
-                  </div>
-                  <button type="submit" className="w-full py-4 px-4 rounded-xl shadow-lg font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all transform hover:-translate-y-0.5 mt-6">
-                    Update Password
-                  </button>
-                </form>
-              )}
-              
-              <div className="mt-8 text-center border-t border-gray-100 pt-6">
-                <button onClick={() => { setIsForgotPassword(false); setOtpStep(false); }} className="text-emerald-700 hover:text-emerald-500 font-bold text-xs uppercase tracking-wider transition-colors">
-                  Return to Sign In
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="text-center mb-8">
-                <div className="bg-emerald-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Shield className="h-8 w-8 text-emerald-600" />
-                </div>
-                <h2 className="text-2xl sm:text-3xl font-black text-emerald-950">{isLogin ? 'Welcome Back' : 'Create Account'}</h2>
-                <p className="text-gray-500 mt-1 text-sm font-medium">{isLogin ? 'Sign in to track orders and manage deliveries.' : 'Register to order wholesale Mwea grains.'}</p>
-              </div>
-              
-              <form className="space-y-4" onSubmit={handleSubmit}>
-                {!isLogin && (
-                  <>
-                    <div>
-                      <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Full Name</label>
-                      <input required type="text" placeholder="Full Name" onChange={(e) => setFormData({...formData, fullName: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Email Address</label>
-                      <input required type="email" placeholder="Email Address" onChange={(e) => setFormData({...formData, email: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
-                    </div>
-                  </>
-                )}
+            <form className="space-y-4" onSubmit={resetStep === 'request' ? handleResetRequest : handlePasswordReset}>
+              {resetStep === 'request' ? (
                 <div>
                   <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Phone Number</label>
                   <input required type="tel" placeholder="0712345678" onChange={(e) => setFormData({...formData, phoneNumber: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Password</label>
-                  <input required type="password" placeholder="••••••••" onChange={(e) => setFormData({...formData, password: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
-                </div>
-                
-                <button type="submit" className="w-full py-4 px-4 rounded-xl shadow-lg font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all transform hover:-translate-y-0.5 mt-6">
-                  {isLogin ? 'Sign In' : 'Register Account'}
-                </button>
-              </form>
-
-              <div className="mt-8 text-center border-t border-gray-100 pt-6 flex flex-col space-y-3">
-                {isLogin && (
-                  <button onClick={() => setIsForgotPassword(true)} className="text-rose-600 hover:text-rose-500 font-bold text-xs uppercase tracking-wider transition-colors block w-full mb-1">
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Phone Number</label>
+                    <input required type="tel" value={formData.phoneNumber} disabled className="text-black bg-gray-100 w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Reset Code</label>
+                    <input required type="text" placeholder="Enter 6-digit code" onChange={(e) => setFormData({...formData, resetToken: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">New Password</label>
+                    <input required type="password" placeholder="••••••••" onChange={(e) => setFormData({...formData, newPassword: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  </div>
+                </>
+              )}
+              <button type="submit" className="w-full py-4 px-4 rounded-xl shadow-lg font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all transform hover:-translate-y-0.5 mt-6">
+                {resetStep === 'request' ? 'Send Reset Code' : 'Update Password'}
+              </button>
+              <button type="button" onClick={() => { setIsForgotPassword(false); setResetStep('request'); }} className="w-full py-4 px-4 rounded-xl shadow-md font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all mt-3">
+                Back to Sign In
+              </button>
+            </form>
+          ) : (
+            <form className="space-y-4" onSubmit={handleSubmit}>
+              {!isLogin && (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Full Name</label>
+                    <input required type="text" placeholder="Full Name" onChange={(e) => setFormData({...formData, fullName: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Email Address</label>
+                    <input required type="email" placeholder="Email Address" onChange={(e) => setFormData({...formData, email: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  </div>
+                </>
+              )}
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Phone Number</label>
+                <input required type="tel" placeholder="0712345678" onChange={(e) => setFormData({...formData, phoneNumber: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Password</label>
+                <input required type="password" placeholder="••••••••" onChange={(e) => setFormData({...formData, password: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+              </div>
+              
+              {isLogin && (
+                <div className="flex justify-end pt-1">
+                  <button type="button" onClick={() => setIsForgotPassword(true)} className="text-xs font-bold text-emerald-600 hover:text-emerald-500 transition-colors">
                     Forgot Password?
                   </button>
-                )}
-                <button onClick={() => setIsLogin(!isLogin)} className="text-emerald-700 hover:text-emerald-500 font-bold text-xs uppercase tracking-wider transition-colors">
-                  {isLogin ? "Need an account? Register Here" : "Already registered? Sign In"}
-                </button>
-              </div>
-            </>
+                </div>
+              )}
+
+              <button type="submit" className="w-full py-4 px-4 rounded-xl shadow-lg font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all transform hover:-translate-y-0.5 mt-6">
+                {isLogin ? 'Sign In' : 'Register Account'}
+              </button>
+            </form>
+          )}
+
+          {!isForgotPassword && (
+            <div className="mt-8 text-center border-t border-gray-100 pt-6">
+              <button onClick={() => setIsLogin(!isLogin)} className="text-emerald-700 hover:text-emerald-500 font-bold text-xs uppercase tracking-wider transition-colors">
+                {isLogin ? "Need an account? Register Here" : "Already registered? Sign In"}
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -1673,7 +1715,6 @@ export default function PremiumRiceStore() {
                         const res = await fetch(`${API_BASE_URL}/admin/config/black-friday`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ active: false }) });
                         if (res.ok) {
                           showToast('Flash Sale terminated manually', 'success');
-                          setFlashSale({ active: false, endTime: null, msRemaining: 0 });
                         } else {
                           showToast('Failed to terminate Flash Sale', 'error');
                         }
@@ -1686,82 +1727,80 @@ export default function PremiumRiceStore() {
                   ) : (
                     <button onClick={async () => {
                       try {
-                        const res = await fetch(`${API_BASE_URL}/admin/config/black-friday`, { 
-                          method: 'POST', 
-                          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
-                          body: JSON.stringify({ active: true, durationHours: 24 }) 
-                        });
+                        const res = await fetch(`${API_BASE_URL}/admin/config/black-friday`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ active: true, durationHours: 24 }) });
                         if (res.ok) {
-                          showToast('Flash Sale activated sitewide!', 'success');
-                          setFlashSale(prev => ({ ...prev, active: true }));
-                          fetchProducts();
+                          showToast('24H Flash Sale Launched!', 'success');
                         } else {
-                          showToast('Failed to activate Flash Sale', 'error');
+                          showToast('Failed to deploy Flash Sale event', 'error');
                         }
                       } catch (err) {
-                        showToast('Network error while activating Flash Sale', 'error');
+                        showToast('Network error while deploying Flash Sale', 'error');
                       }
-                    }} className="w-full bg-rose-600 hover:bg-rose-500 text-white py-3.5 rounded-2xl text-xs font-black shadow-lg">
-                      Launch Flash Harvest Sale
+                    }} className="w-full bg-rose-600 hover:bg-rose-500 text-white py-3.5 rounded-2xl text-xs font-black shadow-lg shadow-rose-950/50">
+                      Deploy 24-Hour Flash Sale Event
                     </button>
                   )}
                 </div>
 
                 <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                  <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">🚚 County Logistics Rate Overrides</h3>
-                  <p className="text-xs text-gray-400 mb-4">Set specific delivery transport fees for any of the 47 counties.</p>
-                  
-                  <div className="space-y-3 max-h-72 overflow-y-auto pr-2">
-                    <div className="flex gap-2 mb-2">
-                      <input type="number" id="baseTransportInput" placeholder="Base Transport Fee (KES)" defaultValue={baseTransportFee} className="bg-white border border-gray-300 text-black font-bold px-4 py-2.5 rounded-xl text-xs flex-1 outline-none" />
-                      <button onClick={async () => {
-                        const val = Number((document.getElementById('baseTransportInput') as HTMLInputElement)?.value || 250);
-                        try {
-                          const res = await fetch(`${API_BASE_URL}/admin/config/transport`, {
-                            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                            body: JSON.stringify({ baseFee: val })
-                          });
-                          if (res.ok) {
-                            setBaseTransportFee(val);
-                            showToast('Base transport fee updated successfully', 'success');
-                          } else {
-                            showToast('Failed to update base fee', 'error');
-                          }
-                        } catch(e) { showToast('Network error', 'error'); }
-                      }} className="bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-xs font-bold">Set Base</button>
-                    </div>
+                  <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">🚚 Default Transport Rate</h3>
+                  <p className="text-xs text-gray-400 mb-4">Base shipping fee for counties without custom overrides.</p>
+                  <div className="flex gap-3">
+                    <input type="number" value={baseTransportFee} onChange={e => setBaseTransportFee(Number(e.target.value))} className="w-full bg-white text-black border border-gray-300 rounded-xl px-4 py-3 text-sm font-mono font-bold" />
+                    <button onClick={async () => {
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/admin/config/transport`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ amount: baseTransportFee }) });
+                        if (res.ok) {
+                          showToast('Default transport fee saved', 'success');
+                        } else {
+                          showToast('Failed to save transport fee', 'error');
+                        }
+                      } catch (err) {
+                        showToast('Network error while saving transport fee', 'error');
+                      }
+                    }} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 rounded-xl font-bold text-xs shrink-0">Commit Rate</button>
+                  </div>
+                </div>
+              </div>
 
-                    {ALL_47_COUNTIES.slice(0, 10).map(c => (
-                      <div key={c} className="flex items-center justify-between bg-[#1a1a1a] p-3 rounded-xl border border-gray-800">
-                        <span className="text-xs font-bold text-gray-300">{c} County</span>
-                        <div className="flex items-center gap-2">
-                          <input 
-                            type="number" 
-                            placeholder={countyOverrides[c] !== undefined ? countyOverrides[c].toString() : baseTransportFee.toString()}
-                            id={`override_${c}`}
-                            className="w-24 bg-white text-black font-bold px-3 py-1.5 rounded-lg text-xs outline-none"
-                          />
-                          <button onClick={async () => {
-                            const feeVal = Number((document.getElementById(`override_${c}`) as HTMLInputElement)?.value);
-                            if (isNaN(feeVal)) return;
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
+                <h3 className="font-bold text-sm text-white uppercase tracking-wider mb-1">Kenya 47 Counties Regional Overrides Matrix</h3>
+                <p className="text-xs text-gray-400 mb-6">Assign specific transport shipping rates for each county in Kenya.</p>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-96 overflow-y-auto pr-2">
+                  {ALL_47_COUNTIES.map(c => (
+                    <div key={c} className="flex justify-between items-center bg-[#1c1c1c] p-3 rounded-2xl border border-gray-800/80">
+                      <span className="text-xs text-gray-300 font-bold">{c}</span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-gray-500 font-mono">KES</span>
+                        <input 
+                          type="number" 
+                          value={countyOverrides[c] !== undefined ? countyOverrides[c] : baseTransportFee} 
+                          onChange={e => {
+                            const val = Number(e.target.value);
+                            setCountyOverrides({...countyOverrides, [c]: val});
+                          }}
+                          onBlur={async (e) => {
+                            const val = Number(e.target.value);
                             try {
-                              const res = await fetch(`${API_BASE_URL}/admin/config/county-fee`, {
+                              const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                body: JSON.stringify({ county: c, fee: feeVal })
+                                body: JSON.stringify({ county: c, fee: val })
                               });
                               if (res.ok) {
-                                setCountyOverrides(prev => ({ ...prev, [c]: feeVal }));
-                                showToast(`Transport fee for ${c} updated to KES ${feeVal}`, 'success');
+                                showToast(`Updated ${c} delivery rate to KES ${val}`, 'success');
                               } else {
-                                showToast('Failed to update county fee', 'error');
+                                showToast(`Failed to update ${c} rate`, 'error');
                               }
-                            } catch(e) { showToast('Network error', 'error'); }
-                          }} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Save</button>
-                        </div>
+                            } catch (err) {
+                              showToast(`Network error updating ${c} rate`, 'error');
+                            }
+                          }}
+                          className="w-16 bg-white text-black border border-gray-400 rounded-lg px-2 py-1 text-xs text-right font-mono font-bold outline-none focus:border-emerald-500"
+                        />
                       </div>
-                    ))}
-                    <p className="text-[10px] text-gray-500 text-center italic mt-2">Showing key counties. All 47 counties supported via backend dispatch engine.</p>
-                  </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -1769,28 +1808,22 @@ export default function PremiumRiceStore() {
 
           {adminTab === 'logs' && (
             <div className="animate-fadeIn space-y-6">
-              <div className="flex justify-between items-center border-b border-gray-800 pb-6">
-                <div>
-                  <h2 className="text-2xl font-black text-white">System & Database Audit Logs</h2>
-                  <p className="text-gray-400 text-xs mt-1">Real-time security logs, login activities, and database mutations.</p>
-                </div>
-                <button onClick={fetchAdminLogs} className="bg-gray-800 hover:bg-gray-700 text-gray-200 px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center">
-                  <RefreshCw size={14} className="mr-2" /> Refresh Logs
-                </button>
+              <div>
+                <h2 className="text-2xl font-black text-white">System Logs & Audit Trail</h2>
+                <p className="text-gray-400 text-xs mt-1">Real-time database writes, administrative actions, and security events.</p>
               </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 font-mono text-xs overflow-x-auto space-y-2">
+              
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 font-mono text-xs space-y-2.5 max-h-[600px] overflow-y-auto">
                 {adminLogs.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500 font-sans">No audit log entries recorded or access restricted.</div>
-                ) : (
-                  adminLogs.map((log: any, idx: number) => (
-                    <div key={idx} className="p-3 bg-[#1a1a1a] rounded-xl border border-gray-800/80 flex items-start gap-3">
-                      <span className="text-emerald-400 font-bold shrink-0">[{new Date(log.createdAt || Date.now()).toLocaleTimeString()}]</span>
-                      <span className="text-gray-300 flex-1">{log.action || log.message || JSON.stringify(log)}</span>
-                      <span className="text-gray-500 text-[10px] shrink-0">{log.ipAddress || log.user || 'System'}</span>
-                    </div>
-                  ))
-                )}
+                  <div className="text-gray-500 py-6 text-center">No audit logs recorded in system ledger yet.</div>
+                ) : adminLogs.map(log => (
+                  <div key={log.id} className="flex items-start gap-3 text-gray-300 bg-[#1a1a1a] p-3.5 rounded-xl border border-gray-800/60">
+                    <span className="text-emerald-500 font-bold">[{log.action}]</span>
+                    <span className="text-gray-400">{new Date(log.createdAt).toLocaleTimeString()}</span>
+                    <span className="text-gray-200 flex-1">Admin {log.Admin?.fullName || `#${log.adminId}`} modified {log.targetType} #{log.targetId}</span>
+                    <span className="text-gray-500 text-[10px]">{log.ipAddress}</span>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -1799,11 +1832,15 @@ export default function PremiumRiceStore() {
     );
   };
 
-  // ==========================================
-  // 7. MAIN RENDER WRAPPER
-  // ==========================================
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col font-sans selection:bg-emerald-500 selection:text-white">
+    <div className="min-h-screen bg-gray-50 font-sans flex flex-col selection:bg-emerald-200 selection:text-emerald-900">
+      {toast && (
+        <div className={`fixed top-24 right-4 sm:right-8 z-50 px-6 py-4 rounded-2xl shadow-2xl font-bold text-sm flex items-center transform transition-all duration-300 animate-fadeIn ${toast.type === 'error' ? 'bg-rose-500 text-white' : 'bg-emerald-600 text-white'}`}>
+          {toast.type === 'error' ? <AlertCircle className="mr-3 h-5 w-5 shrink-0" /> : <CheckCircle className="mr-3 h-5 w-5 shrink-0" />}
+          {toast.message}
+        </div>
+      )}
+
       {renderNav()}
 
       <main className="flex-1">
@@ -1811,57 +1848,22 @@ export default function PremiumRiceStore() {
         {view === 'shop' && renderShop()}
         {view === 'cart' && renderCart()}
         {view === 'login' && renderAuth()}
-        {view === 'profile' && renderProfile()}
         {view === 'admin' && renderAdmin()}
+        {view === 'profile' && renderProfile()}
       </main>
 
-      {/* Toast Notification Banner */}
-      {toast && (
-        <div className="fixed bottom-6 right-6 z-50 animate-bounce">
-          <div className={`px-6 py-4 rounded-2xl shadow-2xl font-bold text-sm flex items-center gap-3 border ${
-            toast.type === 'error' 
-              ? 'bg-rose-950 text-rose-200 border-rose-500/50' 
-              : 'bg-emerald-950 text-emerald-200 border-emerald-500/50'
-          }`}>
-            {toast.type === 'error' ? <AlertCircle className="h-5 w-5 text-rose-400 shrink-0" /> : <CheckCircle className="h-5 w-5 text-emerald-400 shrink-0" />}
-            <span>{toast.message}</span>
+      <footer className="bg-emerald-950 text-emerald-100 py-12 border-t border-emerald-900 mt-auto">
+        <div className="max-w-7xl mx-auto px-4 text-center">
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <Leaf className="h-6 w-6 text-emerald-400" />
+            <span className="font-black text-xl tracking-tight text-white">MWEA HUB</span>
           </div>
-        </div>
-      )}
-
-      {/* Footer */}
-      <footer className="bg-emerald-950 text-emerald-300 py-12 px-4 border-t border-emerald-900 mt-20">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
-          <div>
-            <div className="flex items-center space-x-2 mb-4">
-              <Leaf className="h-6 w-6 text-emerald-400" />
-              <span className="font-black text-xl text-white">MWEA HUB</span>
-            </div>
-            <p className="text-xs text-emerald-400/80 leading-relaxed font-medium">Direct agricultural logistics connecting Mwea paddy fields directly to households and wholesale markets across all 47 Kenyan counties.</p>
+          <p className="text-xs text-emerald-300 max-w-md mx-auto leading-relaxed">
+            Premium Agricultural Grain E-Commerce Infrastructure. Direct logistics across all 47 Counties in Kenya. Powered by relational database backends and real-time websockets.
+          </p>
+          <div className="mt-8 pt-6 border-t border-emerald-900/80 text-[11px] text-emerald-500 font-mono">
+            © {new Date().getFullYear()} MWEA HUB / RICEDIRECT • ALL RIGHTS RESERVED
           </div>
-          <div>
-            <h4 className="font-bold text-white mb-3 text-sm uppercase tracking-wider">Grain Catalog</h4>
-            <ul className="space-y-2 text-xs text-emerald-400/80 font-medium">
-              <li><button onClick={() => setView('shop')} className="hover:text-white transition-colors">Grade 1 Aromatic Pishori</button></li>
-              <li><button onClick={() => setView('shop')} className="hover:text-white transition-colors">Basmati Special Sacks</button></li>
-              <li><button onClick={() => setView('shop')} className="hover:text-white transition-colors">Wholesale Paddy Bags</button></li>
-            </ul>
-          </div>
-          <div>
-            <h4 className="font-bold text-white mb-3 text-sm uppercase tracking-wider">Logistics & Support</h4>
-            <ul className="space-y-2 text-xs text-emerald-400/80 font-medium">
-              <li><button onClick={() => setView('cart')} className="hover:text-white transition-colors">M-Pesa STK Push Checkout</button></li>
-              <li><button onClick={() => setView('profile')} className="hover:text-white transition-colors">Live Order Tracking</button></li>
-              <li><span className="text-emerald-400">Support Hotline: +254 700 000000</span></li>
-            </ul>
-          </div>
-          <div>
-            <h4 className="font-bold text-white mb-3 text-sm uppercase tracking-wider">Compliance & Security</h4>
-            <p className="text-xs text-emerald-400/80 leading-relaxed font-medium">Secured with end-to-end audit logging, JWT authentication, and direct Safaricom M-Pesa API integration.</p>
-          </div>
-        </div>
-        <div className="max-w-7xl mx-auto pt-8 border-t border-emerald-900/60 text-center text-xs text-emerald-500 font-medium">
-          &copy; {new Date().getFullYear()} Mwea Hub Direct Rice Logistics. All rights reserved.
         </div>
       </footer>
     </div>
