@@ -30,21 +30,23 @@ const port = parseInt(process.env.PORT || '5000', 10);
 const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
 
 // Resend Email Client Initialization
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = new Resend(process.env.RESEND_API_KEY || 're_dR7G9AZb_MQdHKVHqAj44JSQF6gxZmEab');
 
-// Pay Hero Credentials Configuration (Cleaned to prevent 401 newline string corruption)
+// Pay Hero Credentials Configuration (Cleaned to prevent 401 string corruption)
 const getPayHeroAuthHeader = () => {
   if (process.env.PAYHERO_BASIC_AUTH) {
-    const cleanAuth = process.env.PAYHERO_BASIC_AUTH.replace(/[\r\n\s]+/g, '');
-    return cleanAuth.startsWith('Basic ') ? cleanAuth : `Basic ${cleanAuth}`;
+    const cleanAuth = process.env.PAYHERO_BASIC_AUTH.replace(/[\r\n]+/g, '').trim();
+    return cleanAuth.startsWith('Basic ') ? cleanAuth : `Basic ${cleanAuth.replace(/^Basic/i, '').trim()}`;
   }
   if (process.env.PAYHERO_API_KEY && process.env.PAYHERO_API_SECRET) {
     const creds = `${process.env.PAYHERO_API_KEY.trim()}:${process.env.PAYHERO_API_SECRET.trim()}`;
     return `Basic ${Buffer.from(creds).toString('base64')}`;
   }
   const fallbackRaw = 'Basic cnBqZHU3YWJyWG03SWdqcDBI\\nBF:NHFvR\\nV32XR99cDq\\nGf3igKB3R0A5vRtgTMJ7Jpfm'
-    .replace(/[\r\n\s]+/g, '');
-  return fallbackRaw.startsWith('Basic') ? fallbackRaw : `Basic ${fallbackRaw}`;
+    .replace(/\\[rn]/g, '')
+    .replace(/[\r\n]+/g, '')
+    .trim();
+  return fallbackRaw.startsWith('Basic ') ? fallbackRaw : `Basic ${fallbackRaw.replace(/^Basic/i, '').trim()}`;
 };
 
 const PAYHERO_CHANNEL_ID = Number(process.env.PAYHERO_CHANNEL_ID || 11668);
@@ -197,12 +199,14 @@ const requireAdmin = async (req, res, next) => {
 async function startServer() {
   try {
     await sequelize.authenticate();
-    await sequelize.sync({ alter: true }); // Added alter: true to fix the missing column issue
+    await sequelize.sync();
     
     const currentMode = process.env.DB_MODE === 'cloud' ? '☁️ AIVEN CLOUD' : '🏠 LOCAL';
     console.log(`🍃 Database Connected Successfully! Mode: [ ${currentMode} ]`);
 
     const expressApp = express();
+    expressApp.set('trust proxy', true); // Trust active proxies (e.g. ngrok) to properly resolve req.protocol to https
+
     const server = createServer(expressApp);
 
     const corsOptions = {
