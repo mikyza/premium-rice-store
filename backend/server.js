@@ -205,7 +205,7 @@ async function startServer() {
     console.log(`🍃 Database Connected Successfully! Mode: [ ${currentMode} ]`);
 
     const expressApp = express();
-    expressApp.set('trust proxy', true); // Trust active proxies (e.g. ngrok) to properly resolve req.protocol to https
+    expressApp.set('trust proxy', true);
 
     const server = createServer(expressApp);
 
