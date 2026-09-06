@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   ShoppingCart, User as UserIcon, LogIn, Menu, X, Plus, 
   Trash2, Shield, Clock, Search, Edit, Package, Activity, 
   CheckCircle, AlertCircle, Settings, Leaf, ChevronRight,
   ShoppingBag, Users, Image as ImageIcon, Video, Download,
-  MapPin, Eye, RefreshCw, LogOut, Check, AlertTriangle, Smartphone, CreditCard
+  MapPin, Eye, RefreshCw, LogOut, Check, AlertTriangle, Smartphone, CreditCard,
+  BarChart2, DollarSign, Award, Calendar
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 
@@ -128,14 +129,17 @@ export default function PremiumRiceStore() {
   const [formData, setFormData] = useState({ phoneNumber: '', email: '', password: '', fullName: '', resetToken: '', newPassword: '' });
   
   // --- Admin Workspace States ---
-  const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'users' | 'carousel' | 'config' | 'logs'>('inventory');
-  const [newProduct, setNewProduct] = useState({ brandName: '', variety: '', weightKg: '', basePrice: '', stockQuantity: '', imageUrl: '' });
+  const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'users' | 'carousel' | 'config' | 'logs' | 'finances'>('inventory');
+  const [newProduct, setNewProduct] = useState({ brandName: '', variety: '', weightKg: '', basePrice: '', costPrice: '', stockQuantity: '', imageUrl: '' });
   const [editingProduct, setEditingProduct] = useState<any | null>(null);
   const [adminOrders, setAdminOrders] = useState<any[]>([]);
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
   const [adminLogs, setAdminLogs] = useState<any[]>([]);
   const [orderSearchQuery, setOrderSearchQuery] = useState('');
   const [shopSearch, setShopSearch] = useState('');
+  
+  // --- Admin Financial State ---
+  const [financeYear, setFinanceYear] = useState<number>(new Date().getFullYear());
 
   // ==========================================
   // ACCOUNT-SCOPED CART LOGIC
@@ -169,6 +173,11 @@ export default function PremiumRiceStore() {
       console.error("Failed to save account cart to storage:", err);
     }
   }, [cart, user]);
+
+  const clearCart = () => {
+    setCart([]);
+    showToast('Cart cleared successfully.', 'success');
+  };
 
   // ==========================================
   // 3. INITIALIZATION & REAL-TIME WEBSOCKETS
@@ -288,7 +297,7 @@ export default function PremiumRiceStore() {
   useEffect(() => {
     if (view === 'profile' && token) fetchMyOrders();
     if (view === 'admin' && token) {
-      if (adminTab === 'orders') fetchAdminOrders();
+      if (adminTab === 'orders' || adminTab === 'finances') fetchAdminOrders();
       if (adminTab === 'users') fetchAdminUsers();
       if (adminTab === 'logs') fetchAdminLogs();
     }
@@ -474,6 +483,20 @@ export default function PremiumRiceStore() {
 
   const cartSubtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const cartTotal = cartSubtotal + (cart.length > 0 ? activeTransportFee : 0);
+
+  // ==========================================
+  // CALCULATE LOYALTY POINTS
+  // ==========================================
+  const totalKgBought = useMemo(() => {
+    return myOrders.reduce((acc, order) => {
+      if (order.status === 'failed' || order.paymentStatus === 'failed') return acc;
+      const orderKg = order.items?.reduce((sum: number, item: any) => {
+         return sum + ((item.weightKg || item.product?.weightKg || 25) * item.quantity);
+      }, 0) || 0;
+      return acc + orderKg;
+    }, 0);
+  }, [myOrders]);
+  const loyaltyPoints = (totalKgBought * 0.2).toFixed(1);
 
   // ==========================================
   // 6. RENDER SUB-COMPONENTS
@@ -824,9 +847,16 @@ export default function PremiumRiceStore() {
 
     return (
       <div className="max-w-7xl mx-auto py-12 px-4 animate-fadeIn">
-        <h1 className="text-3xl sm:text-4xl font-black text-emerald-950 mb-8 flex items-center">
-          <ShoppingBag className="mr-3 h-9 w-9 text-emerald-600" /> Shopping Bag & Checkout
-        </h1>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
+          <h1 className="text-3xl sm:text-4xl font-black text-emerald-950 flex items-center">
+            <ShoppingBag className="mr-3 h-9 w-9 text-emerald-600" /> Shopping Bag
+          </h1>
+          {cart.length > 0 && (
+            <button onClick={clearCart} className="text-rose-500 hover:text-white bg-rose-50 hover:bg-rose-500 border border-rose-100 font-bold flex items-center text-sm px-4 py-2 rounded-xl transition-all shadow-sm">
+              <Trash2 className="h-4 w-4 mr-1.5"/> Clear Entire Cart
+            </button>
+          )}
+        </div>
         
         {cart.length === 0 ? (
           <div className="text-center py-24 bg-white rounded-3xl shadow-sm border border-emerald-100 max-w-2xl mx-auto">
@@ -1204,21 +1234,31 @@ export default function PremiumRiceStore() {
 
   const renderProfile = () => (
     <div className="max-w-5xl mx-auto py-12 px-4 animate-fadeIn">
-      <div className="bg-white rounded-3xl shadow-md border border-emerald-100 p-6 sm:p-8 mb-10 flex flex-col sm:flex-row items-center justify-between gap-6">
-        <div className="flex items-center gap-5 text-center sm:text-left">
+      <div className="bg-white rounded-3xl shadow-md border border-emerald-100 p-6 sm:p-8 mb-10 flex flex-col sm:flex-row items-center justify-between gap-6 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -z-10 opacity-60"></div>
+        <div className="flex items-center gap-5 text-center sm:text-left z-10">
           <div className="bg-emerald-100 w-20 h-20 rounded-full flex items-center justify-center shrink-0 border-2 border-emerald-200">
              <UserIcon className="h-10 w-10 text-emerald-700" />
           </div>
           <div>
             <h1 className="text-2xl sm:text-3xl font-black text-emerald-950">{user?.fullName}</h1>
             <p className="text-gray-500 font-medium text-sm flex items-center justify-center sm:justify-start mt-0.5">
-              <Shield className="h-4 w-4 mr-1 text-emerald-600" /> Account Role: <span className="uppercase font-bold text-emerald-700 ml-1">{user?.role}</span> • Phone: {user?.phoneNumber}
+              <Shield className="h-4 w-4 mr-1 text-emerald-600" /> Role: <span className="uppercase font-bold text-emerald-700 ml-1">{user?.role}</span> • Phone: {user?.phoneNumber}
             </p>
           </div>
         </div>
-        <button onClick={fetchMyOrders} className="flex items-center bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2.5 rounded-xl text-xs font-bold transition-all">
-          <RefreshCw className="h-4 w-4 mr-2" /> Refresh Orders
-        </button>
+        <div className="flex flex-col items-center sm:items-end gap-3 z-10">
+          <div className="bg-amber-100 border border-amber-300 text-amber-800 px-4 py-2 rounded-xl flex items-center shadow-sm">
+            <Award className="h-5 w-5 mr-2" />
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-wider">Loyalty Points</div>
+              <div className="font-black text-lg leading-none">{loyaltyPoints} PTS</div>
+            </div>
+          </div>
+          <button onClick={fetchMyOrders} className="flex items-center text-emerald-600 hover:text-emerald-800 px-2 py-1 text-xs font-bold transition-all">
+            <RefreshCw className="h-4 w-4 mr-1" /> Refresh Orders
+          </button>
+        </div>
       </div>
       
       <div className="bg-white rounded-3xl shadow-md border border-emerald-100 overflow-hidden">
@@ -1235,20 +1275,22 @@ export default function PremiumRiceStore() {
           ) : (
             <div className="space-y-6">
               {myOrders.map(o => (
-                <div key={o.id} className="border border-gray-200 rounded-2xl p-5 hover:border-emerald-300 transition-all bg-gray-50/50">
+                <div key={o.id} className={`border rounded-2xl p-5 transition-all ${o.paymentStatus === 'failed' ? 'bg-rose-50/30 border-rose-200' : 'bg-gray-50/50 border-gray-200 hover:border-emerald-300'}`}>
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-200/80 pb-4 mb-4">
                     <div>
                       <span className="font-mono font-black text-emerald-950 text-base">ORDER #{o.id}</span>
                       <span className="text-xs text-gray-400 font-medium block sm:inline sm:ml-3">{new Date(o.createdAt).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</span>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
-                        o.status === 'completed' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
-                        o.status === 'dispatched' ? 'bg-blue-100 text-blue-800 border border-blue-300' :
-                        o.status === 'processing' ? 'bg-amber-100 text-amber-800 border border-amber-300' :
-                        'bg-gray-200 text-gray-700'
+                      <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                        o.paymentStatus === 'failed' ? 'bg-rose-100 text-rose-800 border-rose-300' :
+                        (o.status === 'pending' && o.paymentStatus === 'paid') ? 'bg-blue-100 text-blue-800 border-blue-300' :
+                        o.status === 'completed' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
+                        o.status === 'dispatched' ? 'bg-indigo-100 text-indigo-800 border-indigo-300' :
+                        o.status === 'processing' ? 'bg-amber-100 text-amber-800 border-amber-300' :
+                        'bg-gray-200 text-gray-700 border-gray-300'
                       }`}>
-                        ● {o.status}
+                        ● {o.paymentStatus === 'failed' ? 'PAYMENT FAILED' : (o.status === 'pending' && o.paymentStatus === 'paid' ? 'PAID - WAITING ADMIN' : o.status)}
                       </span>
                       <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
                     </div>
@@ -1269,7 +1311,7 @@ export default function PremiumRiceStore() {
                   <div className="space-y-1.5 text-xs">
                     {o.items?.map((item: any, i: number) => (
                       <div key={i} className="flex justify-between text-gray-700 bg-white px-3 py-2 rounded-lg border border-gray-100 font-medium">
-                        <span>{item.quantity}x {item.name}</span>
+                        <span>{item.quantity}x {item.name || item.product?.variety}</span>
                         <span className="font-bold">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
                       </div>
                     ))}
@@ -1280,8 +1322,8 @@ export default function PremiumRiceStore() {
           )}
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderAdmin = () => {
     if (user?.role !== 'admin') {
@@ -1299,6 +1341,7 @@ export default function PremiumRiceStore() {
     const tabsList = [
       { id: 'inventory', icon: <Package size={18}/>, label: 'Grain Catalog' },
       { id: 'orders', icon: <ShoppingBag size={18}/>, label: 'Logistics & Orders' },
+      { id: 'finances', icon: <BarChart2 size={18}/>, label: 'Financial Dashboard' },
       { id: 'users', icon: <Users size={18}/>, label: 'User Clearance' },
       { id: 'carousel', icon: <ImageIcon size={18}/>, label: 'Hero Config' },
       { id: 'config', icon: <Settings size={18}/>, label: 'Counties & Engine' },
@@ -1307,8 +1350,9 @@ export default function PremiumRiceStore() {
 
     return (
       <div className="flex flex-col md:flex-row min-h-[calc(100vh-80px)] bg-[#0a0a0a] text-white font-sans animate-fadeIn">
-        <aside className="w-full md:w-64 bg-[#111] border-b md:border-b-0 md:border-r border-gray-800/80 flex flex-col shrink-0">
-          <div className="p-5 border-b border-gray-800/60 hidden md:block">
+        {/* Fixed admin sidebar using sticky positioning on desktop */}
+        <aside className="w-full md:w-64 bg-[#111] border-b md:border-b-0 md:border-r border-gray-800/80 flex flex-col shrink-0 md:sticky md:top-20 md:h-[calc(100vh-80px)] overflow-y-auto">
+          <div className="p-5 border-b border-gray-800/60 hidden md:block shrink-0">
             <div className="flex items-center gap-3 bg-[#181818] border border-gray-800 p-3 rounded-2xl">
               <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold">
                 <Shield size={20}/>
@@ -1320,7 +1364,7 @@ export default function PremiumRiceStore() {
             </div>
           </div>
 
-          <nav className="p-3 md:p-4 flex flex-row md:flex-col gap-1.5 overflow-x-auto md:overflow-x-visible shrink-0">
+          <nav className="p-3 md:p-4 flex flex-row md:flex-col gap-1.5 overflow-x-auto md:overflow-x-visible shrink-0 flex-1">
             {tabsList.map(tab => {
               const isActive = adminTab === tab.id;
               return (
@@ -1365,12 +1409,13 @@ export default function PremiumRiceStore() {
                         weightKg: Number(newProduct.weightKg),
                         basePrice: Number(newProduct.basePrice),
                         price: Number(newProduct.basePrice),
+                        costPrice: Number(newProduct.costPrice),
                         stockQuantity: Number(newProduct.stockQuantity)
                       })
                     });
                     if (res.ok) {
                       showToast('New grain product initialized in database!', 'success');
-                      setNewProduct({ brandName: '', variety: '', weightKg: '', basePrice: '', stockQuantity: '', imageUrl: '' });
+                      setNewProduct({ brandName: '', variety: '', weightKg: '', basePrice: '', costPrice: '', stockQuantity: '', imageUrl: '' });
                       fetchProducts();
                     } else {
                       const errData = await res.json();
@@ -1381,9 +1426,10 @@ export default function PremiumRiceStore() {
                   <input required type="text" placeholder="Brand (e.g. Mwea Pishori)" value={newProduct.brandName} onChange={e=>setNewProduct({...newProduct, brandName:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
                   <input required type="text" placeholder="Variety (e.g. Grade 1 Aromatic)" value={newProduct.variety} onChange={e=>setNewProduct({...newProduct, variety:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
                   <input required type="number" placeholder="Weight (Kg)" value={newProduct.weightKg} onChange={e=>setNewProduct({...newProduct, weightKg:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
-                  <input required type="number" placeholder="Base Price (KES)" value={newProduct.basePrice} onChange={e=>setNewProduct({...newProduct, basePrice:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
+                  <input required type="number" placeholder="Cost/Buying Price (KES)" value={newProduct.costPrice} onChange={e=>setNewProduct({...newProduct, costPrice:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
+                  <input required type="number" placeholder="Selling Price (KES)" value={newProduct.basePrice} onChange={e=>setNewProduct({...newProduct, basePrice:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
                   <input required type="number" placeholder="Stock Quantity (Bags)" value={newProduct.stockQuantity} onChange={e=>setNewProduct({...newProduct, stockQuantity:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
-                  <input type="text" placeholder="Image URL (http://...)" value={newProduct.imageUrl} onChange={e=>setNewProduct({...newProduct, imageUrl:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 font-mono placeholder-gray-500" />
+                  <input type="text" placeholder="Image URL (http://...)" value={newProduct.imageUrl} onChange={e=>setNewProduct({...newProduct, imageUrl:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 font-mono placeholder-gray-500 md:col-span-2" />
                   <button type="submit" className="bg-emerald-600 text-white px-6 py-3.5 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all md:col-span-3">Commit Product to Database</button>
                 </form>
               </div>
@@ -1395,11 +1441,30 @@ export default function PremiumRiceStore() {
                     <button onClick={() => setEditingProduct(null)} className="text-gray-400 hover:text-white"><X size={18}/></button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                    <input type="text" value={editingProduct.brandName} onChange={e=>setEditingProduct({...editingProduct, brandName:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                    <input type="text" value={editingProduct.variety} onChange={e=>setEditingProduct({...editingProduct, variety:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                    <input type="number" value={editingProduct.basePrice} onChange={e=>setEditingProduct({...editingProduct, basePrice:Number(e.target.value), price:Number(e.target.value)})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                    <input type="number" value={editingProduct.stockQuantity} onChange={e=>setEditingProduct({...editingProduct, stockQuantity:Number(e.target.value)})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                    <input type="text" placeholder="Image URL" value={editingProduct.imageUrl || ''} onChange={e=>setEditingProduct({...editingProduct, imageUrl:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono md:col-span-2" />
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Brand Name</label>
+                      <input type="text" value={editingProduct.brandName} onChange={e=>setEditingProduct({...editingProduct, brandName:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Variety</label>
+                      <input type="text" value={editingProduct.variety} onChange={e=>setEditingProduct({...editingProduct, variety:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Buying/Cost Price</label>
+                      <input type="number" value={editingProduct.costPrice || ''} onChange={e=>setEditingProduct({...editingProduct, costPrice:Number(e.target.value)})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Selling Price</label>
+                      <input type="number" value={editingProduct.basePrice} onChange={e=>setEditingProduct({...editingProduct, basePrice:Number(e.target.value), price:Number(e.target.value)})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Stock Inventory</label>
+                      <input type="number" value={editingProduct.stockQuantity} onChange={e=>setEditingProduct({...editingProduct, stockQuantity:Number(e.target.value)})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Image URL</label>
+                      <input type="text" placeholder="Image URL" value={editingProduct.imageUrl || ''} onChange={e=>setEditingProduct({...editingProduct, imageUrl:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
                   </div>
                   <button onClick={async () => {
                     try {
@@ -1428,7 +1493,8 @@ export default function PremiumRiceStore() {
                       <tr>
                         <th className="px-6 py-4">ID</th>
                         <th className="px-6 py-4">Brand & Variety</th>
-                        <th className="px-6 py-4">Price (KES)</th>
+                        <th className="px-6 py-4">Buying Price</th>
+                        <th className="px-6 py-4">Selling Price</th>
                         <th className="px-6 py-4">Stock Matrix</th>
                         <th className="px-6 py-4 text-center">Controls</th>
                       </tr>
@@ -1438,6 +1504,7 @@ export default function PremiumRiceStore() {
                         <tr key={p.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
                           <td className="px-6 py-4 font-mono text-gray-500">#{p.id}</td>
                           <td className="px-6 py-4 font-bold text-gray-200">{p.brandName} - <span className="text-gray-400 font-normal">{p.variety} ({p.weightKg}kg)</span></td>
+                          <td className="px-6 py-4 font-bold font-mono text-gray-400">KES {p.costPrice?.toLocaleString() || '---'}</td>
                           <td className="px-6 py-4 font-bold font-mono text-emerald-400">KES {p.price?.toLocaleString()}</td>
                           <td className="px-6 py-4">
                             <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black border font-mono ${
@@ -1473,6 +1540,101 @@ export default function PremiumRiceStore() {
             </div>
           )}
 
+          {adminTab === 'finances' && (() => {
+            const currentYear = new Date().getFullYear();
+            const monthlyRevenue = Array(12).fill(0);
+            const monthlyProfit = Array(12).fill(0);
+            let totalYearlyRevenue = 0;
+            let totalYearlyProfit = 0;
+
+            adminOrders.forEach(order => {
+               if (order.status !== 'failed' && order.paymentStatus !== 'failed') {
+                   const d = new Date(order.createdAt);
+                   if (d.getFullYear() === financeYear) {
+                       totalYearlyRevenue += (order.grandTotal || 0);
+                       const profit = order.items?.reduce((sum: number, item: any) => {
+                           const cost = item.product?.costPrice || item.costPrice || (item.priceAtPurchase * 0.75); // Fallback to 25% margin if unknown
+                           return sum + ((item.priceAtPurchase - cost) * item.quantity);
+                       }, 0) || 0;
+                       
+                       totalYearlyProfit += profit;
+                       monthlyRevenue[d.getMonth()] += (order.grandTotal || 0);
+                       monthlyProfit[d.getMonth()] += profit;
+                   }
+               }
+            });
+
+            const maxMonthValue = Math.max(...monthlyRevenue, 1);
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+            return (
+              <div className="animate-fadeIn space-y-6">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-800 pb-6">
+                  <div>
+                    <h2 className="text-2xl font-black text-white flex items-center"><DollarSign className="mr-3 text-emerald-500 h-7 w-7"/> Financial Overview</h2>
+                    <p className="text-gray-400 text-xs mt-1">Track actual money paid, logistics revenue, and expected net profit based on buying/selling prices.</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Calendar className="text-gray-500 h-5 w-5" />
+                    <select 
+                      value={financeYear} 
+                      onChange={(e) => setFinanceYear(Number(e.target.value))}
+                      className="bg-[#141414] text-white border border-gray-700 rounded-xl px-4 py-2 font-black text-sm outline-none focus:border-emerald-500 cursor-pointer"
+                    >
+                      {[currentYear - 2, currentYear - 1, currentYear, currentYear + 1].map(y => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-6 opacity-10"><DollarSign size={64} className="text-emerald-500" /></div>
+                    <h3 className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-2">Total Gross Revenue ({financeYear})</h3>
+                    <div className="text-4xl font-black font-mono text-white mb-1">KES {totalYearlyRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                    <div className="text-[10px] text-gray-500 font-bold">Includes products + logistics fees of paid/completed orders.</div>
+                  </div>
+                  <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-6 opacity-10"><BarChart2 size={64} className="text-emerald-500" /></div>
+                    <h3 className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-2">Expected Product Profit ({financeYear})</h3>
+                    <div className="text-4xl font-black font-mono text-emerald-400 mb-1">KES {totalYearlyProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                    <div className="text-[10px] text-gray-500 font-bold">Calculated from (Selling Price - Buying Price) * Quantity.</div>
+                  </div>
+                </div>
+
+                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                  <h3 className="text-sm text-gray-300 font-bold uppercase tracking-wider mb-8">Sales & Profit Growth Graph</h3>
+                  <div className="h-64 flex items-end justify-between gap-2 px-2">
+                    {months.map((month, idx) => {
+                       const revHeight = Math.max((monthlyRevenue[idx] / maxMonthValue) * 100, 0);
+                       const profHeight = Math.max((monthlyProfit[idx] / maxMonthValue) * 100, 0);
+                       return (
+                         <div key={month} className="flex flex-col items-center justify-end h-full w-full group relative">
+                           {monthlyRevenue[idx] > 0 && (
+                             <div className="absolute bottom-full mb-2 bg-[#222] text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10 border border-gray-700">
+                               Rev: KES {monthlyRevenue[idx].toLocaleString()}<br/>
+                               Prof: KES {monthlyProfit[idx].toLocaleString()}
+                             </div>
+                           )}
+                           <div className="w-full max-w-[40px] flex items-end justify-center gap-1 h-full">
+                              <div style={{ height: `${revHeight}%` }} className="w-1/2 bg-gray-600 rounded-t-sm transition-all duration-500 min-h-[4px]"></div>
+                              <div style={{ height: `${profHeight}%` }} className="w-1/2 bg-emerald-500 rounded-t-sm transition-all duration-500 min-h-[4px]"></div>
+                           </div>
+                           <div className="text-[10px] text-gray-500 font-bold mt-3 uppercase">{month}</div>
+                         </div>
+                       );
+                    })}
+                  </div>
+                  <div className="flex justify-center items-center gap-6 mt-6 pt-4 border-t border-gray-800 text-[10px] font-bold text-gray-400 uppercase">
+                    <div className="flex items-center"><div className="w-3 h-3 bg-gray-600 rounded-sm mr-2"></div> Gross Revenue</div>
+                    <div className="flex items-center"><div className="w-3 h-3 bg-emerald-500 rounded-sm mr-2"></div> Expected Profit</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {adminTab === 'orders' && (
             <div className="animate-fadeIn space-y-6">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-800 pb-6">
@@ -1507,9 +1669,12 @@ export default function PremiumRiceStore() {
                 {adminOrders.filter(o => !orderSearchQuery || o.id?.toString().includes(orderSearchQuery) || o.county?.toLowerCase().includes(orderSearchQuery.toLowerCase())).map(order => (
                   <div key={order.id} className="border border-gray-800 rounded-3xl p-6 bg-[#141414] flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                     <div>
-                      <div className="flex items-center gap-3 mb-2">
+                      <div className="flex flex-wrap items-center gap-3 mb-2">
                         <span className="font-mono font-black text-white text-base">ORDER #{order.id}</span>
                         <span className="bg-gray-800 text-gray-300 text-[10px] font-black px-2.5 py-1 rounded-md uppercase">{order.paymentMethod}</span>
+                        <span className={`text-[10px] font-black px-2.5 py-1 rounded-md uppercase border ${order.paymentStatus === 'paid' ? 'bg-emerald-950 text-emerald-400 border-emerald-800' : order.paymentStatus === 'failed' ? 'bg-rose-950 text-rose-400 border-rose-800' : 'bg-amber-950 text-amber-400 border-amber-800'}`}>
+                          Payment: {order.paymentStatus || 'UNKNOWN'}
+                        </span>
                       </div>
                       <div className="text-xs text-gray-400 font-medium">{order.User?.fullName} • <span className="text-gray-200">{order.User?.phoneNumber}</span></div>
                       
@@ -1525,38 +1690,41 @@ export default function PremiumRiceStore() {
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-4 md:pt-0 border-gray-800">
+                    <div className="flex flex-col items-end gap-4 w-full md:w-auto justify-between border-t md:border-t-0 pt-4 md:pt-0 border-gray-800">
                       <div className="text-right">
                         <span className="text-[10px] text-gray-500 uppercase block font-bold">Grand Total</span>
                         <span className="font-mono font-black text-lg text-emerald-400">KES {order.grandTotal?.toLocaleString()}</span>
                       </div>
                       
-                      <select 
-                        value={order.status} 
-                        onChange={async (e) => {
-                          const newStatus = e.target.value;
-                          try {
-                            const res = await fetch(`${API_BASE_URL}/admin/orders/${order.id}/status`, {
-                              method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                              body: JSON.stringify({ status: newStatus })
-                            });
-                            if (res.ok) {
-                              showToast(`Order #${order.id} updated to ${newStatus}`, 'success');
-                              fetchAdminOrders();
-                            } else {
-                              showToast('Failed to update order status', 'error');
+                      <div className="flex flex-col items-end gap-1 w-full sm:w-auto">
+                        <label className="text-[10px] font-black uppercase text-gray-500">Update Order Status</label>
+                        <select 
+                          value={order.status} 
+                          onChange={async (e) => {
+                            const newStatus = e.target.value;
+                            try {
+                              const res = await fetch(`${API_BASE_URL}/admin/orders/${order.id}/status`, {
+                                method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                body: JSON.stringify({ status: newStatus })
+                              });
+                              if (res.ok) {
+                                showToast(`Order #${order.id} updated to ${newStatus}`, 'success');
+                                fetchAdminOrders();
+                              } else {
+                                showToast('Failed to update order status', 'error');
+                              }
+                            } catch (err) {
+                              showToast('Network error updating order status', 'error');
                             }
-                          } catch (err) {
-                            showToast('Network error updating order status', 'error');
-                          }
-                        }}
-                        className="bg-white text-black border-2 border-gray-300 rounded-xl px-4 py-2.5 text-xs outline-none font-black cursor-pointer"
-                      >
-                        <option value="pending">🟡 Pending</option>
-                        <option value="processing">🟠 Processing</option>
-                        <option value="dispatched">🔵 Dispatched</option>
-                        <option value="completed">🟢 Completed</option>
-                      </select>
+                          }}
+                          className="w-full bg-white text-black border-2 border-gray-300 rounded-xl px-4 py-2.5 text-xs outline-none font-black cursor-pointer"
+                        >
+                          <option value="pending">🟡 Pending (Waiting Confirmation)</option>
+                          <option value="processing">🟠 Processing (Packing)</option>
+                          <option value="dispatched">🔵 Dispatched (On Transit)</option>
+                          <option value="completed">🟢 Completed (Delivered)</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1659,39 +1827,33 @@ export default function PremiumRiceStore() {
                     </div>
                   </div>
 
-                  <div className="pt-4 border-t border-gray-800">
-                    <h4 className="text-xs text-emerald-400 font-bold mb-3 uppercase tracking-wider">Video Assets (Max 2 - Displays for 5s each)</h4>
+                  <div className="border-t border-gray-800 pt-4 mt-2">
+                    <label className="text-[11px] text-emerald-500 uppercase font-bold block mb-2">Video URLs (Cycles every 5s)</label>
                     <div className="space-y-3">
-                      <input type="text" placeholder="YouTube Embed URL 1" value={heroSettings.video1} onChange={e => setHeroSettings({...heroSettings, video1: e.target.value})} className="w-full bg-white text-black font-mono border border-gray-300 rounded-xl px-4 py-2.5 text-xs outline-none focus:border-emerald-500" />
-                      <input type="text" placeholder="YouTube Embed URL 2" value={heroSettings.video2} onChange={e => setHeroSettings({...heroSettings, video2: e.target.value})} className="w-full bg-white text-black font-mono border border-gray-300 rounded-xl px-4 py-2.5 text-xs outline-none focus:border-emerald-500" />
+                      <input type="text" placeholder="Video URL 1 (YouTube embed / direct mp4)" value={heroSettings.video1} onChange={e => setHeroSettings({...heroSettings, video1: e.target.value})} className="w-full bg-[#1a1a1a] text-white border border-gray-700 rounded-xl px-4 py-3 text-xs font-mono outline-none focus:border-emerald-500" />
+                      <input type="text" placeholder="Video URL 2" value={heroSettings.video2} onChange={e => setHeroSettings({...heroSettings, video2: e.target.value})} className="w-full bg-[#1a1a1a] text-white border border-gray-700 rounded-xl px-4 py-3 text-xs font-mono outline-none focus:border-emerald-500" />
                     </div>
                   </div>
 
-                  <div className="pt-4 border-t border-gray-800">
-                    <h4 className="text-xs text-emerald-400 font-bold mb-3 uppercase tracking-wider">Image Assets (Max 3 - Displays for 3-4s each)</h4>
+                  <div className="border-t border-gray-800 pt-4 mt-2">
+                    <label className="text-[11px] text-emerald-500 uppercase font-bold block mb-2">Image URLs (Cycles every 3.5s)</label>
                     <div className="space-y-3">
-                      <input type="text" placeholder="Image URL 1" value={heroSettings.img1} onChange={e => setHeroSettings({...heroSettings, img1: e.target.value})} className="w-full bg-white text-black font-mono border border-gray-300 rounded-xl px-4 py-2.5 text-xs outline-none focus:border-emerald-500" />
-                      <input type="text" placeholder="Image URL 2" value={heroSettings.img2} onChange={e => setHeroSettings({...heroSettings, img2: e.target.value})} className="w-full bg-white text-black font-mono border border-gray-300 rounded-xl px-4 py-2.5 text-xs outline-none focus:border-emerald-500" />
-                      <input type="text" placeholder="Image URL 3" value={heroSettings.img3} onChange={e => setHeroSettings({...heroSettings, img3: e.target.value})} className="w-full bg-white text-black font-mono border border-gray-300 rounded-xl px-4 py-2.5 text-xs outline-none focus:border-emerald-500" />
+                      <input type="text" placeholder="Image URL 1" value={heroSettings.img1} onChange={e => setHeroSettings({...heroSettings, img1: e.target.value})} className="w-full bg-[#1a1a1a] text-white border border-gray-700 rounded-xl px-4 py-3 text-xs font-mono outline-none focus:border-emerald-500" />
+                      <input type="text" placeholder="Image URL 2" value={heroSettings.img2} onChange={e => setHeroSettings({...heroSettings, img2: e.target.value})} className="w-full bg-[#1a1a1a] text-white border border-gray-700 rounded-xl px-4 py-3 text-xs font-mono outline-none focus:border-emerald-500" />
+                      <input type="text" placeholder="Image URL 3" value={heroSettings.img3} onChange={e => setHeroSettings({...heroSettings, img3: e.target.value})} className="w-full bg-[#1a1a1a] text-white border border-gray-700 rounded-xl px-4 py-3 text-xs font-mono outline-none focus:border-emerald-500" />
                     </div>
                   </div>
 
                   <button onClick={async () => {
                     try {
-                      const res = await fetch(`${API_BASE_URL}/admin/config/hero`, {
-                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                      const res = await fetch(`${API_BASE_URL}/admin/hero`, {
+                        method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                         body: JSON.stringify(heroSettings)
                       });
-                      if (res.ok) {
-                        showToast('Hero media array committed and synced!', 'success');
-                      } else {
-                        showToast('Failed to deploy carousel configuration', 'error');
-                      }
-                    } catch (err) {
-                      showToast('Network error while deploying carousel configuration', 'error');
-                    }
-                  }} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-4 rounded-xl font-bold text-sm shadow-lg">
-                    Deploy Carousel Configuration
+                      if (res.ok) showToast('Hero configuration synchronized successfully');
+                    } catch (err) { showToast('Network sync error', 'error'); }
+                  }} className="w-full bg-emerald-600 text-white font-bold py-3.5 rounded-xl mt-4 hover:bg-emerald-500 transition-colors">
+                    Save Hero Media Array
                   </button>
                 </div>
               </div>
@@ -1699,108 +1861,83 @@ export default function PremiumRiceStore() {
           )}
 
           {adminTab === 'config' && (
-            <div className="animate-fadeIn space-y-6 max-w-5xl">
+            <div className="animate-fadeIn space-y-6 max-w-4xl">
               <div>
-                <h2 className="text-2xl font-black text-white">Logistics & Promotional Engine</h2>
-                <p className="text-gray-400 text-xs mt-1">Control Flash Sale timers and assign custom delivery rates across all 47 counties.</p>
+                <h2 className="text-2xl font-black text-white">Logistics & Event Engine</h2>
+                <p className="text-gray-400 text-xs mt-1">Override transport fees by county, and manage scheduled system events (e.g. Flash Sales).</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                  <h3 className="font-bold text-sm text-rose-400 uppercase tracking-wider mb-4">🔥 Flash Harvest Sale Engine</h3>
-                  <p className="text-xs text-gray-400 mb-6">Instantly trigger sitewide discounted pricing via real-time websockets.</p>
-                  {flashSale.active ? (
-                    <button onClick={async () => {
-                      try {
-                        const res = await fetch(`${API_BASE_URL}/admin/config/black-friday`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ active: false }) });
-                        if (res.ok) {
-                          showToast('Flash Sale terminated manually', 'success');
-                        } else {
-                          showToast('Failed to terminate Flash Sale', 'error');
-                        }
-                      } catch (err) {
-                        showToast('Network error while terminating Flash Sale', 'error');
-                      }
-                    }} className="w-full bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-500/40 py-3.5 rounded-2xl text-xs font-black">
-                      Terminate Flash Sale
-                    </button>
-                  ) : (
-                    <button onClick={async () => {
-                      try {
-                        const res = await fetch(`${API_BASE_URL}/admin/config/black-friday`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ active: true, durationHours: 24 }) });
-                        if (res.ok) {
-                          showToast('24H Flash Sale Launched!', 'success');
-                        } else {
-                          showToast('Failed to deploy Flash Sale event', 'error');
-                        }
-                      } catch (err) {
-                        showToast('Network error while deploying Flash Sale', 'error');
-                      }
-                    }} className="w-full bg-rose-600 hover:bg-rose-500 text-white py-3.5 rounded-2xl text-xs font-black shadow-lg shadow-rose-950/50">
-                      Deploy 24-Hour Flash Sale Event
-                    </button>
-                  )}
-                </div>
-
-                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                  <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">🚚 Default Transport Rate</h3>
-                  <p className="text-xs text-gray-400 mb-4">Base shipping fee for counties without custom overrides.</p>
-                  <div className="flex gap-3">
-                    <input type="number" value={baseTransportFee} onChange={e => setBaseTransportFee(Number(e.target.value))} className="w-full bg-white text-black border border-gray-300 rounded-xl px-4 py-3 text-sm font-mono font-bold" />
-                    <button onClick={async () => {
-                      try {
-                        const res = await fetch(`${API_BASE_URL}/admin/config/transport`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ amount: baseTransportFee }) });
-                        if (res.ok) {
-                          showToast('Default transport fee saved', 'success');
-                        } else {
-                          showToast('Failed to save transport fee', 'error');
-                        }
-                      } catch (err) {
-                        showToast('Network error while saving transport fee', 'error');
-                      }
-                    }} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 rounded-xl font-bold text-xs shrink-0">Commit Rate</button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                <h3 className="font-bold text-sm text-white uppercase tracking-wider mb-1">Kenya 47 Counties Regional Overrides Matrix</h3>
-                <p className="text-xs text-gray-400 mb-6">Assign specific transport shipping rates for each county in Kenya.</p>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-96 overflow-y-auto pr-2">
-                  {ALL_47_COUNTIES.map(c => (
-                    <div key={c} className="flex justify-between items-center bg-[#1c1c1c] p-3 rounded-2xl border border-gray-800/80">
-                      <span className="text-xs text-gray-300 font-bold">{c}</span>
-                      <div className="flex items-center gap-1">
-                        <span className="text-[10px] text-gray-500 font-mono">KES</span>
-                        <input 
-                          type="number" 
-                          value={countyOverrides[c] !== undefined ? countyOverrides[c] : baseTransportFee} 
-                          onChange={e => {
-                            const val = Number(e.target.value);
-                            setCountyOverrides({...countyOverrides, [c]: val});
-                          }}
-                          onBlur={async (e) => {
-                            const val = Number(e.target.value);
-                            try {
-                              const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
-                                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                body: JSON.stringify({ county: c, fee: val })
-                              });
-                              if (res.ok) {
-                                showToast(`Updated ${c} delivery rate to KES ${val}`, 'success');
-                              } else {
-                                showToast(`Failed to update ${c} rate`, 'error');
-                              }
-                            } catch (err) {
-                              showToast(`Network error updating ${c} rate`, 'error');
-                            }
-                          }}
-                          className="w-16 bg-white text-black border border-gray-400 rounded-lg px-2 py-1 text-xs text-right font-mono font-bold outline-none focus:border-emerald-500"
-                        />
+                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                   <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-6 flex items-center gap-2">
+                     <Clock size={18}/> Black Friday Event Trigger
+                   </h3>
+                   <div className="space-y-4">
+                      {flashSale.active ? (
+                        <div className="bg-rose-950/30 border border-rose-900/50 p-4 rounded-xl flex items-center justify-between">
+                           <div>
+                             <span className="text-rose-500 font-black text-sm block">EVENT IS ACTIVE</span>
+                             <span className="text-gray-400 text-[10px] font-bold">Ends in approx {Math.floor(flashSale.msRemaining / (1000 * 60 * 60))} hours</span>
+                           </div>
+                           <Activity className="text-rose-500 animate-spin" />
+                        </div>
+                      ) : (
+                        <div className="bg-emerald-950/30 border border-emerald-900/50 p-4 rounded-xl">
+                           <span className="text-emerald-500 font-black text-sm">NO ACTIVE EVENTS</span>
+                        </div>
+                      )}
+                      
+                      <div className="flex gap-3 pt-4 border-t border-gray-800">
+                        <button onClick={async () => {
+                           try {
+                             await fetch(`${API_BASE_URL}/admin/blackfriday/start`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ hours: 48, discountPercentage: 15 }) });
+                             showToast('Flash sale deployed globally', 'success');
+                           } catch (err) {}
+                        }} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl text-xs transition-colors">Start 48H Sale (15%)</button>
+                        
+                        <button onClick={async () => {
+                           try {
+                             await fetch(`${API_BASE_URL}/admin/blackfriday/stop`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+                             showToast('Flash sale forcibly stopped', 'success');
+                           } catch (err) {}
+                        }} className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-bold py-3 rounded-xl text-xs transition-colors" disabled={!flashSale.active}>Force Stop Event</button>
                       </div>
-                    </div>
-                  ))}
+                   </div>
+                </div>
+
+                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl max-h-[500px] flex flex-col">
+                   <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                     <MapPin size={18}/> County Logistics Override
+                   </h3>
+                   <p className="text-[10px] text-gray-500 mb-4">Set exact delivery fees for specific counties. Overrides the base fee.</p>
+                   
+                   <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                     {ALL_47_COUNTIES.map(county => (
+                       <div key={county} className="flex justify-between items-center bg-[#1a1a1a] p-3 rounded-xl border border-gray-800/80">
+                         <span className="text-xs font-bold text-gray-300">{county}</span>
+                         <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono text-gray-500">KES</span>
+                            <input 
+                              type="number" 
+                              value={countyOverrides[county] !== undefined ? countyOverrides[county] : ''}
+                              onChange={(e) => setCountyOverrides({...countyOverrides, [county]: Number(e.target.value)})}
+                              placeholder={baseTransportFee.toString()}
+                              className="w-20 bg-black border border-gray-700 rounded-lg px-2 py-1 text-xs font-mono text-white text-right outline-none focus:border-emerald-500"
+                            />
+                         </div>
+                       </div>
+                     ))}
+                   </div>
+                   
+                   <button onClick={async () => {
+                     try {
+                        await fetch(`${API_BASE_URL}/config/counties`, {
+                          method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                          body: JSON.stringify({ overrides: countyOverrides })
+                        });
+                        showToast('Logistics routing fees updated globally', 'success');
+                     } catch (err) {}
+                   }} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3.5 rounded-xl text-xs mt-4 transition-colors shrink-0 shadow-lg">Save Overrides Config</button>
                 </div>
               </div>
             </div>
@@ -1809,21 +1946,25 @@ export default function PremiumRiceStore() {
           {adminTab === 'logs' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white">System Logs & Audit Trail</h2>
-                <p className="text-gray-400 text-xs mt-1">Real-time database writes, administrative actions, and security events.</p>
+                <h2 className="text-2xl font-black text-white">System Diagnostics & Audit Array</h2>
+                <p className="text-gray-400 text-xs mt-1">Raw console logs for checkout interactions, admin actions, and backend events.</p>
               </div>
-              
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 font-mono text-xs space-y-2.5 max-h-[600px] overflow-y-auto">
-                {adminLogs.length === 0 ? (
-                  <div className="text-gray-500 py-6 text-center">No audit logs recorded in system ledger yet.</div>
-                ) : adminLogs.map(log => (
-                  <div key={log.id} className="flex items-start gap-3 text-gray-300 bg-[#1a1a1a] p-3.5 rounded-xl border border-gray-800/60">
-                    <span className="text-emerald-500 font-bold">[{log.action}]</span>
-                    <span className="text-gray-400">{new Date(log.createdAt).toLocaleTimeString()}</span>
-                    <span className="text-gray-200 flex-1">Admin {log.Admin?.fullName || `#${log.adminId}`} modified {log.targetType} #{log.targetId}</span>
-                    <span className="text-gray-500 text-[10px]">{log.ipAddress}</span>
-                  </div>
-                ))}
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
+                 <div className="bg-[#1a1a1a] p-4 flex justify-between items-center border-b border-gray-800">
+                   <h3 className="font-bold text-sm text-gray-300 flex items-center"><Activity size={16} className="mr-2 text-emerald-500"/> Raw Terminal Stream</h3>
+                   <button onClick={fetchAdminLogs} className="text-xs text-gray-400 hover:text-white flex items-center bg-gray-800 px-3 py-1.5 rounded-lg transition-colors"><RefreshCw size={12} className="mr-1"/> Refresh Log</button>
+                 </div>
+                 <div className="p-4 bg-[#0a0a0a] h-[60vh] overflow-y-auto font-mono text-[10px] sm:text-xs">
+                   {adminLogs.map(log => (
+                     <div key={log.id} className="border-b border-gray-800/50 py-2.5 flex flex-col sm:flex-row gap-2 sm:gap-4 text-gray-300 hover:bg-[#111] px-2 rounded">
+                       <span className="text-gray-600 shrink-0">{new Date(log.createdAt).toISOString()}</span>
+                       <span className={`font-black shrink-0 ${log.action === 'checkout' ? 'text-blue-400' : log.action.includes('admin') ? 'text-rose-400' : 'text-emerald-400'}`}>[{log.action.toUpperCase()}]</span>
+                       <span className="break-all">{log.details}</span>
+                     </div>
+                   ))}
+                   {adminLogs.length === 0 && <div className="text-center text-gray-600 py-10">No diagnostic logs recorded yet.</div>}
+                 </div>
               </div>
             </div>
           )}
@@ -1832,40 +1973,75 @@ export default function PremiumRiceStore() {
     );
   };
 
+  // ==========================================
+  // ROOT RENDER
+  // ==========================================
   return (
-    <div className="min-h-screen bg-gray-50 font-sans flex flex-col selection:bg-emerald-200 selection:text-emerald-900">
+    <div className="min-h-screen bg-emerald-50/30 font-sans selection:bg-emerald-200 selection:text-emerald-900 flex flex-col relative">
+      {renderNav()}
+      
+      {/* Toast Notification Mount */}
       {toast && (
-        <div className={`fixed top-24 right-4 sm:right-8 z-50 px-6 py-4 rounded-2xl shadow-2xl font-bold text-sm flex items-center transform transition-all duration-300 animate-fadeIn ${toast.type === 'error' ? 'bg-rose-500 text-white' : 'bg-emerald-600 text-white'}`}>
-          {toast.type === 'error' ? <AlertCircle className="mr-3 h-5 w-5 shrink-0" /> : <CheckCircle className="mr-3 h-5 w-5 shrink-0" />}
-          {toast.message}
+        <div className="fixed top-24 left-1/2 transform -translate-x-1/2 z-[100] animate-bounce-short pointer-events-none w-[90%] sm:w-auto">
+          <div className={`flex items-center px-6 py-4 rounded-2xl shadow-2xl font-black text-sm tracking-wide border-2 backdrop-blur-md ${toast.type === 'error' ? 'bg-rose-950/90 text-rose-300 border-rose-500/50' : 'bg-emerald-950/90 text-emerald-300 border-emerald-500/50'}`}>
+            {toast.type === 'error' ? <AlertCircle className="mr-3 h-5 w-5" /> : <CheckCircle className="mr-3 h-5 w-5" />}
+            {toast.message}
+          </div>
         </div>
       )}
 
-      {renderNav()}
-
-      <main className="flex-1">
+      {/* Main Content Router */}
+      <div className="flex-1">
         {view === 'home' && renderHome()}
         {view === 'shop' && renderShop()}
         {view === 'cart' && renderCart()}
         {view === 'login' && renderAuth()}
-        {view === 'admin' && renderAdmin()}
         {view === 'profile' && renderProfile()}
-      </main>
+        {view === 'admin' && renderAdmin()}
+      </div>
 
-      <footer className="bg-emerald-950 text-emerald-100 py-12 border-t border-emerald-900 mt-auto">
-        <div className="max-w-7xl mx-auto px-4 text-center">
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <Leaf className="h-6 w-6 text-emerald-400" />
-            <span className="font-black text-xl tracking-tight text-white">MWEA HUB</span>
+      {/* Global Footer (Hidden in Admin for immersive layout) */}
+      {view !== 'admin' && (
+        <footer className="bg-emerald-950 pt-20 pb-10 border-t border-emerald-900 mt-auto">
+          <div className="max-w-7xl mx-auto px-4 grid grid-cols-1 md:grid-cols-4 gap-10 mb-12">
+            <div className="col-span-1 md:col-span-2">
+              <div className="flex items-center group cursor-pointer mb-6" onClick={() => setView('home')}>
+                <Leaf className="h-8 w-8 text-emerald-500 mr-2 transform group-hover:scale-110 transition-transform duration-300" />
+                <span className="font-black text-2xl tracking-tight text-white block leading-none">MWEA HUB</span>
+              </div>
+              <p className="text-emerald-200/60 font-medium text-sm leading-relaxed max-w-sm mb-6">
+                Premium grade Pishori and Basmati, carefully harvested from Kenyan soils and delivered straight to your doorstep through our direct logistics network.
+              </p>
+              <div className="flex space-x-4">
+                 <div className="w-10 h-10 rounded-full bg-emerald-900 flex items-center justify-center text-emerald-400 hover:bg-emerald-800 cursor-pointer transition-colors"><MapPin size={18}/></div>
+                 <div className="w-10 h-10 rounded-full bg-emerald-900 flex items-center justify-center text-emerald-400 hover:bg-emerald-800 cursor-pointer transition-colors"><ShoppingCart size={18}/></div>
+              </div>
+            </div>
+            
+            <div>
+              <h4 className="text-white font-black mb-6 uppercase tracking-widest text-xs">Platform Support</h4>
+              <ul className="space-y-4 text-sm font-medium text-emerald-200/60">
+                <li><button onClick={() => setView('shop')} className="hover:text-emerald-400 transition-colors">Complete Grain Catalog</button></li>
+                <li><button onClick={() => setView('profile')} className="hover:text-emerald-400 transition-colors">Track Your Order</button></li>
+                <li><a href="#" className="hover:text-emerald-400 transition-colors">Logistics & Delivery Regions</a></li>
+                <li><a href="#" className="hover:text-emerald-400 transition-colors">Terms of Trade</a></li>
+              </ul>
+            </div>
+            
+            <div>
+              <h4 className="text-white font-black mb-6 uppercase tracking-widest text-xs">Direct Contact</h4>
+              <ul className="space-y-4 text-sm font-medium text-emerald-200/60">
+                <li className="flex items-start"><MapPin size={16} className="mr-3 mt-0.5 shrink-0 text-emerald-500"/> Mwea Sub-county, Kirinyaga, Kenya</li>
+                <li className="flex items-center"><Smartphone size={16} className="mr-3 shrink-0 text-emerald-500"/> +254 700 000 000</li>
+                <li className="flex items-center"><Leaf size={16} className="mr-3 shrink-0 text-emerald-500"/> support@mweahub.co.ke</li>
+              </ul>
+            </div>
           </div>
-          <p className="text-xs text-emerald-300 max-w-md mx-auto leading-relaxed">
-            Premium Agricultural Grain E-Commerce Infrastructure. Direct logistics across all 47 Counties in Kenya. Powered by relational database backends and real-time websockets.
-          </p>
-          <div className="mt-8 pt-6 border-t border-emerald-900/80 text-[11px] text-emerald-500 font-mono">
-            © {new Date().getFullYear()} MWEA HUB / RICEDIRECT • ALL RIGHTS RESERVED
+          <div className="max-w-7xl mx-auto px-4 text-center border-t border-emerald-900/50 pt-8 text-xs font-bold text-emerald-700 tracking-wider">
+            &copy; {new Date().getFullYear()} MWEA HUB AGRICULTURAL LOGISTICS. ALL RIGHTS RESERVED.
           </div>
-        </div>
-      </footer>
+        </footer>
+      )}
     </div>
   );
 }
