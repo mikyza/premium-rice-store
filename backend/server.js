@@ -89,6 +89,36 @@ import {
   sequelize 
 } from './lib/db.js';
 
+// User Cart Database Model Definition
+const Cart = sequelize.models.Cart || sequelize.define('Cart', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  userId: {
+    type: DataTypes.INTEGER,
+    allowNull: false
+  },
+  productId: {
+    type: DataTypes.INTEGER,
+    allowNull: false
+  },
+  quantity: {
+    type: DataTypes.INTEGER,
+    defaultValue: 1,
+    allowNull: false
+  }
+});
+
+// Setup Model Associations for Cart
+if (Cart && RiceProduct && !Cart.associations.RiceProduct) {
+  Cart.belongsTo(RiceProduct, { foreignKey: 'productId', as: 'product' });
+}
+if (Cart && User && !Cart.associations.User) {
+  Cart.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+}
+
 // ==========================================
 // 3. LIVE FLASH HARVEST SALE ENGINE UTILS
 // ==========================================
@@ -199,6 +229,30 @@ const requireAdmin = async (req, res, next) => {
 async function startServer() {
   try {
     await sequelize.authenticate();
+    
+    // Auto migration checks for dynamic reward points & product buying prices
+    try {
+      const queryInterface = sequelize.getQueryInterface();
+      const userTable = await queryInterface.describeTable('Users');
+      if (!userTable.rewardPoints) {
+        await queryInterface.addColumn('Users', 'rewardPoints', {
+          type: DataTypes.FLOAT,
+          defaultValue: 0,
+          allowNull: false
+        });
+      }
+      const productTable = await queryInterface.describeTable('RiceProducts');
+      if (!productTable.buyingPrice) {
+        await queryInterface.addColumn('RiceProducts', 'buyingPrice', {
+          type: DataTypes.FLOAT,
+          defaultValue: 0,
+          allowNull: true
+        });
+      }
+    } catch (colErr) {
+      console.log('DEBUG: Table column sync verified.');
+    }
+
     await sequelize.sync();
     
     const currentMode = process.env.DB_MODE === 'cloud' ? '☁️ AIVEN CLOUD' : '🏠 LOCAL';
@@ -374,6 +428,7 @@ async function startServer() {
           variety: 'Aromatic Pishori',
           weightKg: 5,
           basePrice: 1250,
+          buyingPrice: 950,
           flashSalePrice: 1100,
           stockQuantity: 150,
           imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=800&q=80',
@@ -384,6 +439,7 @@ async function startServer() {
           variety: 'Long Grain Basmati',
           weightKg: 10,
           basePrice: 2400,
+          buyingPrice: 1800,
           flashSalePrice: 2150,
           stockQuantity: 80,
           imageUrl: 'https://images.unsplash.com/photo-1536304929831-ee1ca9d44906?auto=format&fit=crop&w=800&q=80',
@@ -394,6 +450,7 @@ async function startServer() {
           variety: 'Kaisari Long Grain',
           weightKg: 25,
           basePrice: 5200,
+          buyingPrice: 4000,
           flashSalePrice: 4800,
           stockQuantity: 40,
           imageUrl: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=800&q=80',
@@ -404,6 +461,7 @@ async function startServer() {
           variety: 'Brown Nutritious Rice',
           weightKg: 5,
           basePrice: 1400,
+          buyingPrice: 1050,
           flashSalePrice: 1250,
           stockQuantity: 60,
           imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=800&q=80',
@@ -486,7 +544,7 @@ async function startServer() {
         const newUser = await User.create({ phoneNumber, email, password: hashedPassword, fullName });
         
         const token = jwt.sign({ id: newUser.id, role: newUser.role }, JWT_SECRET, { expiresIn: '7d' });
-        res.status(201).json({ token, user: { id: newUser.id, fullName: newUser.fullName, role: newUser.role } });
+        res.status(201).json({ token, user: { id: newUser.id, fullName: newUser.fullName, role: newUser.role, rewardPoints: newUser.rewardPoints || 0 } });
       } catch (err) { 
         console.error("Signup Error:", err);
         res.status(500).json({ error: err.message || 'Internal server signup failure' }); 
@@ -525,7 +583,7 @@ async function startServer() {
         }
 
         const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-        res.json({ token, user: { id: user.id, fullName: user.fullName, role: user.role, phoneNumber: user.phoneNumber, email: user.email } });
+        res.json({ token, user: { id: user.id, fullName: user.fullName, role: user.role, phoneNumber: user.phoneNumber, email: user.email, rewardPoints: user.rewardPoints || 0 } });
       } catch (err) { 
         console.error("Login Error:", err);
         res.status(500).json({ error: err.message || 'Internal server authentication failure' }); 
@@ -542,22 +600,20 @@ async function startServer() {
 
         const user = await User.findOne({ where: { email } });
         
-        // Prevent email enumeration attacks by returning uniform success
         if (!user) {
           return res.status(200).json({ 
             message: 'If an account with that email exists, a password reset OTP has been sent.' 
           });
         }
 
-        // Generate a 6-digit numeric OTP code
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const tokenExpiration = Date.now() + 10 * 60 * 1000; // Valid for 10 minutes
+        const tokenExpiration = Date.now() + 10 * 60 * 1000;
 
         user.resetToken = otpCode;
         user.resetTokenExpires = tokenExpiration;
         await user.save();
 
-        const emailResponse = await resend.emails.send({
+        await resend.emails.send({
           from: 'Mwea Rice Hub <onboarding@resend.dev>',
           to: user.email,
           subject: 'Your Password Reset OTP Code',
@@ -619,6 +675,114 @@ async function startServer() {
       } catch (err) {
         console.error('❌ Reset Password OTP Error:', err);
         res.status(500).json({ error: 'Internal server error while resetting password' });
+      }
+    });
+
+    // --- USER REWARD POINTS TRACKING ---
+    expressApp.get('/api/user/points', authenticateToken, async (req, res) => {
+      try {
+        const user = await User.findByPk(req.user.id, { attributes: ['id', 'fullName', 'rewardPoints'] });
+        res.json({
+          rewardPoints: user ? user.rewardPoints || 0 : 0,
+          ratePerKg: 0.2
+        });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // ==========================================
+    // USER PERSISTENT CART MANAGEMENT APIs
+    // ==========================================
+    expressApp.get('/api/cart', authenticateToken, async (req, res) => {
+      try {
+        const items = await Cart.findAll({
+          where: { userId: req.user.id },
+          include: [{ model: RiceProduct, as: 'product' }]
+        });
+        
+        let totalKg = 0;
+        const formattedItems = items.map(item => {
+          const p = item.product ? item.product.toJSON() : {};
+          const weight = p.weightKg || 0;
+          const qty = item.quantity || 1;
+          totalKg += weight * qty;
+          let effectivePrice = p.basePrice || p.price || 0;
+          if (flashSaleState && flashSaleState.active && p.flashSalePrice) {
+            effectivePrice = p.flashSalePrice;
+          }
+          return {
+            id: item.id,
+            productId: item.productId,
+            quantity: item.quantity,
+            product: {
+              ...p,
+              price: effectivePrice
+            }
+          };
+        });
+
+        const expectedPoints = Number((totalKg * 0.2).toFixed(2));
+        res.json({ items: formattedItems, totalKg, expectedPoints });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.post('/api/cart/add', authenticateToken, async (req, res) => {
+      try {
+        const { productId, quantity } = req.body || {};
+        const qty = Number(quantity || 1);
+        
+        let cartItem = await Cart.findOne({ where: { userId: req.user.id, productId } });
+        if (cartItem) {
+          cartItem.quantity += qty;
+          await cartItem.save();
+        } else {
+          cartItem = await Cart.create({ userId: req.user.id, productId, quantity: qty });
+        }
+        
+        res.status(201).json({ message: 'Item added to user cart', cartItem });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.put('/api/cart/item/:id', authenticateToken, async (req, res) => {
+      try {
+        const { quantity } = req.body || {};
+        const cartItem = await Cart.findOne({ where: { id: req.params.id, userId: req.user.id } });
+        if (!cartItem) return res.status(404).json({ error: 'Cart item not found' });
+        
+        if (Number(quantity) <= 0) {
+          await cartItem.destroy();
+          return res.json({ message: 'Cart item removed' });
+        }
+        
+        cartItem.quantity = Number(quantity);
+        await cartItem.save();
+        res.json({ message: 'Cart item quantity updated', cartItem });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.delete('/api/cart/item/:id', authenticateToken, async (req, res) => {
+      try {
+        const deleted = await Cart.destroy({ where: { id: req.params.id, userId: req.user.id } });
+        if (!deleted) return res.status(404).json({ error: 'Cart item not found' });
+        res.json({ message: 'Item deleted from cart' });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.delete('/api/cart', authenticateToken, async (req, res) => {
+      try {
+        await Cart.destroy({ where: { userId: req.user.id } });
+        res.json({ message: 'User cart cleared successfully' });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
       }
     });
 
@@ -802,7 +966,7 @@ async function startServer() {
     expressApp.post('/api/payments/stk-push', handleStkPushRequest);
     expressApp.post('/api/payment/stkpush', handleStkPushRequest);
 
-    // --- CREATE ORDER & TRIGGER PAY HERO STK PUSH ---
+    // --- CREATE ORDER, CALCULATE WEIGHT/POINTS & TRIGGER STK PUSH ---
     expressApp.post('/api/orders/create', authenticateToken, async (req, res) => {
       try {
         const { 
@@ -824,6 +988,7 @@ async function startServer() {
         }
 
         let calculatedSubtotal = 0;
+        let totalWeightKg = 0;
         const builtOrderLineItems = [];
 
         for (const item of cartItems) {
@@ -839,6 +1004,9 @@ async function startServer() {
             purchasePrice = product.flashSalePrice;
           }
 
+          const itemKg = (product.weightKg || 0) * item.quantity;
+          totalWeightKg += itemKg;
+
           calculatedSubtotal += (purchasePrice * item.quantity);
           product.stockQuantity -= item.quantity; 
           await product.save();
@@ -848,6 +1016,7 @@ async function startServer() {
             name: `${product.brandName} ${product.variety || ''} (${product.weightKg || 0}kg)`,
             quantity: item.quantity, 
             priceAtPurchase: purchasePrice,
+            buyingPrice: product.buyingPrice || (purchasePrice * 0.75),
             imageUrl: product.imageUrl || product.image || null
           });
           
@@ -880,6 +1049,7 @@ async function startServer() {
         };
 
         const finalOrderTotal = Number(grandTotal || (calculatedSubtotal + activeTransportCharge));
+        const earnedPoints = Number((totalWeightKg * 0.2).toFixed(2));
 
         const generatedOrder = await Order.create({
           userId: req.user.id,
@@ -887,9 +1057,12 @@ async function startServer() {
           transportFee: activeTransportCharge,
           subTotal: calculatedSubtotal,
           grandTotal: finalOrderTotal,
+          totalWeightKg: totalWeightKg,
+          pointsEarned: earnedPoints,
           paymentDetails: { 
             method: paymentMethod || 'mpesa_stk', 
             isPaid: false,
+            paidTag: 'PENDING',
             mpesaNumber: mpesaPhoneNumber || null
           },
           county: county || 'Not Specified', 
@@ -899,6 +1072,9 @@ async function startServer() {
           shippingAddress: fullDeliveryAddress,
           status: 'pending' 
         });
+
+        // Automatically clear user cart in DB after placing order
+        await Cart.destroy({ where: { userId: req.user.id } });
 
         let stkInitiated = false;
         let stkMessage = '';
@@ -951,6 +1127,80 @@ async function startServer() {
       }
     });
 
+    // --- PAY HERO REAL-TIME PAYMENT CHECKING & LIVE TRACKING API ---
+    expressApp.get('/api/payments/payhero/status/:orderId', authenticateToken, async (req, res) => {
+      try {
+        const order = await Order.findByPk(req.params.orderId);
+        if (!order) return res.status(404).json({ error: 'Order not found' });
+
+        const ref = `ORD-${order.id}`;
+        let heroStatusData = null;
+        let failureReason = null;
+        let isSuccess = false;
+
+        try {
+          const response = await axios.get(
+            `https://backend.payhero.co.ke/api/v2/payments?external_reference=${ref}`,
+            { headers: { 'Authorization': getPayHeroAuthHeader() } }
+          );
+          heroStatusData = response.data;
+          
+          const paymentObj = Array.isArray(heroStatusData) ? heroStatusData[0] : (heroStatusData.response || heroStatusData);
+          if (paymentObj) {
+            const rawStatus = String(paymentObj.status || paymentObj.Status || '').toUpperCase();
+            if (rawStatus === 'SUCCESS' || rawStatus === 'PAID') {
+              isSuccess = true;
+            } else if (rawStatus === 'FAILED' || rawStatus === 'CANCELLED' || rawStatus === 'REJECTED') {
+              failureReason = paymentObj.failure_reason || paymentObj.message || paymentObj.ResultDesc || 'Payment failed or cancelled (insufficient balance or wrong PIN)';
+            }
+          }
+        } catch (apiErr) {
+          console.warn(`Pay Hero live status poll warning for Order #${order.id}:`, apiErr.message);
+        }
+
+        if (isSuccess && !order.paymentDetails?.isPaid) {
+          order.paymentDetails = {
+            ...order.paymentDetails,
+            isPaid: true,
+            paidTag: 'PAID',
+            paidAt: new Date()
+          };
+          order.status = 'pending';
+          
+          const totalKg = order.totalWeightKg || 0;
+          const points = Number((totalKg * 0.2).toFixed(2));
+          const user = await User.findByPk(order.userId);
+          if (user && points > 0) {
+            user.rewardPoints = Number(((user.rewardPoints || 0) + points).toFixed(2));
+            await user.save();
+          }
+          await order.save();
+          io.emit('orderStatusUpdated', order);
+        } else if (failureReason) {
+          order.paymentDetails = {
+            ...order.paymentDetails,
+            isPaid: false,
+            paidTag: 'FAILED',
+            failureReason: failureReason
+          };
+          order.status = 'payment_failed';
+          await order.save();
+          io.emit('orderStatusUpdated', order);
+        }
+
+        res.json({
+          orderId: order.id,
+          status: order.status,
+          paymentDetails: order.paymentDetails,
+          totalWeightKg: order.totalWeightKg || 0,
+          pointsEarned: order.pointsEarned || 0,
+          heroData: heroStatusData
+        });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     // --- PAY HERO REAL-TIME PAYMENT CALLBACK / WEBHOOK ---
     expressApp.post('/api/payments/payhero/callback', async (req, res) => {
       try {
@@ -971,19 +1221,39 @@ async function startServer() {
             const isPaymentSuccessful = String(statusStr).toUpperCase() === 'SUCCESS' || body.success === true;
 
             const existingPaymentDetails = order.paymentDetails || {};
-            order.paymentDetails = {
-              ...existingPaymentDetails,
-              isPaid: isPaymentSuccessful,
-              mpesaReceipt: mpesaReceipt,
-              paidAt: isPaymentSuccessful ? new Date() : null,
-              rawCallback: body
-            };
-
+            
             if (isPaymentSuccessful) {
-              order.status = 'paid';
-              console.log(`🎉 Payment VERIFIED for Order #${order.id}. M-Pesa Receipt: ${mpesaReceipt}`);
+              order.status = 'pending'; // Display pending, waiting for admin action
+              order.paymentDetails = {
+                ...existingPaymentDetails,
+                isPaid: true,
+                paidTag: 'PAID',
+                mpesaReceipt: mpesaReceipt,
+                paidAt: new Date(),
+                rawCallback: body
+              };
+
+              // Credit 0.2 points per kg bought to user
+              const totalKg = order.totalWeightKg || 0;
+              const points = Number((totalKg * 0.2).toFixed(2));
+              const user = await User.findByPk(order.userId);
+              if (user && points > 0) {
+                user.rewardPoints = Number(((user.rewardPoints || 0) + points).toFixed(2));
+                await user.save();
+              }
+
+              console.log(`🎉 Payment VERIFIED for Order #${order.id}. Tag: PAID. Waiting for admin status update. M-Pesa Receipt: ${mpesaReceipt}`);
             } else {
-              console.log(`⚠️ Payment FAILED/CANCELLED for Order #${order.id}`);
+              const reason = responseObj.message || responseObj.failure_reason || responseObj.ResultDesc || 'Insufficient balance or user cancelled transaction';
+              order.status = 'payment_failed';
+              order.paymentDetails = {
+                ...existingPaymentDetails,
+                isPaid: false,
+                paidTag: 'FAILED',
+                failureReason: reason,
+                rawCallback: body
+              };
+              console.log(`⚠️ Payment FAILED/CANCELLED for Order #${order.id}. Reason: ${reason}`);
             }
 
             await order.save();
@@ -1009,9 +1279,97 @@ async function startServer() {
     });
 
     // ==========================================
-    // 7. SECURE ADMINISTRATIVE ENGINE
+    // 7. SECURE ADMINISTRATIVE ENGINE & ANALYTICS
     // ==========================================
     
+    // --- ADMIN FINANCIAL ANALYTICS & PROFIT GROWTH ROUTE ---
+    expressApp.get('/api/admin/analytics/finances', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const selectedYear = Number(req.query.year || new Date().getFullYear());
+        
+        const allOrders = await Order.findAll({
+          order: [['createdAt', 'DESC']]
+        });
+
+        const products = await RiceProduct.findAll();
+        const productMap = {};
+        products.forEach(p => {
+          productMap[p.id] = p;
+        });
+
+        let totalMoneyPaid = 0;
+        let totalExpectedProfit = 0;
+        let totalKgSold = 0;
+        let totalPointsAwarded = 0;
+
+        const yearsSet = new Set([new Date().getFullYear()]);
+
+        const monthlyStats = Array.from({ length: 12 }, (_, i) => ({
+          monthIndex: i,
+          month: new Date(2000, i, 1).toLocaleString('en-US', { month: 'short' }),
+          totalSales: 0,
+          totalProfit: 0,
+          orderCount: 0
+        }));
+
+        allOrders.forEach(order => {
+          const createdAt = new Date(order.createdAt);
+          const orderYear = createdAt.getFullYear();
+          yearsSet.add(orderYear);
+
+          const isPaid = order.paymentDetails && (order.paymentDetails.isPaid || order.paymentDetails.paidTag === 'PAID' || order.status === 'paid' || order.status === 'completed' || order.status === 'delivered');
+
+          let orderProfit = 0;
+          let orderKg = order.totalWeightKg || 0;
+
+          if (Array.isArray(order.items)) {
+            order.items.forEach(item => {
+              const prod = productMap[item.productId];
+              const qty = item.quantity || 1;
+              const sellPrice = item.priceAtPurchase || (prod ? prod.basePrice : 0);
+              const buyPrice = (prod && prod.buyingPrice) ? prod.buyingPrice : (sellPrice * 0.75);
+              orderProfit += (sellPrice - buyPrice) * qty;
+              
+              if (!order.totalWeightKg && prod) {
+                orderKg += (prod.weightKg || 0) * qty;
+              }
+            });
+          }
+
+          const orderPoints = Number((orderKg * 0.2).toFixed(2));
+
+          if (isPaid) {
+            totalMoneyPaid += Number(order.grandTotal || 0);
+            totalExpectedProfit += orderProfit;
+            totalKgSold += orderKg;
+            totalPointsAwarded += orderPoints;
+          }
+
+          if (orderYear === selectedYear && isPaid) {
+            const monthIdx = createdAt.getMonth();
+            monthlyStats[monthIdx].totalSales += Number(order.grandTotal || 0);
+            monthlyStats[monthIdx].totalProfit += orderProfit;
+            monthlyStats[monthIdx].orderCount += 1;
+          }
+        });
+
+        res.json({
+          selectedYear,
+          availableYears: Array.from(yearsSet).sort((a, b) => b - a),
+          summary: {
+            totalMoneyPaid: Number(totalMoneyPaid.toFixed(2)),
+            totalExpectedProfit: Number(totalExpectedProfit.toFixed(2)),
+            totalKgSold: Number(totalKgSold.toFixed(2)),
+            totalPointsAwarded: Number(totalPointsAwarded.toFixed(2))
+          },
+          monthlySalesGrowth: monthlyStats
+        });
+      } catch (err) {
+        console.error('DEBUG: Financial Analytics Error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     expressApp.post('/api/admin/upload', authenticateToken, requireAdmin, upload.single('image'), (req, res) => {
       try {
         if (!req.file) return res.status(400).json({ error: 'No file buffered to stream' });
@@ -1029,6 +1387,7 @@ async function startServer() {
           variety: req.body.variety || 'Aromatic Pishori',
           weightKg: Number(req.body.weightKg || req.body.weight || 0),
           basePrice: Number(req.body.basePrice || req.body.price || 0),
+          buyingPrice: req.body.buyingPrice ? Number(req.body.buyingPrice) : (Number(req.body.basePrice || req.body.price || 0) * 0.75),
           flashSalePrice: req.body.flashSalePrice !== undefined && req.body.flashSalePrice !== null && req.body.flashSalePrice !== '' ? Number(req.body.flashSalePrice) : null,
           stockQuantity: Number(req.body.stockQuantity || req.body.stock || 0),
           imageUrl: req.body.imageUrl || req.body.image || req.body.url || null,
@@ -1117,7 +1476,7 @@ async function startServer() {
         const { search } = req.query;
         const include = [{
           model: User,
-          attributes: ['id', 'fullName', 'phoneNumber', 'role', 'isActive']
+          attributes: ['id', 'fullName', 'phoneNumber', 'role', 'isActive', 'rewardPoints']
         }];
 
         let whereCondition = {};
