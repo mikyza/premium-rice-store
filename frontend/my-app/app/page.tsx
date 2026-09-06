@@ -1232,100 +1232,100 @@ export default function PremiumRiceStore() {
     );
   };
 
-  const renderProfile = () => (
-    <div className="max-w-5xl mx-auto py-12 px-4 animate-fadeIn">
-      <div className="bg-white rounded-3xl shadow-md border border-emerald-100 p-6 sm:p-8 mb-10 flex flex-col sm:flex-row items-center justify-between gap-6 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -z-10 opacity-60"></div>
-        <div className="flex items-center gap-5 text-center sm:text-left z-10">
-          <div className="bg-emerald-100 w-20 h-20 rounded-full flex items-center justify-center shrink-0 border-2 border-emerald-200">
-             <UserIcon className="h-10 w-10 text-emerald-700" />
-          </div>
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-black text-emerald-950">{user?.fullName}</h1>
-            <p className="text-gray-500 font-medium text-sm flex items-center justify-center sm:justify-start mt-0.5">
-              <Shield className="h-4 w-4 mr-1 text-emerald-600" /> Role: <span className="uppercase font-bold text-emerald-700 ml-1">{user?.role}</span> • Phone: {user?.phoneNumber}
-            </p>
-          </div>
+ const renderProfile = () => (
+  <div className="max-w-5xl mx-auto py-12 px-4 animate-fadeIn">
+    <div className="bg-white rounded-3xl shadow-md border border-emerald-100 p-6 sm:p-8 mb-10 flex flex-col sm:flex-row items-center justify-between gap-6 relative overflow-hidden">
+      <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -z-10 opacity-60"></div>
+      <div className="flex items-center gap-5 text-center sm:text-left z-10">
+        <div className="bg-emerald-100 w-20 h-20 rounded-full flex items-center justify-center shrink-0 border-2 border-emerald-200">
+           <UserIcon className="h-10 w-10 text-emerald-700" />
         </div>
-        <div className="flex flex-col items-center sm:items-end gap-3 z-10">
-          <div className="bg-amber-100 border border-amber-300 text-amber-800 px-4 py-2 rounded-xl flex items-center shadow-sm">
-            <Award className="h-5 w-5 mr-2" />
-            <div>
-              <div className="text-[10px] font-black uppercase tracking-wider">Loyalty Points</div>
-              <div className="font-black text-lg leading-none">{loyaltyPoints} PTS</div>
-            </div>
-          </div>
-          <button onClick={fetchMyOrders} className="flex items-center text-emerald-600 hover:text-emerald-800 px-2 py-1 text-xs font-bold transition-all">
-            <RefreshCw className="h-4 w-4 mr-1" /> Refresh Orders
-          </button>
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-black text-emerald-950">{user?.fullName}</h1>
+          <p className="text-gray-500 font-medium text-sm flex items-center justify-center sm:justify-start mt-0.5">
+            <Shield className="h-4 w-4 mr-1 text-emerald-600" /> Role: <span className="uppercase font-bold text-emerald-700 ml-1">{user?.role}</span> • Phone: {user?.phoneNumber}
+          </p>
         </div>
       </div>
-      
-      <div className="bg-white rounded-3xl shadow-md border border-emerald-100 overflow-hidden">
-        <div className="p-6 sm:p-8 border-b border-gray-100 bg-emerald-50/30">
-          <h2 className="text-xl font-black text-gray-900 flex items-center">
-            <Clock className="mr-2 text-emerald-600 h-5 w-5" /> Live Order Fulfillment Tracking
-          </h2>
-          <p className="text-xs text-gray-500 mt-1">Real-time status updates from our Mwea dispatch warehouses.</p>
+      <div className="flex flex-col items-center sm:items-end gap-3 z-10">
+        <div className="bg-amber-100 border border-amber-300 text-amber-800 px-4 py-2 rounded-xl flex items-center shadow-sm">
+          <Award className="h-5 w-5 mr-2" />
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-wider">Loyalty Points</div>
+            <div className="font-black text-lg leading-none">{loyaltyPoints} PTS</div>
+          </div>
         </div>
+        <button onClick={fetchMyOrders} className="flex items-center text-emerald-600 hover:text-emerald-800 px-2 py-1 text-xs font-bold transition-all">
+          <RefreshCw className="h-4 w-4 mr-1" /> Refresh Orders
+        </button>
+      </div>
+    </div>
+    
+    <div className="bg-white rounded-3xl shadow-md border border-emerald-100 overflow-hidden">
+      <div className="p-6 sm:p-8 border-b border-gray-100 bg-emerald-50/30">
+        <h2 className="text-xl font-black text-gray-900 flex items-center">
+          <Clock className="mr-2 text-emerald-600 h-5 w-5" /> Live Order Fulfillment Tracking
+        </h2>
+        <p className="text-xs text-gray-500 mt-1">Real-time status updates from our Mwea dispatch warehouses.</p>
+      </div>
 
-        <div className="p-6 sm:p-8">
-          {myOrders.length === 0 ? (
-            <div className="text-center py-12 text-gray-500 font-medium">No order history recorded yet. Place your first order from the Grain Catalog!</div>
-          ) : (
-            <div className="space-y-6">
-              {myOrders.map(o => (
-                <div key={o.id} className={`border rounded-2xl p-5 transition-all ${o.paymentStatus === 'failed' ? 'bg-rose-50/30 border-rose-200' : 'bg-gray-50/50 border-gray-200 hover:border-emerald-300'}`}>
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-200/80 pb-4 mb-4">
-                    <div>
-                      <span className="font-mono font-black text-emerald-950 text-base">ORDER #{o.id}</span>
-                      <span className="text-xs text-gray-400 font-medium block sm:inline sm:ml-3">{new Date(o.createdAt).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
-                        o.paymentStatus === 'failed' ? 'bg-rose-100 text-rose-800 border-rose-300' :
-                        (o.status === 'pending' && o.paymentStatus === 'paid') ? 'bg-blue-100 text-blue-800 border-blue-300' :
-                        o.status === 'completed' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
-                        o.status === 'dispatched' ? 'bg-indigo-100 text-indigo-800 border-indigo-300' :
-                        o.status === 'processing' ? 'bg-amber-100 text-amber-800 border-amber-300' :
-                        'bg-gray-200 text-gray-700 border-gray-300'
-                      }`}>
-                        ● {o.paymentStatus === 'failed' ? 'PAYMENT FAILED' : (o.status === 'pending' && o.paymentStatus === 'paid' ? 'PAID - WAITING ADMIN' : o.status)}
-                      </span>
-                      <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
-                    </div>
+      <div className="p-6 sm:p-8">
+        {myOrders.length === 0 ? (
+          <div className="text-center py-12 text-gray-500 font-medium">No order history recorded yet. Place your first order from the Grain Catalog!</div>
+        ) : (
+          <div className="space-y-6">
+            {myOrders.map(o => (
+              <div key={o.id} className={`border rounded-2xl p-5 transition-all ${o.paymentStatus === 'failed' ? 'bg-rose-50/30 border-rose-200' : 'bg-gray-50/50 border-gray-200 hover:border-emerald-300'}`}>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-200/80 pb-4 mb-4">
+                  <div>
+                    <span className="font-mono font-black text-emerald-950 text-base">ORDER #{o.id}</span>
+                    <span className="text-xs text-gray-400 font-medium block sm:inline sm:ml-3">{new Date(o.createdAt).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</span>
                   </div>
-
-                  <div className="text-xs text-gray-600 mb-4 bg-white p-4 rounded-xl border border-gray-200">
-                    <div className="font-bold text-gray-800 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-600"/> Complete Delivery Logistics:</div>
-                    <ul className="space-y-1 pl-5 list-disc text-gray-700">
-                      <li><strong>County:</strong> {o.county || 'N/A'}</li>
-                      <li><strong>Town/District:</strong> {o.town || 'N/A'}</li>
-                      <li><strong>Location:</strong> {o.location || 'N/A'}</li>
-                      <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
-                      <li><strong>Street/Landmark:</strong> {o.shippingAddress?.details || o.shippingAddress || 'N/A'}</li>
-                      <li><strong>Payment Channel:</strong> {o.paymentMethod || 'N/A'}</li>
-                    </ul>
-                  </div>
-
-                  <div className="space-y-1.5 text-xs">
-                    {o.items?.map((item: any, i: number) => (
-                      <div key={i} className="flex justify-between text-gray-700 bg-white px-3 py-2 rounded-lg border border-gray-100 font-medium">
-                        <span>{item.quantity}x {item.name || item.product?.variety}</span>
-                        <span className="font-bold">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
-                      </div>
-                    ))}
+                  <div className="flex items-center gap-3">
+                    <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                      o.paymentStatus === 'failed' ? 'bg-rose-100 text-rose-800 border-rose-300' :
+                      (o.status === 'pending' && o.paymentStatus === 'paid') ? 'bg-blue-100 text-blue-800 border-blue-300' :
+                      o.status === 'completed' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
+                      o.status === 'dispatched' ? 'bg-indigo-100 text-indigo-800 border-indigo-300' :
+                      o.status === 'processing' ? 'bg-amber-100 text-amber-800 border-amber-300' :
+                      'bg-gray-200 text-gray-700 border-gray-300'
+                    }`}>
+                      ● {o.paymentStatus === 'failed' ? 'PAYMENT FAILED' : (o.status === 'pending' && o.paymentStatus === 'paid' ? 'PAID - WAITING ADMIN' : o.status)}
+                    </span>
+                    <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
 
- const renderAdmin = () => {
+                <div className="text-xs text-gray-600 mb-4 bg-white p-4 rounded-xl border border-gray-200">
+                  <div className="font-bold text-gray-800 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-600"/> Complete Delivery Logistics:</div>
+                  <ul className="space-y-1 pl-5 list-disc text-gray-700">
+                    <li><strong>County:</strong> {o.county || 'N/A'}</li>
+                    <li><strong>Town/District:</strong> {o.town || 'N/A'}</li>
+                    <li><strong>Location:</strong> {o.location || 'N/A'}</li>
+                    <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
+                    <li><strong>Street/Landmark:</strong> {o.shippingAddress?.details || o.shippingAddress || 'N/A'}</li>
+                    <li><strong>Payment Channel:</strong> {o.paymentMethod || 'N/A'}</li>
+                  </ul>
+                </div>
+
+                <div className="space-y-1.5 text-xs">
+                  {o.items?.map((item: any, i: number) => (
+                    <div key={i} className="flex justify-between text-gray-700 bg-white px-3 py-2 rounded-lg border border-gray-100 font-medium">
+                      <span>{item.quantity}x {item.name || item.product?.variety}</span>
+                      <span className="font-bold">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+);
+
+const renderAdmin = () => {
   if (user?.role !== 'admin') {
     return (
       <div className="min-h-[80vh] flex items-center justify-center bg-[#0a0a0a]">
