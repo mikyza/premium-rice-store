@@ -1325,18 +1325,25 @@ export default function PremiumRiceStore() {
     );
   };
 
-  const renderAdmin = () => {
-    if (user?.role !== 'admin') {
-      return (
-        <div className="min-h-[80vh] flex items-center justify-center bg-[#0a0a0a]">
-          <div className="text-center bg-rose-950/20 border border-rose-900/50 p-10 rounded-3xl max-w-md">
-            <AlertTriangle className="h-12 w-12 text-rose-500 mx-auto mb-4 animate-bounce" />
-            <h2 className="text-rose-500 font-black text-2xl tracking-widest mb-2">403 FORBIDDEN</h2>
-            <p className="text-gray-400 text-sm">You lack the administrator clearance privileges required to access this system module.</p>
-          </div>
+ const renderAdmin = () => {
+  if (user?.role !== 'admin') {
+    return (
+      <div className="min-h-[80vh] flex items-center justify-center bg-[#0a0a0a]">
+        <div className="text-center bg-rose-950/20 border border-rose-900/50 p-10 rounded-3xl max-w-md">
+          <AlertTriangle className="h-12 w-12 text-rose-500 mx-auto mb-4 animate-bounce" />
+          <h2 className="text-rose-500 font-black text-2xl tracking-widest mb-2">403 FORBIDDEN</h2>
+          <p className="text-gray-400 text-sm">You lack the administrator clearance privileges required to access this system module.</p>
         </div>
-      );
-    }
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6">
+      {/* Admin dashboard view */}
+    </div>
+  );
+};
 
     const tabsList = [
       { id: 'inventory', icon: <Package size={18}/>, label: 'Grain Catalog' },
