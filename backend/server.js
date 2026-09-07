@@ -913,6 +913,24 @@ async function startServer() {
       }
     });
 
+    // --- GET SINGLE ORDER BY ID (WITH FULL PAYMENT DETAILS) ---
+    expressApp.get('/api/orders/:id', authenticateToken, async (req, res) => {
+      try {
+        const order = await Order.findByPk(req.params.id, {
+          include: [{ model: User, attributes: ['id', 'fullName', 'phoneNumber', 'email'] }]
+        });
+        if (!order) return res.status(404).json({ error: 'Order not found' });
+
+        if (order.userId !== req.user.id && req.user.role !== 'admin') {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        res.json(order);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     // --- DIRECT M-PESA STK PUSH ROUTE ---
     const handleStkPushRequest = async (req, res) => {
       try {
@@ -1063,7 +1081,11 @@ async function startServer() {
             method: paymentMethod || 'mpesa_stk', 
             isPaid: false,
             paidTag: 'PENDING',
-            mpesaNumber: mpesaPhoneNumber || null
+            mpesaNumber: mpesaPhoneNumber || null,
+            amount: finalOrderTotal,
+            paidAt: null,
+            mpesaReceipt: null,
+            failureReason: null
           },
           county: county || 'Not Specified', 
           town: town || '',
@@ -1262,7 +1284,8 @@ async function startServer() {
               orderId: order.id,
               status: order.status,
               isPaid: isPaymentSuccessful,
-              mpesaReceipt: mpesaReceipt
+              mpesaReceipt: mpesaReceipt,
+              paymentDetails: order.paymentDetails
             });
 
             io.emit('orderStatusUpdated', order);
@@ -1512,7 +1535,7 @@ async function startServer() {
           order: [['createdAt', 'DESC']]
         });
 
-        let csv = 'Order ID,Customer Name,Phone Number,County,Town,Location,Sublocation,Grand Total (KES),Delivery Status,Order Date\n';
+        let csv = 'Order ID,Customer Name,Phone Number,County,Town,Location,Sublocation,Grand Total (KES),Payment Status,M-Pesa Receipt,Delivery Status,Order Date\n';
         
         orders.forEach(o => {
           const customerName = o.User ? o.User.fullName.replace(/,/g, ' ') : 'N/A';
@@ -1521,9 +1544,11 @@ async function startServer() {
           const town = (o.town || '').replace(/,/g, ' ');
           const loc = (o.location || '').replace(/,/g, ' ');
           const subloc = (o.sublocation || '').replace(/,/g, ' ');
+          const payTag = o.paymentDetails ? (o.paymentDetails.paidTag || (o.paymentDetails.isPaid ? 'PAID' : 'PENDING')) : 'PENDING';
+          const receipt = o.paymentDetails ? (o.paymentDetails.mpesaReceipt || 'N/A') : 'N/A';
           const dateStr = new Date(o.createdAt).toISOString().split('T')[0];
           
-          csv += `${o.id},"${customerName}",${phone},${county},${town},${loc},${subloc},${o.grandTotal},${o.status},${dateStr}\n`;
+          csv += `${o.id},"${customerName}",${phone},${county},${town},${loc},${subloc},${o.grandTotal},${payTag},${receipt},${o.status},${dateStr}\n`;
         });
 
         res.setHeader('Content-Type', 'text/csv');
@@ -1556,6 +1581,48 @@ async function startServer() {
         io.emit('orderStatusUpdated', order);
         res.json(order);
       } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // --- ADMIN MANUAL PAYMENT STATUS OVERRIDE ---
+    expressApp.put('/api/admin/orders/:id/payment-status', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const { isPaid, paidTag, mpesaReceipt, failureReason, method } = req.body || {};
+        const order = await Order.findByPk(req.params.id);
+        if (!order) return res.status(404).json({ error: 'Order not found' });
+
+        const currentPaymentDetails = order.paymentDetails || {};
+        const updatedIsPaid = isPaid !== undefined ? Boolean(isPaid) : currentPaymentDetails.isPaid;
+
+        order.paymentDetails = {
+          ...currentPaymentDetails,
+          isPaid: updatedIsPaid,
+          paidTag: paidTag || (updatedIsPaid ? 'PAID' : 'PENDING'),
+          mpesaReceipt: mpesaReceipt !== undefined ? mpesaReceipt : currentPaymentDetails.mpesaReceipt,
+          failureReason: failureReason !== undefined ? failureReason : currentPaymentDetails.failureReason,
+          method: method || currentPaymentDetails.method || 'mpesa_stk',
+          paidAt: updatedIsPaid ? (currentPaymentDetails.paidAt || new Date()) : currentPaymentDetails.paidAt
+        };
+
+        if (updatedIsPaid && order.status === 'payment_failed') {
+          order.status = 'pending';
+        }
+
+        await order.save();
+
+        await AdminLog.create({
+          adminId: req.adminUser.id,
+          action: 'UPDATE_ORDER_PAYMENT_STATUS',
+          targetType: 'order',
+          targetId: order.id,
+          changes: req.body,
+          ipAddress: req.ip
+        });
+
+        io.emit('orderStatusUpdated', order);
+        res.json(order);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
     });
 
     expressApp.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
