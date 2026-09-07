@@ -7,7 +7,7 @@ import {
   CheckCircle, AlertCircle, Settings, Leaf, ChevronRight,
   ShoppingBag, Users, Image as ImageIcon, Video, Download,
   MapPin, Eye, RefreshCw, LogOut, Check, AlertTriangle, Smartphone, CreditCard,
-  BarChart2, DollarSign, Award, Calendar
+  BarChart2, DollarSign, Award, Calendar, Lock, Unlock
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 
@@ -29,7 +29,6 @@ const ALL_47_COUNTIES = [
   "Siaya", "Kisumu", "Homa Bay", "Migori", "Kisii", "Nyamira", "Nairobi"
 ];
 
-// Regional logistics datasets for dynamic county dropdowns
 const REGIONAL_LOGISTICS_DATA: { [key: string]: { towns: string[], locations: string[], sublocations: string[], streets: string[] } } = {
   "Nairobi": {
     towns: ["Westlands", "Kasarani", "Lang'ata", "Starehe", "Dagoretti", "Embakasi", "Makadara", "Kamukunji", "Roysambu", "Mathare"],
@@ -80,16 +79,16 @@ const DEFAULT_REGIONAL_LOGISTICS = {
 // 2. MAIN APPLICATION COMPONENT
 // ==========================================
 export default function PremiumRiceStore() {
-  // --- Global Navigation & Auth States ---
   const [view, setView] = useState<'home' | 'shop' | 'cart' | 'login' | 'admin' | 'profile'>('home');
   const [user, setUser] = useState<any>(null);
   const [token, setToken] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
 
-  // --- Dynamic Store Data States ---
   const [products, setProducts] = useState<any[]>([]);
   const [carousel, setCarousel] = useState<any[]>([]);
+  
+  // Expanded Hero Configuration (10 Configs)
   const [heroSettings, setHeroSettings] = useState<any>({
     title: 'Direct From Mwea Paddy Fields',
     subtitle: '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.',
@@ -97,38 +96,38 @@ export default function PremiumRiceStore() {
     video2: '',
     img1: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=1600&q=80',
     img2: '',
-    img3: ''
+    img3: '',
+    ctaButtonText: 'Explore Grain Catalog',
+    badgeText: '🌱 Pure Kenya Agricultural Harvest',
+    overlayOpacity: '40',
+    secondaryButtonText: 'Track Order Status'
   });
   
   const [activeHeroIndex, setActiveHeroIndex] = useState(0);
   const [cart, setCart] = useState<any[]>([]);
   const [myOrders, setMyOrders] = useState<any[]>([]);
   
-  // --- Engine & Logistics States ---
   const [flashSale, setFlashSale] = useState({ active: false, endTime: null as string | null, msRemaining: 0 });
   const [baseTransportFee, setBaseTransportFee] = useState(250);
   const [countyOverrides, setCountyOverrides] = useState<{ [key: string]: number }>({});
   const [socket, setSocket] = useState<Socket | null>(null);
 
-  // --- Checkout Form States ---
   const [checkoutData, setCheckoutData] = useState({
     county: 'Nairobi',
     town: 'Westlands',
     location: 'CBD',
     sublocation: 'Mwiki',
     shippingAddress: 'Moi Avenue',
-    paymentMethod: 'payhero',
+    paymentMethod: 'stk',
     stkPhoneNumber: ''
   });
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   
-  // --- Auth Form States ---
   const [isLogin, setIsLogin] = useState(true);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [resetStep, setResetStep] = useState<'request' | 'reset'>('request');
   const [formData, setFormData] = useState({ phoneNumber: '', email: '', password: '', fullName: '', resetToken: '', newPassword: '' });
   
-  // --- Admin Workspace States ---
   const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'users' | 'carousel' | 'config' | 'logs' | 'finances'>('inventory');
   const [newProduct, setNewProduct] = useState({ brandName: '', variety: '', weightKg: '', basePrice: '', costPrice: '', stockQuantity: '', imageUrl: '' });
   const [editingProduct, setEditingProduct] = useState<any | null>(null);
@@ -140,12 +139,10 @@ export default function PremiumRiceStore() {
   const [newSlide, setNewSlide] = useState({ title: '', subtitle: '', url: '' });
   const [countyOverrideForm, setCountyOverrideForm] = useState({ county: 'Nairobi', fee: '' });
   
-  // --- Admin Financial State ---
   const [financeYear, setFinanceYear] = useState<number>(new Date().getFullYear());
+  const [monthlyBuyingPrices, setMonthlyBuyingPrices] = useState<{ [key: string]: number }>({});
+  const [editingUser, setEditingUser] = useState<any | null>(null);
 
-  // ==========================================
-  // ACCOUNT-SCOPED CART LOGIC
-  // ==========================================
   const getAccountCartKey = (u: any) => {
     return u ? `mwea_hub_cart_${u.id || u.phoneNumber}` : 'mwea_hub_cart_guest';
   };
@@ -179,10 +176,6 @@ export default function PremiumRiceStore() {
     showToast('Cart cleared successfully.', 'success');
   };
 
-  // ==========================================
-  // 3. INITIALIZATION & REAL-TIME WEBSOCKETS
-  // ==========================================
-  
   useEffect(() => {
     const mediaArray = [
       { type: 'video', url: heroSettings?.video1 },
@@ -301,9 +294,6 @@ export default function PremiumRiceStore() {
     }
   }, [view, adminTab, token]);
 
-  // ==========================================
-  // 4. API HELPERS & DATA FETCHERS
-  // ==========================================
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
@@ -431,9 +421,6 @@ export default function PremiumRiceStore() {
     showToast('Logged out successfully');
   };
 
-  // ==========================================
-  // 5. CART & LOGISTICS CALCULATIONS
-  // ==========================================
   const activeTransportFee = React.useMemo(() => {
     if (checkoutData.county && countyOverrides[checkoutData.county] !== undefined) {
       return Number(countyOverrides[checkoutData.county]);
@@ -486,10 +473,6 @@ export default function PremiumRiceStore() {
     }, 0);
   }, [myOrders]);
   const loyaltyPoints = (totalKgBought * 0.2).toFixed(1);
-
-  // ==========================================
-  // 6. SUB-COMPONENTS RENDER
-  // ==========================================
 
   const renderNav = () => (
     <nav className="bg-emerald-900 text-emerald-50 sticky top-0 z-50 shadow-xl border-b border-emerald-800">
@@ -581,6 +564,7 @@ export default function PremiumRiceStore() {
     ].filter(item => item.url && item.url.trim() !== '');
 
     const currentMedia = mediaArray.length > 0 ? mediaArray[activeHeroIndex % mediaArray.length] : null;
+    const opacityClass = heroSettings?.overlayOpacity === '60' ? 'opacity-60' : heroSettings?.overlayOpacity === '80' ? 'opacity-80' : 'opacity-40';
 
     return (
       <div className="animate-fadeIn">
@@ -610,19 +594,19 @@ export default function PremiumRiceStore() {
             <img 
               src={currentMedia.url} 
               alt="Hero Backdrop" 
-              className="absolute inset-0 w-full h-full object-cover opacity-40 transition-opacity duration-1000" 
+              className={`absolute inset-0 w-full h-full object-cover ${opacityClass} transition-opacity duration-1000`} 
             />
           ) : (
             <img 
               src="https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=1600&q=80" 
               alt="Default Backdrop" 
-              className="absolute inset-0 w-full h-full object-cover opacity-40 transition-opacity duration-1000" 
+              className={`absolute inset-0 w-full h-full object-cover ${opacityClass} transition-opacity duration-1000`} 
             />
           )}
           
           <div className="absolute inset-0 bg-gradient-to-t from-emerald-950 via-emerald-950/40 to-transparent flex flex-col justify-center items-center text-center p-6 z-10">
             <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest mb-6 animate-pulse">
-              🌱 Pure Kenya Agricultural Harvest
+              {heroSettings?.badgeText || '🌱 Pure Kenya Agricultural Harvest'}
             </span>
             <h1 className="text-4xl sm:text-6xl md:text-7xl font-black text-white mb-6 drop-shadow-2xl tracking-tight max-w-4xl leading-none">
               {heroSettings?.title || 'Direct From Mwea Paddy Fields'}
@@ -632,10 +616,10 @@ export default function PremiumRiceStore() {
             </p>
             <div className="flex flex-col sm:flex-row gap-4">
               <button onClick={() => setView('shop')} className="bg-emerald-500 text-white px-8 py-4 rounded-full font-black text-lg hover:bg-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.4)] transition-all transform hover:scale-105 flex items-center justify-center">
-                Explore Grain Catalog <ChevronRight className="ml-2 h-5 w-5" />
+                {heroSettings?.ctaButtonText || 'Explore Grain Catalog'} <ChevronRight className="ml-2 h-5 w-5" />
               </button>
               <button onClick={() => setView('profile')} className="bg-emerald-900/80 border border-emerald-700 text-white px-8 py-4 rounded-full font-bold text-lg hover:bg-emerald-800 transition-all">
-                Track Order Status
+                {heroSettings?.secondaryButtonText || 'Track Order Status'}
               </button>
             </div>
           </div>
@@ -774,10 +758,10 @@ export default function PremiumRiceStore() {
         return showToast('Please select Town/District and Location from the logistics dropdowns', 'error');
       }
       
-      const targetPhone = (checkoutData.paymentMethod === 'stk' || checkoutData.paymentMethod === 'payhero') ? (checkoutData.stkPhoneNumber || user?.phoneNumber) : user?.phoneNumber;
+      const targetPhone = checkoutData.paymentMethod === 'stk' ? (checkoutData.stkPhoneNumber || user?.phoneNumber) : user?.phoneNumber;
       
-      if ((checkoutData.paymentMethod === 'stk' || checkoutData.paymentMethod === 'payhero') && !targetPhone) {
-        return showToast('Please provide a valid M-Pesa phone number for payment processing', 'error');
+      if (checkoutData.paymentMethod === 'stk' && !targetPhone) {
+        return showToast('Please provide a valid M-Pesa phone number for STK Push', 'error');
       }
 
       setIsCheckingOut(true);
@@ -804,17 +788,16 @@ export default function PremiumRiceStore() {
         if (res.ok) {
           const data = await res.json();
           
-          if (checkoutData.paymentMethod === 'stk' || checkoutData.paymentMethod === 'payhero') {
-            const gatewayName = checkoutData.paymentMethod === 'payhero' ? 'PayHero Express' : 'M-Pesa STK Push';
-            showToast(`📲 ${gatewayName} payment successfully initiated to ${targetPhone}! Please enter your M-Pesa PIN when prompted.`, 'success');
+          if (checkoutData.paymentMethod === 'stk') {
+            showToast(`📲 STK Push successfully initiated to ${targetPhone}! Please enter your M-Pesa PIN when prompted.`, 'success');
             try {
                await fetch(`${API_BASE_URL}/payments/stkpush`, {
                  method: 'POST',
                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                 body: JSON.stringify({ orderId: data.id || data.order?.id, amount: cartTotal, phoneNumber: targetPhone, paymentMethod: checkoutData.paymentMethod })
+                 body: JSON.stringify({ orderId: data.id || data.order?.id, amount: cartTotal, phoneNumber: targetPhone })
                });
             } catch (err) {
-               console.error("Payment trigger request error:", err);
+               console.error("STK trigger request error:", err);
             }
           } else {
             showToast('🌾 Order placed successfully! Direct logistics dispatched.', 'success');
@@ -962,7 +945,6 @@ export default function PremiumRiceStore() {
                     onChange={(e) => setCheckoutData({...checkoutData, paymentMethod: e.target.value})} 
                     className="w-full text-black border-2 border-gray-200 rounded-xl px-4 py-3 bg-white focus:border-emerald-500 outline-none font-bold text-sm"
                   >
-                    <option value="payhero">⚡ PayHero Express Checkout (M-Pesa / Card)</option>
                     <option value="stk">🟢 M-Pesa STK Push Express</option>
                     <option value="till">🏪 M-Pesa Paybill / Till Number</option>
                   </select>
@@ -976,11 +958,11 @@ export default function PremiumRiceStore() {
                   </div>
                 )}
 
-                {(checkoutData.paymentMethod === 'stk' || checkoutData.paymentMethod === 'payhero') && (
+                {checkoutData.paymentMethod === 'stk' && (
                   <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200 flex flex-col gap-3 text-emerald-900 text-xs font-bold animate-fadeIn mt-2">
                     <div className="flex items-start gap-3">
                       <Smartphone className="h-6 w-6 text-emerald-600 shrink-0" />
-                      <span className="leading-relaxed">A secure payment prompt will instantly pop up on the mobile number below. Please enter your M-Pesa PIN when prompted.</span>
+                      <span className="leading-relaxed">An STK Push prompt will instantly pop up on the mobile number below. Please enter your M-Pesa PIN when prompted.</span>
                     </div>
                     <div className="mt-1">
                       <label className="block text-[10px] font-black uppercase text-emerald-800 mb-1">M-Pesa Mobile Number</label>
@@ -1027,15 +1009,15 @@ export default function PremiumRiceStore() {
                   onClick={handleCheckout} 
                   disabled={isCheckingOut}
                   className={`w-full py-4 rounded-2xl font-black text-base flex justify-center items-center shadow-lg transition-all transform hover:-translate-y-0.5 ${
-                    (checkoutData.paymentMethod === 'stk' || checkoutData.paymentMethod === 'payhero')
+                    checkoutData.paymentMethod === 'stk'
                       ? 'bg-emerald-500 hover:bg-emerald-400 text-white hover:shadow-emerald-500/40'
                       : 'bg-emerald-600 hover:bg-emerald-500 text-white hover:shadow-emerald-500/30'
                   }`}
                 >
                   {isCheckingOut ? (
                     <><Activity className="animate-spin mr-2 h-5 w-5" /> Processing Order...</>
-                  ) : (checkoutData.paymentMethod === 'stk' || checkoutData.paymentMethod === 'payhero') ? (
-                    <><Smartphone className="mr-2 h-5 w-5" /> Initiate Payment & Pay KES {cartTotal.toLocaleString()}</>
+                  ) : checkoutData.paymentMethod === 'stk' ? (
+                    <><Smartphone className="mr-2 h-5 w-5" /> Initiate STK Push & Pay KES {cartTotal.toLocaleString()}</>
                   ) : (
                     <><CheckCircle className="mr-2 h-5 w-5" /> Confirm Order & Pay KES {cartTotal.toLocaleString()}</>
                   )}
@@ -1221,98 +1203,132 @@ export default function PremiumRiceStore() {
     );
   };
 
-  const renderProfile = () => (
-    <div className="max-w-5xl mx-auto py-12 px-4 animate-fadeIn">
-      <div className="bg-white rounded-3xl shadow-md border border-emerald-100 p-6 sm:p-8 mb-10 flex flex-col sm:flex-row items-center justify-between gap-6 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -z-10 opacity-60"></div>
-        <div className="flex items-center gap-5 text-center sm:text-left z-10">
-          <div className="bg-emerald-100 w-20 h-20 rounded-full flex items-center justify-center shrink-0 border-2 border-emerald-200">
-             <UserIcon className="h-10 w-10 text-emerald-700" />
-          </div>
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-black text-emerald-950">{user?.fullName}</h1>
-            <p className="text-gray-500 font-medium text-sm flex items-center justify-center sm:justify-start mt-0.5">
-              <Shield className="h-4 w-4 mr-1 text-emerald-600" /> Role: <span className="uppercase font-bold text-emerald-700 ml-1">{user?.role}</span> • Phone: {user?.phoneNumber}
-            </p>
-          </div>
-        </div>
-        <div className="flex flex-col items-center sm:items-end gap-3 z-10">
-          <div className="bg-amber-100 border border-amber-300 text-amber-800 px-4 py-2 rounded-xl flex items-center shadow-sm">
-            <Award className="h-5 w-5 mr-2" />
+  const renderProfile = () => {
+    // Transaction Categories in user profile: Pending / In-transit vs Completed (delivered)
+    const pendingTransactions = myOrders.filter(o => o.status !== 'delivered' && o.status !== 'completed' && o.paymentStatus !== 'failed');
+    const completedTransactions = myOrders.filter(o => o.status === 'delivered' || o.status === 'completed');
+
+    return (
+      <div className="max-w-5xl mx-auto py-12 px-4 animate-fadeIn">
+        <div className="bg-white rounded-3xl shadow-md border border-emerald-100 p-6 sm:p-8 mb-10 flex flex-col sm:flex-row items-center justify-between gap-6 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -z-10 opacity-60"></div>
+          <div className="flex items-center gap-5 text-center sm:text-left z-10">
+            <div className="bg-emerald-100 w-20 h-20 rounded-full flex items-center justify-center shrink-0 border-2 border-emerald-200">
+               <UserIcon className="h-10 w-10 text-emerald-700" />
+            </div>
             <div>
-              <div className="text-[10px] font-black uppercase tracking-wider">Loyalty Points</div>
-              <div className="font-black text-lg leading-none">{loyaltyPoints} PTS</div>
+              <h1 className="text-2xl sm:text-3xl font-black text-emerald-950">{user?.fullName}</h1>
+              <p className="text-gray-500 font-medium text-sm flex items-center justify-center sm:justify-start mt-0.5">
+                <Shield className="h-4 w-4 mr-1 text-emerald-600" /> Role: <span className="uppercase font-bold text-emerald-700 ml-1">{user?.role}</span> • Phone: {user?.phoneNumber}
+              </p>
             </div>
           </div>
-          <button onClick={fetchMyOrders} className="flex items-center text-emerald-600 hover:text-emerald-800 px-2 py-1 text-xs font-bold transition-all">
-            <RefreshCw className="h-4 w-4 mr-1" /> Refresh Orders
-          </button>
-        </div>
-      </div>
-      
-      <div className="bg-white rounded-3xl shadow-md border border-emerald-100 overflow-hidden">
-        <div className="p-6 sm:p-8 border-b border-gray-100 bg-emerald-50/30">
-          <h2 className="text-xl font-black text-gray-900 flex items-center">
-            <Clock className="mr-2 text-emerald-600 h-5 w-5" /> Live Order Fulfillment Tracking
-          </h2>
-          <p className="text-xs text-gray-500 mt-1">Real-time status updates from our Mwea dispatch warehouses.</p>
-        </div>
-
-        <div className="p-6 sm:p-8">
-          {myOrders.length === 0 ? (
-            <div className="text-center py-12 text-gray-500 font-medium">No order history recorded yet. Place your first order from the Grain Catalog!</div>
-          ) : (
-            <div className="space-y-6">
-              {myOrders.map(o => (
-                <div key={o.id} className={`border rounded-2xl p-5 transition-all ${o.paymentStatus === 'failed' ? 'bg-rose-50/30 border-rose-200' : 'bg-gray-50/50 border-gray-200 hover:border-emerald-300'}`}>
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-200/80 pb-4 mb-4">
-                    <div>
-                      <span className="font-mono font-black text-emerald-950 text-base">ORDER #{o.id}</span>
-                      <span className="text-xs text-gray-400 font-medium block sm:inline sm:ml-3">{new Date(o.createdAt).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
-                        o.paymentStatus === 'failed' ? 'bg-rose-100 text-rose-800 border-rose-300' :
-                        (o.status === 'pending' && o.paymentStatus === 'paid') ? 'bg-blue-100 text-blue-800 border-blue-300' :
-                        o.status === 'completed' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
-                        o.status === 'dispatched' ? 'bg-indigo-100 text-indigo-800 border-indigo-300' :
-                        o.status === 'processing' ? 'bg-amber-100 text-amber-800 border-amber-300' :
-                        'bg-gray-200 text-gray-700 border-gray-300'
-                      }`}>
-                        ● {o.paymentStatus === 'failed' ? 'PAYMENT FAILED' : (o.status === 'pending' && o.paymentStatus === 'paid' ? 'PAID - WAITING ADMIN' : o.status)}
-                      </span>
-                      <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
-                    </div>
-                  </div>
-
-                  <div className="text-xs text-gray-600 mb-4 bg-white p-4 rounded-xl border border-gray-200">
-                    <div className="font-bold text-gray-800 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-600"/> Complete Delivery Logistics:</div>
-                    <ul className="space-y-1 pl-5 list-disc text-gray-700">
-                      <li><strong>County:</strong> {o.county || 'N/A'}</li>
-                      <li><strong>Town/District:</strong> {o.town || 'N/A'}</li>
-                      <li><strong>Location:</strong> {o.location || 'N/A'}</li>
-                      <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
-                      <li><strong>Street/Landmark:</strong> {o.shippingAddress?.details || o.shippingAddress || 'N/A'}</li>
-                      <li><strong>Payment Channel:</strong> {o.paymentMethod || 'N/A'}</li>
-                    </ul>
-                  </div>
-
-                  <div className="space-y-1.5 text-xs">
-                    {o.items?.map((item: any, i: number) => (
-                      <div key={i} className="flex justify-between text-gray-700 bg-white px-3 py-2 rounded-lg border border-gray-100 font-medium">
-                        <span>{item.quantity}x {item.name || item.product?.variety}</span>
-                        <span className="font-bold">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
+          <div className="flex flex-col items-center sm:items-end gap-3 z-10">
+            <div className="bg-amber-100 border border-amber-300 text-amber-800 px-4 py-2 rounded-xl flex items-center shadow-sm">
+              <Award className="h-5 w-5 mr-2" />
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-wider">Loyalty Points</div>
+                <div className="font-black text-lg leading-none">{loyaltyPoints} PTS</div>
+              </div>
             </div>
-          )}
+            <button onClick={fetchMyOrders} className="flex items-center text-emerald-600 hover:text-emerald-800 px-2 py-1 text-xs font-bold transition-all">
+              <RefreshCw className="h-4 w-4 mr-1" /> Refresh Orders
+            </button>
+          </div>
+        </div>
+        
+        <div className="bg-white rounded-3xl shadow-md border border-emerald-100 overflow-hidden mb-8">
+          <div className="p-6 sm:p-8 border-b border-gray-100 bg-emerald-50/30">
+            <h2 className="text-xl font-black text-gray-900 flex items-center">
+              <Clock className="mr-2 text-emerald-600 h-5 w-5" /> Pending Shipping Transactions
+            </h2>
+            <p className="text-xs text-gray-500 mt-1">Successful transactions that have not yet completed shipping procedures up to delivered.</p>
+          </div>
+          <div className="p-6 sm:p-8">
+            {pendingTransactions.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 font-medium text-sm">No pending shipping transactions.</div>
+            ) : (
+              <div className="space-y-4">
+                {pendingTransactions.map(o => (
+                  <div key={o.id} className="border border-amber-200 bg-amber-50/40 rounded-2xl p-5">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200 pb-3 mb-3">
+                      <div>
+                        <span className="font-mono font-black text-emerald-950 text-base">TXN #{o.transactionId || o.id}</span>
+                        <span className="text-xs text-gray-500 font-medium ml-3">Payment Status: <strong className="text-emerald-700 uppercase">{o.paymentStatus || 'Paid'}</strong></span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
+                          ● {o.status} (In Shipping)
+                        </span>
+                        <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
+                      </div>
+                    </div>
+                    <div className="text-xs text-gray-700">
+                      <strong>Shipping Route:</strong> {o.county}, {o.town}, {o.location} ({o.shippingAddress?.details || o.shippingAddress || 'Standard Delivery'})
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-3xl shadow-md border border-emerald-100 overflow-hidden">
+          <div className="p-6 sm:p-8 border-b border-gray-100 bg-emerald-50/30">
+            <h2 className="text-xl font-black text-gray-900 flex items-center">
+              <CheckCircle className="mr-2 text-emerald-600 h-5 w-5" /> Completed & Delivered Transactions
+            </h2>
+            <p className="text-xs text-gray-500 mt-1">Successfully delivered orders with full transaction IDs and item details.</p>
+          </div>
+          <div className="p-6 sm:p-8">
+            {completedTransactions.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 font-medium text-sm">No completed delivery transactions recorded yet.</div>
+            ) : (
+              <div className="space-y-6">
+                {completedTransactions.map(o => (
+                  <div key={o.id} className="border border-gray-200 bg-gray-50/50 rounded-2xl p-5">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-200 pb-4 mb-4">
+                      <div>
+                        <span className="font-mono font-black text-emerald-950 text-base">TXN ID: #{o.transactionId || o.id}</span>
+                        <span className="text-xs text-gray-400 font-medium block sm:inline sm:ml-3">{new Date(o.createdAt).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          ● DELIVERED & COMPLETED
+                        </span>
+                        <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-gray-600 mb-4 bg-white p-4 rounded-xl border border-gray-200">
+                      <div className="font-bold text-gray-800 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-600"/> Delivery Details:</div>
+                      <ul className="space-y-1 pl-5 list-disc text-gray-700">
+                        <li><strong>County:</strong> {o.county || 'N/A'}</li>
+                        <li><strong>Town/District:</strong> {o.town || 'N/A'}</li>
+                        <li><strong>Location:</strong> {o.location || 'N/A'}</li>
+                        <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
+                        <li><strong>Street/Landmark:</strong> {o.shippingAddress?.details || o.shippingAddress || 'N/A'}</li>
+                        <li><strong>Payment Status:</strong> <span className="uppercase text-emerald-600 font-bold">{o.paymentStatus || 'Paid'}</span></li>
+                      </ul>
+                    </div>
+
+                    <div className="space-y-1.5 text-xs">
+                      {o.items?.map((item: any, i: number) => (
+                        <div key={i} className="flex justify-between text-gray-700 bg-white px-3 py-2 rounded-lg border border-gray-100 font-medium">
+                          <span>{item.quantity}x {item.name || item.product?.variety}</span>
+                          <span className="font-bold">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderAdmin = () => {
     if (user?.role !== 'admin') {
@@ -1535,32 +1551,53 @@ export default function PremiumRiceStore() {
             let totalYearlyRevenue = 0;
             let totalYearlyProfit = 0;
 
+            const categorySales: { [key: string]: { quantity: number, revenue: number, profit: number, sellingPrice: number, costPrice: number } } = {};
+
             adminOrders.forEach(order => {
                if (order.status !== 'failed' && order.paymentStatus !== 'failed') {
                    const d = new Date(order.createdAt);
                    if (d.getFullYear() === financeYear) {
                        totalYearlyRevenue += (order.grandTotal || 0);
-                       const profit = order.items?.reduce((sum: number, item: any) => {
+                       
+                       order.items?.forEach((item: any) => {
+                          const catName = item.name || item.product?.variety || 'Standard Rice';
+                          const selling = item.priceAtPurchase || 0;
+                          const cost = item.product?.costPrice || item.costPrice || (selling * 0.75);
+                          const profit = (selling - cost) * item.quantity;
+                          const rev = selling * item.quantity;
+
+                          if (!categorySales[catName]) {
+                             categorySales[catName] = { quantity: 0, revenue: 0, profit: 0, sellingPrice: selling, costPrice: cost };
+                          }
+                          categorySales[catName].quantity += item.quantity;
+                          categorySales[catName].revenue += rev;
+                          categorySales[catName].profit += profit;
+                       });
+
+                       const orderProfit = order.items?.reduce((sum: number, item: any) => {
                            const cost = item.product?.costPrice || item.costPrice || (item.priceAtPurchase * 0.75);
                            return sum + ((item.priceAtPurchase - cost) * item.quantity);
                        }, 0) || 0;
                        
-                       totalYearlyProfit += profit;
+                       totalYearlyProfit += orderProfit;
                        monthlyRevenue[d.getMonth()] += (order.grandTotal || 0);
-                       monthlyProfit[d.getMonth()] += profit;
+                       monthlyProfit[d.getMonth()] += orderProfit;
                    }
                }
             });
 
             const maxMonthValue = Math.max(...monthlyRevenue, 1);
             const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const activeMonthName = months[new Date().getMonth()];
+            const currentMonthBuyingPriceKey = `${financeYear}-${new Date().getMonth()}`;
+            const currentMonthBuyingPrice = monthlyBuyingPrices[currentMonthBuyingPriceKey] || 120;
 
             return (
               <div className="animate-fadeIn space-y-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-800 pb-6">
                   <div>
-                    <h2 className="text-2xl font-black text-white flex items-center"><DollarSign className="mr-3 text-emerald-500 h-7 w-7"/> Financial Overview</h2>
-                    <p className="text-gray-400 text-xs mt-1">Track actual money paid, logistics revenue, and expected net profit based on buying/selling prices.</p>
+                    <h2 className="text-2xl font-black text-white flex items-center"><DollarSign className="mr-3 text-emerald-500 h-7 w-7"/> Financial Dashboard & Profit Analysis</h2>
+                    <p className="text-gray-400 text-xs mt-1">Displays all received money, categories of rice sold with prices, and monthly buying price configuration.</p>
                   </div>
                   <div className="flex items-center gap-3">
                     <Calendar className="text-gray-500 h-5 w-5" />
@@ -1576,47 +1613,80 @@ export default function PremiumRiceStore() {
                   </div>
                 </div>
 
+                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl flex flex-col sm:flex-row justify-between items-center gap-4">
+                  <div>
+                    <h3 className="text-sm font-black text-emerald-400 uppercase tracking-wider mb-1">Update Monthly Buying Price ({activeMonthName} {financeYear})</h3>
+                    <p className="text-xs text-gray-400">Admin can update the buying price per month using current purchase values to accurately compute profits.</p>
+                  </div>
+                  <div className="flex items-center gap-3 w-full sm:w-auto">
+                    <input 
+                      type="number"
+                      placeholder="Buying Price per Kg (KES)"
+                      defaultValue={currentMonthBuyingPrice}
+                      id="monthlyBuyingPriceInput"
+                      className="bg-white text-black font-black px-4 py-2.5 rounded-xl text-xs w-full sm:w-48 outline-none"
+                    />
+                    <button 
+                      onClick={() => {
+                        const val = Number((document.getElementById('monthlyBuyingPriceInput') as HTMLInputElement)?.value);
+                        if (val > 0) {
+                          setMonthlyBuyingPrices(prev => ({ ...prev, [currentMonthBuyingPriceKey]: val }));
+                          showToast(`Buying price for ${activeMonthName} updated to KES ${val}/kg`, 'success');
+                        } else {
+                          showToast('Please enter a valid price', 'error');
+                        }
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-2.5 rounded-xl text-xs whitespace-nowrap shadow"
+                    >
+                      Save Buying Price
+                    </button>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-6 opacity-10"><DollarSign size={64} className="text-emerald-500" /></div>
-                    <h3 className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-2">Total Gross Revenue ({financeYear})</h3>
+                    <h3 className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-2">Total All Received Money ({financeYear})</h3>
                     <div className="text-4xl font-black font-mono text-white mb-1">KES {totalYearlyRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-                    <div className="text-[10px] text-gray-500 font-bold">Includes products + logistics fees of paid/completed orders.</div>
+                    <div className="text-[10px] text-gray-500 font-bold">Total revenue collected from successfully paid orders.</div>
                   </div>
                   <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-6 opacity-10"><BarChart2 size={64} className="text-emerald-500" /></div>
-                    <h3 className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-2">Expected Product Profit ({financeYear})</h3>
+                    <h3 className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-2">Total Net Profit ({financeYear})</h3>
                     <div className="text-4xl font-black font-mono text-emerald-400 mb-1">KES {totalYearlyProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-                    <div className="text-[10px] text-gray-500 font-bold">Calculated from (Selling Price - Buying Price) * Quantity.</div>
+                    <div className="text-[10px] text-gray-500 font-bold">Calculated from (Selling Price - Buying Price) across all sold categories.</div>
                   </div>
                 </div>
 
                 <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                  <h3 className="text-sm text-gray-300 font-bold uppercase tracking-wider mb-8">Sales & Profit Growth Graph</h3>
-                  <div className="h-64 flex items-end justify-between gap-2 px-2">
-                    {months.map((month, idx) => {
-                       const revHeight = Math.max((monthlyRevenue[idx] / maxMonthValue) * 100, 0);
-                       const profHeight = Math.max((monthlyProfit[idx] / maxMonthValue) * 100, 0);
-                       return (
-                         <div key={month} className="flex flex-col items-center justify-end h-full w-full group relative">
-                           {monthlyRevenue[idx] > 0 && (
-                             <div className="absolute bottom-full mb-2 bg-[#222] text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10 border border-gray-700">
-                               Rev: KES {monthlyRevenue[idx].toLocaleString()}<br/>
-                               Prof: KES {monthlyProfit[idx].toLocaleString()}
-                             </div>
-                           )}
-                           <div className="w-full max-w-[40px] flex items-end justify-center gap-1 h-full">
-                              <div style={{ height: `${revHeight}%` }} className="w-1/2 bg-gray-600 rounded-t-sm transition-all duration-500 min-h-[4px]"></div>
-                              <div style={{ height: `${profHeight}%` }} className="w-1/2 bg-emerald-500 rounded-t-sm transition-all duration-500 min-h-[4px]"></div>
-                           </div>
-                           <div className="text-[10px] text-gray-500 font-bold mt-3 uppercase">{month}</div>
-                         </div>
-                       );
-                    })}
-                  </div>
-                  <div className="flex justify-center items-center gap-6 mt-6 pt-4 border-t border-gray-800 text-[10px] font-bold text-gray-400 uppercase">
-                    <div className="flex items-center"><div className="w-3 h-3 bg-gray-600 rounded-sm mr-2"></div> Gross Revenue</div>
-                    <div className="flex items-center"><div className="w-3 h-3 bg-emerald-500 rounded-sm mr-2"></div> Expected Profit</div>
+                  <h3 className="text-sm text-gray-300 font-bold uppercase tracking-wider mb-4">Rice Categories Sold & Profit Analysis</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs whitespace-nowrap">
+                      <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
+                        <tr>
+                          <th className="px-6 py-4">Rice Category / Variety</th>
+                          <th className="px-6 py-4">Quantity Sold</th>
+                          <th className="px-6 py-4">Average Selling Price</th>
+                          <th className="px-6 py-4">Total Revenue</th>
+                          <th className="px-6 py-4 text-emerald-400">Estimated Profit</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-800/60">
+                        {Object.keys(categorySales).length === 0 ? (
+                          <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">No rice sales categorized yet for {financeYear}.</td></tr>
+                        ) : (
+                          Object.entries(categorySales).map(([catName, data]) => (
+                            <tr key={catName} className="hover:bg-[#1a1a1a]/40">
+                              <td className="px-6 py-4 font-bold text-gray-200">{catName}</td>
+                              <td className="px-6 py-4 font-mono font-bold text-gray-300">{data.quantity} bags</td>
+                              <td className="px-6 py-4 font-mono text-gray-400">KES {(data.revenue / (data.quantity || 1)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                              <td className="px-6 py-4 font-mono font-bold text-white">KES {data.revenue.toLocaleString()}</td>
+                              <td className="px-6 py-4 font-mono font-bold text-emerald-400">KES {data.profit.toLocaleString()}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               </div>
@@ -1627,104 +1697,107 @@ export default function PremiumRiceStore() {
             <div className="animate-fadeIn space-y-6">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-800 pb-6">
                 <div>
-                  <h2 className="text-2xl font-black text-white">Logistics & Dispatch Control</h2>
-                  <p className="text-gray-400 text-xs mt-1">Review live dispatches across all 47 counties and update delivery milestones.</p>
+                  <h2 className="text-2xl font-black text-white">Logistics & Orders Management</h2>
+                  <p className="text-gray-400 text-xs mt-1">Review live dispatches showing user names and complete shipping details across all counties.</p>
                 </div>
                 
-                <div className="flex items-center gap-3 w-full md:w-auto">
-                  <div className="relative flex-1 md:w-64">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 h-4 w-4" />
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                  <button 
+                    onClick={() => {
+                      window.open(`${API_BASE_URL}/admin/orders/export/csv?token=${token}`, '_blank');
+                    }}
+                    className="flex items-center bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 px-4 py-2 rounded-xl text-xs font-bold transition-all"
+                  >
+                    <Download className="h-4 w-4 mr-2" /> Export CSV
+                  </button>
+                  <div className="relative flex-1 sm:w-64">
+                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input 
-                      type="text"
-                      placeholder="Search order ID or phone..."
+                      type="text" 
+                      placeholder="Search User, Order ID..." 
                       value={orderSearchQuery}
                       onChange={(e) => setOrderSearchQuery(e.target.value)}
-                      className="bg-[#141414] border border-gray-700 text-white pl-9 pr-4 py-2 rounded-xl text-xs outline-none focus:border-emerald-500 w-full"
+                      className="w-full bg-white text-black font-bold rounded-xl pl-9 pr-4 py-2 text-xs focus:border-emerald-500 outline-none placeholder-gray-500"
                     />
                   </div>
                 </div>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs whitespace-nowrap">
-                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
-                      <tr>
-                        <th className="px-6 py-4">Order ID</th>
-                        <th className="px-6 py-4">Customer & Phone</th>
-                        <th className="px-6 py-4">Location (County/Town)</th>
-                        <th className="px-6 py-4">Payment</th>
-                        <th className="px-6 py-4">Total (KES)</th>
-                        <th className="px-6 py-4">Status</th>
-                        <th className="px-6 py-4 text-center">Action Milestone</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-800/60">
-                      {adminOrders.filter(o => {
-                        if (!orderSearchQuery) return true;
-                        const q = orderSearchQuery.toLowerCase();
-                        return String(o.id).includes(q) || o.phoneNumber?.toLowerCase().includes(q) || o.county?.toLowerCase().includes(q);
-                      }).map(o => (
-                        <tr key={o.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                          <td className="px-6 py-4 font-mono font-bold text-gray-300">#{o.id}</td>
-                          <td className="px-6 py-4">
-                            <div className="font-bold text-gray-200">{o.user?.fullName || 'Customer'}</div>
-                            <div className="text-gray-500 font-mono text-[10px]">{o.phoneNumber}</div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="font-bold text-gray-300">{o.county}</div>
-                            <div className="text-gray-500 text-[10px]">{o.town}, {o.location}</div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-800 text-gray-300 uppercase">{o.paymentMethod || 'payhero'}</span>
-                            <span className={`block mt-0.5 font-bold text-[10px] ${o.paymentStatus === 'paid' ? 'text-emerald-400' : 'text-rose-400'}`}>{o.paymentStatus || 'pending'}</span>
-                          </td>
-                          <td className="px-6 py-4 font-mono font-black text-emerald-400">KES {o.grandTotal?.toLocaleString()}</td>
-                          <td className="px-6 py-4">
-                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black border font-mono uppercase ${
-                              o.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
-                              o.status === 'dispatched' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30' :
-                              o.status === 'processing' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
-                              'bg-gray-800 text-gray-400 border-gray-700'
-                            }`}>
-                              {o.status}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <select 
-                              value={o.status}
-                              onChange={async (e) => {
-                                const newStatus = e.target.value;
-                                try {
-                                  const res = await fetch(`${API_BASE_URL}/admin/orders/${o.id}/status`, {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                    body: JSON.stringify({ status: newStatus })
-                                  });
-                                  if (res.ok) {
-                                    showToast(`Order #${o.id} status updated to ${newStatus}`, 'success');
-                                    fetchAdminOrders();
-                                  } else {
-                                    showToast('Failed to update order status', 'error');
-                                  }
-                                } catch (err) {
-                                  showToast('Network error updating status', 'error');
-                                }
-                              }}
-                              className="bg-[#222] text-white border border-gray-700 rounded-xl px-3 py-1.5 text-xs font-bold outline-none focus:border-emerald-500 cursor-pointer"
-                            >
-                              <option value="pending">Pending</option>
-                              <option value="processing">Processing</option>
-                              <option value="dispatched">Dispatched</option>
-                              <option value="completed">Completed</option>
-                              <option value="cancelled">Cancelled</option>
-                            </select>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+              <div className="space-y-4">
+                {adminOrders.filter(o => {
+                  if (!orderSearchQuery) return true;
+                  const q = orderSearchQuery.toLowerCase();
+                  return String(o.id).includes(q) || o.county?.toLowerCase().includes(q) || o.user?.fullName?.toLowerCase().includes(q) || o.phoneNumber?.includes(q);
+                }).map(o => (
+                  <div key={o.id} className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-lg">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-gray-800 pb-4 mb-4">
+                      <div>
+                        <div className="flex items-center gap-3">
+                          <span className="font-mono font-black text-emerald-400 text-base">ORDER #{o.id}</span>
+                          <span className="text-xs text-gray-400">Client: <strong className="text-white">{o.user?.fullName || 'Guest Customer'}</strong> ({o.phoneNumber || o.user?.phoneNumber || 'N/A'})</span>
+                        </div>
+                        <span className="text-[10px] text-gray-500 block mt-1">Placed on: {new Date(o.createdAt).toLocaleString()}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <select 
+                          value={o.status}
+                          onChange={async (e) => {
+                             const newStatus = e.target.value;
+                             try {
+                               const res = await fetch(`${API_BASE_URL}/admin/orders/${o.id}/status`, {
+                                 method: 'PUT',
+                                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                 body: JSON.stringify({ status: newStatus })
+                               });
+                               if (res.ok) {
+                                 showToast(`Order #${o.id} status updated to ${newStatus}`, 'success');
+                                 fetchAdminOrders();
+                               } else {
+                                 showToast('Failed to update order status', 'error');
+                               }
+                             } catch (err) {
+                               showToast('Network error updating status', 'error');
+                             }
+                          }}
+                          className="bg-[#1f1f1f] text-emerald-400 border border-gray-700 font-bold text-xs rounded-xl px-3 py-2 outline-none cursor-pointer"
+                        >
+                          <option value="pending">Pending</option>
+                          <option value="processing">Processing</option>
+                          <option value="dispatched">Dispatched</option>
+                          <option value="delivered">Delivered</option>
+                          <option value="completed">Completed</option>
+                          <option value="failed">Failed</option>
+                        </select>
+                        <span className="font-mono font-black text-white text-base">KES {o.grandTotal?.toLocaleString()}</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                      <div className="bg-[#1a1a1a] p-4 rounded-2xl border border-gray-800">
+                        <span className="font-bold text-emerald-400 uppercase tracking-wider block mb-2">Shipping & Logistics Destination</span>
+                        <ul className="space-y-1 text-gray-300">
+                          <li><strong>County:</strong> {o.county || 'N/A'}</li>
+                          <li><strong>Town / District:</strong> {o.town || 'N/A'}</li>
+                          <li><strong>Location:</strong> {o.location || 'N/A'}</li>
+                          <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
+                          <li><strong>Street / Landmark:</strong> {o.shippingAddress?.details || o.shippingAddress || 'N/A'}</li>
+                        </ul>
+                      </div>
+                      <div className="bg-[#1a1a1a] p-4 rounded-2xl border border-gray-800">
+                        <span className="font-bold text-emerald-400 uppercase tracking-wider block mb-2">Payment & Items</span>
+                        <p className="text-gray-300 mb-2">Payment Method: <strong className="text-white uppercase">{o.paymentMethod || 'M-Pesa'}</strong> | Status: <strong className="text-emerald-400 uppercase">{o.paymentStatus || 'Paid'}</strong></p>
+                        <div className="space-y-1 pt-2 border-t border-gray-800">
+                          {o.items?.map((item: any, idx: number) => (
+                            <div key={idx} className="flex justify-between text-gray-400">
+                              <span>{item.quantity}x {item.name || item.product?.variety}</span>
+                              <span className="font-bold text-white">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -1732,9 +1805,57 @@ export default function PremiumRiceStore() {
           {adminTab === 'users' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Accounts Registry</h2>
-                <p className="text-gray-400 text-xs mt-1">Manage registered customer accounts and administrator privileges.</p>
+                <h2 className="text-2xl font-black text-white">User Client Management</h2>
+                <p className="text-gray-400 text-xs mt-1">Manage registered accounts, edit user details, and suspend or unsuspend client accounts.</p>
               </div>
+
+              {editingUser && (
+                <div className="bg-[#141414] border-2 border-emerald-500/50 rounded-3xl p-6 shadow-2xl animate-fadeIn">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Editing User #{editingUser.id}</h3>
+                    <button onClick={() => setEditingUser(null)} className="text-gray-400 hover:text-white"><X size={18}/></button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Full Name</label>
+                      <input type="text" value={editingUser.fullName} onChange={e=>setEditingUser({...editingUser, fullName:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Email Address</label>
+                      <input type="email" value={editingUser.email || ''} onChange={e=>setEditingUser({...editingUser, email:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Phone Number</label>
+                      <input type="text" value={editingUser.phoneNumber} onChange={e=>setEditingUser({...editingUser, phoneNumber:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Role</label>
+                      <select value={editingUser.role} onChange={e=>setEditingUser({...editingUser, role:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs outline-none">
+                        <option value="customer">Customer</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button onClick={async () => {
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/admin/users/${editingUser.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify(editingUser)
+                      });
+                      if (res.ok) {
+                        showToast('User details updated successfully', 'success');
+                        setEditingUser(null);
+                        fetchAdminUsers();
+                      } else {
+                        showToast('Failed to update user', 'error');
+                      }
+                    } catch (err) {
+                      showToast('Network error updating user', 'error');
+                    }
+                  }} className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs hover:bg-emerald-500">Save User Details</button>
+                </div>
+              )}
 
               <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
                 <div className="overflow-x-auto">
@@ -1742,53 +1863,46 @@ export default function PremiumRiceStore() {
                     <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
                       <tr>
                         <th className="px-6 py-4">ID</th>
-                        <th className="px-6 py-4">Full Name & Email</th>
-                        <th className="px-6 py-4">Phone Number</th>
-                        <th className="px-6 py-4">Role Clearance</th>
-                        <th className="px-6 py-4 text-center">Toggle Role</th>
+                        <th className="px-6 py-4">User Name & Email</th>
+                        <th className="px-6 py-4">Phone</th>
+                        <th className="px-6 py-4">Role</th>
+                        <th className="px-6 py-4">Account Status</th>
+                        <th className="px-6 py-4 text-center">Controls</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800/60">
                       {adminUsers.map(u => (
-                        <tr key={u.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                        <tr key={u.id} className="hover:bg-[#1a1a1a]/40">
                           <td className="px-6 py-4 font-mono text-gray-500">#{u.id}</td>
+                          <td className="px-6 py-4 font-bold text-white">{u.fullName} <span className="text-gray-400 font-normal block">{u.email || 'No email'}</span></td>
+                          <td className="px-6 py-4 font-mono text-gray-300">{u.phoneNumber}</td>
+                          <td className="px-6 py-4 uppercase font-bold text-emerald-400">{u.role}</td>
                           <td className="px-6 py-4">
-                            <div className="font-bold text-gray-200">{u.fullName}</div>
-                            <div className="text-gray-500 text-[10px]">{u.email || 'No email provided'}</div>
-                          </td>
-                          <td className="px-6 py-4 font-mono font-bold text-gray-300">{u.phoneNumber}</td>
-                          <td className="px-6 py-4">
-                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black border font-mono uppercase ${
-                              u.role === 'admin' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                            }`}>
-                              {u.role}
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase ${u.isSuspended ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
+                              {u.isSuspended ? 'Suspended' : 'Active'}
                             </span>
                           </td>
-                          <td className="px-6 py-4 text-center">
-                            <button 
-                              onClick={async () => {
-                                const newRole = u.role === 'admin' ? 'customer' : 'admin';
-                                if (confirm(`Change user ${u.fullName} role to ${newRole}?`)) {
-                                  try {
-                                    const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}/role`, {
-                                      method: 'PUT',
-                                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                      body: JSON.stringify({ role: newRole })
-                                    });
-                                    if (res.ok) {
-                                      showToast(`User role updated to ${newRole}`, 'success');
-                                      fetchAdminUsers();
-                                    } else {
-                                      showToast('Failed to update user role', 'error');
-                                    }
-                                  } catch (err) {
-                                    showToast('Network error updating user role', 'error');
-                                  }
+                          <td className="px-6 py-4 text-center space-x-2">
+                            <button onClick={() => setEditingUser(u)} className="p-2 bg-[#1f1f1f] text-gray-300 hover:text-emerald-400 rounded-xl transition-colors" title="Edit User"><Edit size={14}/></button>
+                            <button onClick={async () => {
+                              const newSuspendedState = !u.isSuspended;
+                              try {
+                                const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}/suspend`, {
+                                  method: 'PUT',
+                                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                  body: JSON.stringify({ isSuspended: newSuspendedState })
+                                });
+                                if (res.ok) {
+                                  showToast(`User account ${newSuspendedState ? 'suspended' : 'unsuspended'}`, 'success');
+                                  fetchAdminUsers();
+                                } else {
+                                  showToast('Failed to update suspension state', 'error');
                                 }
-                              }}
-                              className="px-3 py-1.5 bg-[#222] hover:bg-[#333] text-gray-300 rounded-xl font-bold transition-colors text-xs border border-gray-700"
-                            >
-                              Make {u.role === 'admin' ? 'Customer' : 'Admin'}
+                              } catch (err) {
+                                showToast('Network error', 'error');
+                              }
+                            }} className={`p-2 rounded-xl text-xs font-bold transition-colors ${u.isSuspended ? 'bg-emerald-950 text-emerald-400 hover:bg-emerald-900' : 'bg-rose-950 text-rose-400 hover:bg-rose-900'}`} title={u.isSuspended ? 'Unsuspend' : 'Suspend'}>
+                              {u.isSuspended ? <Unlock size={14}/> : <Lock size={14}/>}
                             </button>
                           </td>
                         </tr>
@@ -1803,14 +1917,52 @@ export default function PremiumRiceStore() {
           {adminTab === 'carousel' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Hero & Carousel Management</h2>
-                <p className="text-gray-400 text-xs mt-1">Configure homepage background videos, banners, and promotional carousel slides.</p>
+                <h2 className="text-2xl font-black text-white">Hero Section Configuration (10 Configs)</h2>
+                <p className="text-gray-400 text-xs mt-1">Customize titles, subtitles, videos, images, badge text, and call-to-action buttons.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Edit Hero Showcase Settings</h3>
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl space-y-4">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-2">Edit Hero Configuration Parameters</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Title</label>
+                    <input type="text" value={heroSettings.title || ''} onChange={e=>setHeroSettings({...heroSettings, title:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Subtitle</label>
+                    <input type="text" value={heroSettings.subtitle || ''} onChange={e=>setHeroSettings({...heroSettings, subtitle:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Badge Text</label>
+                    <input type="text" value={heroSettings.badgeText || ''} onChange={e=>setHeroSettings({...heroSettings, badgeText:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">CTA Button Text</label>
+                    <input type="text" value={heroSettings.ctaButtonText || ''} onChange={e=>setHeroSettings({...heroSettings, ctaButtonText:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Secondary Button Text</label>
+                    <input type="text" value={heroSettings.secondaryButtonText || ''} onChange={e=>setHeroSettings({...heroSettings, secondaryButtonText:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Overlay Opacity (%)</label>
+                    <select value={heroSettings.overlayOpacity || '40'} onChange={e=>setHeroSettings({...heroSettings, overlayOpacity:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs outline-none">
+                      <option value="30">30% (Light)</option>
+                      <option value="40">40% (Default)</option>
+                      <option value="60">60% (Darker)</option>
+                      <option value="80">80% (Deep Dark)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Video 1 URL (YouTube Embed)</label>
+                    <input type="text" value={heroSettings.video1 || ''} onChange={e=>setHeroSettings({...heroSettings, video1:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Image 1 URL</label>
+                    <input type="text" value={heroSettings.img1 || ''} onChange={e=>setHeroSettings({...heroSettings, img1:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                  </div>
+                </div>
+                <button onClick={async () => {
                   try {
                     const res = await fetch(`${API_BASE_URL}/admin/config/hero`, {
                       method: 'PUT',
@@ -1818,62 +1970,15 @@ export default function PremiumRiceStore() {
                       body: JSON.stringify(heroSettings)
                     });
                     if (res.ok) {
-                      showToast('Hero configuration updated successfully!', 'success');
+                      showToast('Hero configuration updated across all clients', 'success');
                       fetchHero();
                     } else {
-                      showToast('Failed to update hero settings', 'error');
+                      showToast('Failed to update hero configuration', 'error');
                     }
                   } catch (err) {
-                    showToast('Network error updating hero', 'error');
+                    showToast('Network error', 'error');
                   }
-                }} className="space-y-4">
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Hero Title</label>
-                    <input type="text" value={heroSettings.title || ''} onChange={e => setHeroSettings({...heroSettings, title: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Hero Subtitle</label>
-                    <input type="text" value={heroSettings.subtitle || ''} onChange={e => setHeroSettings({...heroSettings, subtitle: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">YouTube Video Embed URL (Video 1)</label>
-                    <input type="text" value={heroSettings.video1 || ''} onChange={e => setHeroSettings({...heroSettings, video1: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Backdrop Image URL (Img 1)</label>
-                    <input type="text" value={heroSettings.img1 || ''} onChange={e => setHeroSettings({...heroSettings, img1: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  </div>
-                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all">Save Hero Configuration</button>
-                </form>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Add Carousel Slide</h3>
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  try {
-                    const updatedCarousel = [...carousel, newSlide];
-                    const res = await fetch(`${API_BASE_URL}/admin/config/carousel`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                      body: JSON.stringify({ carousel: updatedCarousel })
-                    });
-                    if (res.ok) {
-                      showToast('Carousel slide added successfully', 'success');
-                      setNewSlide({ title: '', subtitle: '', url: '' });
-                      fetchCarousel();
-                    } else {
-                      showToast('Failed to add carousel slide', 'error');
-                    }
-                  } catch (err) {
-                    showToast('Network error adding slide', 'error');
-                  }
-                }} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <input required type="text" placeholder="Slide Title" value={newSlide.title} onChange={e => setNewSlide({...newSlide, title: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  <input required type="text" placeholder="Subtitle Description" value={newSlide.subtitle} onChange={e => setNewSlide({...newSlide, subtitle: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  <input required type="text" placeholder="Image URL" value={newSlide.url} onChange={e => setNewSlide({...newSlide, url: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 md:col-span-3 transition-all">Append Slide to Carousel</button>
-                </form>
+                }} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 mt-4">Save Hero Configurations</button>
               </div>
             </div>
           )}
@@ -1881,63 +1986,35 @@ export default function PremiumRiceStore() {
           {adminTab === 'config' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> Counties & Logistics Engine</h2>
-                <p className="text-gray-400 text-xs mt-1">Configure county-specific transport fees and base logistics delivery rates.</p>
+                <h2 className="text-2xl font-black text-white">Counties & Transport Fee Engine</h2>
+                <p className="text-gray-400 text-xs mt-1">Configure base transport fees and county-specific shipping overrides.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Base Transport Fee</h3>
-                <div className="flex gap-4 items-center">
-                  <input 
-                    type="number" 
-                    value={baseTransportFee} 
-                    onChange={e => setBaseTransportFee(Number(e.target.value))}
-                    className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono w-48"
-                  />
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl space-y-4">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Set County Transport Fee Override</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <select value={countyOverrideForm.county} onChange={e=>setCountyOverrideForm({...countyOverrideForm, county: e.target.value})} className="bg-white text-black font-bold px-4 py-3 rounded-xl text-xs outline-none">
+                    {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <input type="number" placeholder="Transport Fee (KES)" value={countyOverrideForm.fee} onChange={e=>setCountyOverrideForm({...countyOverrideForm, fee: e.target.value})} className="bg-white text-black font-bold px-4 py-3 rounded-xl text-xs outline-none" />
                   <button onClick={async () => {
                     try {
-                      const res = await fetch(`${API_BASE_URL}/admin/config/transport`, {
-                        method: 'PUT',
+                      const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
+                        method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ baseTransportFee })
+                        body: JSON.stringify({ county: countyOverrideForm.county, fee: Number(countyOverrideForm.fee) })
                       });
-                      if (res.ok) showToast('Base transport fee updated', 'success');
-                      else showToast('Failed to update base fee', 'error');
-                    } catch (err) { showToast('Network error', 'error'); }
-                  }} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all">Save Base Fee</button>
-                </div>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">County Specific Transport Override</h3>
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  try {
-                    const updated = { ...countyOverrides, [countyOverrideForm.county]: Number(countyOverrideForm.fee) };
-                    const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                      body: JSON.stringify(updated)
-                    });
-                    if (res.ok) {
-                      showToast(`Transport fee override saved for ${countyOverrideForm.county}`, 'success');
-                      setCountyOverrides(updated);
-                      setCountyOverrideForm({ county: 'Nairobi', fee: '' });
-                    } else {
-                      showToast('Failed to save county override', 'error');
+                      if (res.ok) {
+                        showToast(`Transport fee override saved for ${countyOverrideForm.county}`, 'success');
+                        fetchCountiesConfig();
+                      } else {
+                        showToast('Failed to save override', 'error');
+                      }
+                    } catch (err) {
+                      showToast('Network error', 'error');
                     }
-                  } catch (err) { showToast('Network error', 'error'); }
-                }} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <select 
-                    value={countyOverrideForm.county}
-                    onChange={e => setCountyOverrideForm({...countyOverrideForm, county: e.target.value})}
-                    className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs"
-                  >
-                    {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c} County</option>)}
-                  </select>
-                  <input required type="number" placeholder="Fee Amount (KES)" value={countyOverrideForm.fee} onChange={e => setCountyOverrideForm({...countyOverrideForm, fee: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all">Apply County Override</button>
-                </form>
+                  }} className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6 py-3 rounded-xl text-xs">Save County Fee</button>
+                </div>
               </div>
             </div>
           )}
@@ -1945,20 +2022,23 @@ export default function PremiumRiceStore() {
           {adminTab === 'logs' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> System Audit Logs</h2>
-                <p className="text-gray-400 text-xs mt-1">Real-time telemetry and database event logs.</p>
+                <h2 className="text-2xl font-black text-white">Database Audit Logs</h2>
+                <p className="text-gray-400 text-xs mt-1">Real-time event logging of system transactions and administrator actions.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl font-mono text-xs text-emerald-400 space-y-2 max-h-[600px] overflow-y-auto">
-                {adminLogs.length === 0 ? (
-                  <div className="text-gray-500">No system audit logs recorded or connected.</div>
-                ) : (
-                  adminLogs.map((log, idx) => (
-                    <div key={idx} className="border-b border-gray-800 pb-2">
-                      <span className="text-gray-500">[{new Date(log.timestamp || Date.now()).toLocaleTimeString()}]</span> <strong className="text-white">{log.action || 'SYSTEM_EVENT'}:</strong> {log.details || JSON.stringify(log)}
-                    </div>
-                  ))
-                )}
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                <div className="space-y-3 font-mono text-xs">
+                  {adminLogs.length === 0 ? (
+                    <p className="text-gray-500">No audit logs recorded.</p>
+                  ) : (
+                    adminLogs.map((log, idx) => (
+                      <div key={idx} className="bg-[#1a1a1a] p-3 rounded-xl border border-gray-800 flex justify-between items-center text-gray-300">
+                        <span>{log.message || JSON.stringify(log)}</span>
+                        <span className="text-[10px] text-gray-500">{new Date(log.createdAt || Date.now()).toLocaleTimeString()}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -1968,24 +2048,55 @@ export default function PremiumRiceStore() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans selection:bg-emerald-500 selection:text-white">
-      {renderNav()}
-      
-      {view === 'home' && renderHome()}
-      {view === 'shop' && renderShop()}
-      {view === 'cart' && renderCart()}
-      {view === 'login' && renderAuth()}
-      {view === 'profile' && renderProfile()}
-      {view === 'admin' && renderAdmin()}
-
+    <div className="min-h-screen bg-gray-50 text-gray-900 flex flex-col font-sans selection:bg-emerald-500 selection:text-white">
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl font-bold text-sm flex items-center gap-3 animate-bounce border ${
-          toast.type === 'error' ? 'bg-rose-600 text-white border-rose-700' : 'bg-emerald-950 text-emerald-100 border-emerald-800'
+        <div className={`fixed bottom-6 right-6 z-50 px-6 py-3.5 rounded-2xl shadow-2xl font-black text-sm flex items-center gap-3 animate-bounce border ${
+          toast.type === 'error' ? 'bg-rose-600 text-white border-rose-700' : 'bg-emerald-600 text-white border-emerald-700'
         }`}>
-          {toast.type === 'error' ? <AlertCircle className="h-5 w-5 shrink-0" /> : <CheckCircle className="h-5 w-5 shrink-0 text-emerald-400" />}
-          <span>{toast.message}</span>
+          {toast.type === 'error' ? <AlertTriangle size={18}/> : <CheckCircle size={18}/>}
+          {toast.message}
         </div>
       )}
+
+      {renderNav()}
+
+      <main className="flex-1">
+        {view === 'home' && renderHome()}
+        {view === 'shop' && renderShop()}
+        {view === 'cart' && renderCart()}
+        {view === 'login' && renderAuth()}
+        {view === 'profile' && renderProfile()}
+        {view === 'admin' && renderAdmin()}
+      </main>
+
+      <footer className="bg-emerald-950 text-emerald-300 py-12 px-4 border-t border-emerald-900">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8 text-sm">
+          <div>
+            <div className="flex items-center space-x-2 text-white font-black text-xl mb-3">
+              <Leaf className="h-6 w-6 text-emerald-400" />
+              <span>MWEA HUB</span>
+            </div>
+            <p className="text-emerald-400/80 text-xs leading-relaxed">Direct farm-to-doorstep logistics connecting Mwea paddy fields directly to households and wholesale buyers across all 47 counties in Kenya.</p>
+          </div>
+          <div>
+            <h4 className="font-bold text-white uppercase text-xs tracking-wider mb-3">Quick Navigation</h4>
+            <div className="flex flex-col space-y-2 text-xs">
+              <button onClick={() => setView('home')} className="text-left hover:text-white transition-colors">Home Storefront</button>
+              <button onClick={() => setView('shop')} className="text-left hover:text-white transition-colors">Complete Grain Catalog</button>
+              <button onClick={() => setView('cart')} className="text-left hover:text-white transition-colors">Shopping Bag & Checkout</button>
+              <button onClick={() => setView('profile')} className="text-left hover:text-white transition-colors">My Profile & Order Tracking</button>
+            </div>
+          </div>
+          <div>
+            <h4 className="font-bold text-white uppercase text-xs tracking-wider mb-3">Customer Support & M-Pesa</h4>
+            <p className="text-xs text-emerald-400/80 mb-2">Automated STK Push & Paybill 889900 Integration active.</p>
+            <p className="text-xs font-mono font-bold text-white">Support Hotline: +254 700 000000</p>
+          </div>
+        </div>
+        <div className="max-w-7xl mx-auto mt-8 pt-6 border-t border-emerald-900/60 text-center text-[10px] text-emerald-500 font-medium">
+          © 2026 Mwea Hub Logistics Ltd. All rights reserved. Powered by Direct Rice Supply Chains.
+        </div>
+      </footer>
     </div>
   );
 }
