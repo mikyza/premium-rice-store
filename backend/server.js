@@ -1228,7 +1228,7 @@ async function startServer() {
     });
 
     // --- PAY HERO REAL-TIME PAYMENT CHECKING & LIVE TRACKING API ---
-    expressApp.get('/api/payments/payhero/status/:orderId', authenticateToken, async (req, res) => {
+    const handlePayHeroStatusCheck = async (req, res) => {
       try {
         const order = await Order.findByPk(req.params.orderId);
         if (!order) return res.status(404).json({ error: 'Order not found' });
@@ -1291,6 +1291,7 @@ async function startServer() {
         res.json({
           orderId: order.id,
           status: order.status,
+          paymentStatus: order.paymentDetails?.paidTag || (order.paymentDetails?.isPaid ? 'PAID' : 'PENDING'),
           paymentDetails: order.paymentDetails,
           totalWeightKg: order.totalWeightKg || 0,
           pointsEarned: order.pointsEarned || 0,
@@ -1299,7 +1300,10 @@ async function startServer() {
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
-    });
+    };
+
+    expressApp.get('/api/payments/payhero/status/:orderId', authenticateToken, handlePayHeroStatusCheck);
+    expressApp.get('/api/payment-status/:orderId', authenticateToken, handlePayHeroStatusCheck);
 
     // --- PAY HERO REAL-TIME PAYMENT CALLBACK / WEBHOOK ---
     expressApp.post('/api/payments/payhero/callback', async (req, res) => {
