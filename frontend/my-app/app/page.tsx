@@ -75,6 +75,16 @@ const DEFAULT_REGIONAL_LOGISTICS = {
   streets: ["Main Street / Highway", "Market Road", "Hospital Road", "School Lane", "Opposite Chief's Camp", "Supermarket Landmark"]
 };
 
+// Helper utility to safely format shipping address objects to strings to prevent React Error #31
+const formatShippingAddress = (addr: any) => {
+  if (!addr) return 'Standard Delivery';
+  if (typeof addr === 'string') return addr;
+  if (typeof addr === 'object') {
+    return addr.streetAddress || addr.details || addr.location || [addr.town, addr.county].filter(Boolean).join(', ') || JSON.stringify(addr);
+  }
+  return String(addr);
+};
+
 // ==========================================
 // 2. MAIN APPLICATION COMPONENT
 // ==========================================
@@ -1204,7 +1214,6 @@ export default function PremiumRiceStore() {
   };
 
   const renderProfile = () => {
-    // Transaction Categories in user profile: Pending / In-transit vs Completed (delivered)
     const pendingTransactions = myOrders.filter(o => o.status !== 'delivered' && o.status !== 'completed' && o.paymentStatus !== 'failed');
     const completedTransactions = myOrders.filter(o => o.status === 'delivered' || o.status === 'completed');
 
@@ -1264,7 +1273,7 @@ export default function PremiumRiceStore() {
                       </div>
                     </div>
                     <div className="text-xs text-gray-700">
-                      <strong>Shipping Route:</strong> {o.county}, {o.town}, {o.location} ({o.shippingAddress?.details || o.shippingAddress || 'Standard Delivery'})
+                      <strong>Shipping Route:</strong> {o.county}, {o.town}, {o.location} ({formatShippingAddress(o.shippingAddress)})
                     </div>
                   </div>
                 ))}
@@ -1307,7 +1316,7 @@ export default function PremiumRiceStore() {
                         <li><strong>Town/District:</strong> {o.town || 'N/A'}</li>
                         <li><strong>Location:</strong> {o.location || 'N/A'}</li>
                         <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
-                        <li><strong>Street/Landmark:</strong> {o.shippingAddress?.details || o.shippingAddress || 'N/A'}</li>
+                        <li><strong>Street/Landmark:</strong> {formatShippingAddress(o.shippingAddress)}</li>
                         <li><strong>Payment Status:</strong> <span className="uppercase text-emerald-600 font-bold">{o.paymentStatus || 'Paid'}</span></li>
                       </ul>
                     </div>
@@ -1544,6 +1553,112 @@ export default function PremiumRiceStore() {
             </div>
           )}
 
+          {adminTab === 'orders' && (
+            <div className="animate-fadeIn space-y-6">
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><ShoppingBag className="mr-3 text-emerald-500"/> Logistics & Order Management</h2>
+                <p className="text-gray-400 text-xs mt-1">Review active orders, update delivery statuses, or monitor regional dispatch.</p>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-4 flex items-center gap-3">
+                <Search size={18} className="text-gray-500 ml-2" />
+                <input 
+                  type="text" 
+                  placeholder="Filter orders by ID, Customer Name, or Phone..."
+                  value={orderSearchQuery}
+                  onChange={(e) => setOrderSearchQuery(e.target.value)}
+                  className="bg-transparent text-white font-bold text-xs w-full outline-none placeholder-gray-600"
+                />
+              </div>
+
+              <div className="space-y-4">
+                {adminOrders
+                  .filter(o => {
+                    if (!orderSearchQuery) return true;
+                    const q = orderSearchQuery.toLowerCase();
+                    return String(o.id).includes(q) || o.user?.fullName?.toLowerCase().includes(q) || o.user?.phoneNumber?.includes(q) || o.county?.toLowerCase().includes(q);
+                  })
+                  .map(o => (
+                    <div key={o.id} className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-gray-800/80 pb-4 mb-4">
+                        <div>
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono font-black text-emerald-400 text-base">ORDER #{o.id}</span>
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                              o.status === 'delivered' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                            }`}>
+                              {o.status}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1">Customer: <strong className="text-white">{o.user?.fullName || 'Guest'}</strong> ({o.user?.phoneNumber || 'No Phone'}) • {new Date(o.createdAt).toLocaleString()}</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                           <span className="text-xs text-gray-400 font-bold">Status Update:</span>
+                           <select 
+                             value={o.status}
+                             onChange={async (e) => {
+                               const newStatus = e.target.value;
+                               try {
+                                 const res = await fetch(`${API_BASE_URL}/admin/orders/${o.id}/status`, {
+                                   method: 'PUT',
+                                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                   body: JSON.stringify({ status: newStatus })
+                                 });
+                                 if (res.ok) {
+                                   showToast(`Order #${o.id} status updated to ${newStatus}`, 'success');
+                                   fetchAdminOrders();
+                                 } else {
+                                   showToast('Failed to update order status', 'error');
+                                 }
+                               } catch (err) {
+                                 showToast('Network error updating status', 'error');
+                               }
+                             }}
+                             className="bg-[#1f1f1f] text-emerald-400 font-black text-xs border border-gray-700 rounded-xl px-3 py-2 outline-none cursor-pointer"
+                           >
+                             <option value="pending">Pending</option>
+                             <option value="processing">Processing</option>
+                             <option value="dispatched">Dispatched</option>
+                             <option value="delivered">Delivered</option>
+                             <option value="failed">Failed</option>
+                           </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80">
+                          <p className="font-bold text-gray-300 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-500"/> Delivery Logistics:</p>
+                          <ul className="space-y-1 text-gray-400">
+                            <li>County: <strong className="text-white">{o.county}</strong></li>
+                            <li>Town: <strong className="text-white">{o.town}</strong></li>
+                            <li>Location: <strong className="text-white">{o.location}</strong></li>
+                            <li>Street: <strong className="text-white">{formatShippingAddress(o.shippingAddress)}</strong></li>
+                          </ul>
+                        </div>
+                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80 flex flex-col justify-between">
+                          <div>
+                            <p className="font-bold text-gray-300 mb-2">Order Items ({o.items?.length || 0}):</p>
+                            <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
+                              {o.items?.map((item: any, idx: number) => (
+                                <div key={idx} className="flex justify-between text-gray-400">
+                                  <span>{item.quantity}x {item.name || item.product?.variety}</span>
+                                  <span className="font-bold text-white">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="flex justify-between font-black text-sm text-emerald-400 border-t border-gray-800 pt-2 mt-2">
+                            <span>Grand Total</span>
+                            <span>KES {o.grandTotal?.toLocaleString()}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
           {adminTab === 'finances' && (() => {
             const currentYear = new Date().getFullYear();
             const monthlyRevenue = Array(12).fill(0);
@@ -1654,34 +1769,61 @@ export default function PremiumRiceStore() {
                     <div className="absolute top-0 right-0 p-6 opacity-10"><BarChart2 size={64} className="text-emerald-500" /></div>
                     <h3 className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-2">Total Net Profit ({financeYear})</h3>
                     <div className="text-4xl font-black font-mono text-emerald-400 mb-1">KES {totalYearlyProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-                    <div className="text-[10px] text-gray-500 font-bold">Calculated from (Selling Price - Buying Price) across all sold categories.</div>
+                    <div className="text-[10px] text-gray-500 font-bold">Calculated from selling price minus recorded buying cost.</div>
                   </div>
                 </div>
 
                 <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                  <h3 className="text-sm text-gray-300 font-bold uppercase tracking-wider mb-4">Rice Categories Sold & Profit Analysis</h3>
+                  <h3 className="font-bold text-sm text-white mb-6 flex items-center"><BarChart2 className="mr-2 text-emerald-500" size={18}/> Monthly Revenue & Profit Breakdown ({financeYear})</h3>
+                  <div className="space-y-4">
+                    {months.map((m, idx) => {
+                      const rev = monthlyRevenue[idx];
+                      const prof = monthlyProfit[idx];
+                      const pct = Math.min(Math.round((rev / maxMonthValue) * 100), 100);
+                      return (
+                        <div key={m} className="bg-[#1a1a1a] p-4 rounded-2xl border border-gray-800/80 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                          <div className="w-16 font-black text-emerald-400">{m}</div>
+                          <div className="flex-1 w-full sm:mx-4">
+                            <div className="w-full bg-gray-800 h-3 rounded-full overflow-hidden">
+                              <div className="bg-emerald-500 h-full rounded-full transition-all duration-500" style={{ width: `${pct}%` }}></div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-6 text-xs w-full sm:w-auto justify-between sm:justify-end">
+                            <div><span className="text-gray-500 text-[10px] block">Revenue</span><strong className="font-mono text-white">KES {rev.toLocaleString()}</strong></div>
+                            <div><span className="text-gray-500 text-[10px] block">Profit</span><strong className="font-mono text-emerald-400">KES {prof.toLocaleString()}</strong></div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                  <h3 className="font-bold text-sm text-white mb-4 flex items-center"><Package className="mr-2 text-emerald-500" size={18}/> Rice Category Sales & Margins ({financeYear})</h3>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs whitespace-nowrap">
                       <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
                         <tr>
-                          <th className="px-6 py-4">Rice Category / Variety</th>
-                          <th className="px-6 py-4">Quantity Sold</th>
-                          <th className="px-6 py-4">Average Selling Price</th>
+                          <th className="px-6 py-4">Rice Variety / Category</th>
+                          <th className="px-6 py-4">Bags Sold</th>
+                          <th className="px-6 py-4">Avg Selling Price</th>
+                          <th className="px-6 py-4">Avg Cost Price</th>
                           <th className="px-6 py-4">Total Revenue</th>
-                          <th className="px-6 py-4 text-emerald-400">Estimated Profit</th>
+                          <th className="px-6 py-4">Total Profit</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-800">
+                      <tbody className="divide-y divide-gray-800/60">
                         {Object.keys(categorySales).length === 0 ? (
-                          <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">No category sales recorded for {financeYear}.</td></tr>
+                          <tr><td colSpan={6} className="text-center py-6 text-gray-500">No sales recorded for {financeYear}</td></tr>
                         ) : (
-                          Object.entries(categorySales).map(([cat, data], idx) => (
-                            <tr key={idx} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                              <td className="px-6 py-4 font-bold text-gray-200">{cat}</td>
-                              <td className="px-6 py-4 font-mono">{data.quantity} bags</td>
-                              <td className="px-6 py-4 font-mono">KES {Math.round(data.sellingPrice).toLocaleString()}</td>
+                          Object.entries(categorySales).map(([catName, data]) => (
+                            <tr key={catName} className="hover:bg-[#1a1a1a]/40">
+                              <td className="px-6 py-4 font-bold text-white">{catName}</td>
+                              <td className="px-6 py-4 font-mono font-bold text-emerald-400">{data.quantity} bags</td>
+                              <td className="px-6 py-4 font-mono text-gray-300">KES {Math.round(data.revenue / (data.quantity || 1)).toLocaleString()}</td>
+                              <td className="px-6 py-4 font-mono text-gray-400">KES {Math.round(data.costPrice).toLocaleString()}</td>
                               <td className="px-6 py-4 font-mono font-bold text-white">KES {data.revenue.toLocaleString()}</td>
-                              <td className="px-6 py-4 font-mono font-bold text-emerald-400">KES {Math.round(data.profit).toLocaleString()}</td>
+                              <td className="px-6 py-4 font-mono font-bold text-emerald-400">KES {data.profit.toLocaleString()}</td>
                             </tr>
                           ))
                         )}
@@ -1693,112 +1835,17 @@ export default function PremiumRiceStore() {
             );
           })()}
 
-          {adminTab === 'orders' && (
-            <div className="animate-fadeIn space-y-6">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-800 pb-6">
-                <div>
-                  <h2 className="text-2xl font-black text-white flex items-center"><ShoppingBag className="mr-3 text-emerald-500"/> Logistics & Orders Management</h2>
-                  <p className="text-gray-400 text-xs mt-1">Review customer orders, inspect delivery locations across counties, and update delivery status.</p>
-                </div>
-                <div className="relative w-full sm:w-72">
-                  <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500 h-4 w-4" />
-                  <input 
-                    type="text" 
-                    placeholder="Search by order ID or phone..." 
-                    value={orderSearchQuery}
-                    onChange={(e) => setOrderSearchQuery(e.target.value)}
-                    className="w-full bg-[#141414] text-white border border-gray-700 rounded-xl pl-11 pr-4 py-2.5 text-xs font-bold outline-none focus:border-emerald-500" 
-                  />
-                </div>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs whitespace-nowrap">
-                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
-                      <tr>
-                        <th className="px-6 py-4">Order ID & Date</th>
-                        <th className="px-6 py-4">Customer Phone</th>
-                        <th className="px-6 py-4">Delivery Route (County / Town)</th>
-                        <th className="px-6 py-4">Grand Total</th>
-                        <th className="px-6 py-4">Payment & Status</th>
-                        <th className="px-6 py-4 text-center">Status Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-800/60">
-                      {adminOrders.filter(o => {
-                        if (!orderSearchQuery) return true;
-                        const q = orderSearchQuery.toLowerCase();
-                        return String(o.id).includes(q) || String(o.phoneNumber).includes(q) || String(o.county).toLowerCase().includes(q);
-                      }).map(o => (
-                        <tr key={o.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                          <td className="px-6 py-4">
-                            <span className="font-mono font-bold text-white">#{o.transactionId || o.id}</span>
-                            <span className="text-[10px] text-gray-500 block mt-0.5">{new Date(o.createdAt).toLocaleDateString()}</span>
-                          </td>
-                          <td className="px-6 py-4 font-mono font-bold text-gray-300">{o.phoneNumber}</td>
-                          <td className="px-6 py-4">
-                            <div className="font-bold text-emerald-400">{o.county}</div>
-                            <div className="text-[10px] text-gray-400">{o.town}, {o.location} ({o.shippingAddress})</div>
-                          </td>
-                          <td className="px-6 py-4 font-mono font-bold text-white">KES {o.grandTotal?.toLocaleString()}</td>
-                          <td className="px-6 py-4">
-                            <div className="flex flex-col gap-1">
-                              <span className="text-[10px] font-black uppercase text-emerald-400">{o.paymentStatus || 'Paid'}</span>
-                              <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 w-fit">{o.status}</span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <select 
-                              value={o.status}
-                              onChange={async (e) => {
-                                const newStatus = e.target.value;
-                                try {
-                                  const res = await fetch(`${API_BASE_URL}/admin/orders/${o.id}/status`, {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                    body: JSON.stringify({ status: newStatus })
-                                  });
-                                  if (res.ok) {
-                                    showToast(`Order #${o.id} status updated to ${newStatus}`, 'success');
-                                    fetchAdminOrders();
-                                  } else {
-                                    showToast('Failed to update order status', 'error');
-                                  }
-                                } catch (err) {
-                                  showToast('Network error updating status', 'error');
-                                }
-                              }}
-                              className="bg-[#1f1f1f] text-emerald-300 font-bold border border-gray-700 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-emerald-500 cursor-pointer"
-                            >
-                              <option value="pending">Pending</option>
-                              <option value="processing">Processing</option>
-                              <option value="dispatched">Dispatched</option>
-                              <option value="delivered">Delivered</option>
-                              <option value="completed">Completed</option>
-                              <option value="cancelled">Cancelled</option>
-                            </select>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
           {adminTab === 'users' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Accounts & Role Registry</h2>
-                <p className="text-gray-400 text-xs mt-1">Manage registered customer and administrator accounts.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Accounts & Role Clearance</h2>
+                <p className="text-gray-400 text-xs mt-1">Manage registered accounts, assign administrator privileges, or lock accounts.</p>
               </div>
 
               {editingUser && (
-                <div className="bg-[#1a1a1a] border-2 border-emerald-500/50 rounded-3xl p-6 shadow-2xl animate-fadeIn">
+                <div className="bg-[#1a1a1a] border-2 border-emerald-500/50 rounded-3xl p-6 shadow-2xl animate-fadeIn mb-6">
                   <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Modifying User #{editingUser.id} - {editingUser.fullName}</h3>
+                    <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Modifying User #{editingUser.id} ({editingUser.fullName})</h3>
                     <button onClick={() => setEditingUser(null)} className="text-gray-400 hover:text-white"><X size={18}/></button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -1808,7 +1855,7 @@ export default function PremiumRiceStore() {
                     </div>
                     <div>
                       <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Phone Number</label>
-                      <input type="text" value={editingUser.phoneNumber} onChange={e=>setEditingUser({...editingUser, phoneNumber:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                      <input type="text" value={editingUser.phoneNumber} onChange={e=>setEditingUser({...editingUser, phoneNumber:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
                     </div>
                     <div>
                       <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Role Clearance</label>
@@ -1817,26 +1864,22 @@ export default function PremiumRiceStore() {
                         <option value="admin">Admin</option>
                       </select>
                     </div>
-                    <div>
-                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">New Password (Leave blank to keep current)</label>
-                      <input type="password" placeholder="New password" onChange={e=>setEditingUser({...editingUser, newPassword:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                    </div>
                   </div>
                   <button onClick={async () => {
                     try {
                       const res = await fetch(`${API_BASE_URL}/admin/users/${editingUser.id}`, {
                         method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify(editingUser)
+                        body: JSON.stringify({ fullName: editingUser.fullName, phoneNumber: editingUser.phoneNumber, role: editingUser.role })
                       });
                       if (res.ok) {
-                        showToast('User account successfully updated', 'success');
+                        showToast('User account updated successfully', 'success');
                         setEditingUser(null);
                         fetchAdminUsers();
                       } else {
-                        showToast('Failed to update user account', 'error');
+                        showToast('Failed to update user', 'error');
                       }
                     } catch (err) {
-                      showToast('Network error while updating user', 'error');
+                      showToast('Network error updating user', 'error');
                     }
                   }} className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs hover:bg-emerald-500 mr-3">Save User Changes</button>
                 </div>
@@ -1847,46 +1890,50 @@ export default function PremiumRiceStore() {
                   <table className="w-full text-left text-xs whitespace-nowrap">
                     <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
                       <tr>
-                        <th className="px-6 py-4">User ID</th>
-                        <th className="px-6 py-4">Full Name & Email</th>
+                        <th className="px-6 py-4">ID</th>
+                        <th className="px-6 py-4">Full Name</th>
                         <th className="px-6 py-4">Phone Number</th>
-                        <th className="px-6 py-4">Assigned Role</th>
+                        <th className="px-6 py-4">Email</th>
+                        <th className="px-6 py-4">Role Clearance</th>
                         <th className="px-6 py-4 text-center">Controls</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800/60">
                       {adminUsers.map(u => (
-                        <tr key={u.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                        <tr key={u.id} className="hover:bg-[#1a1a1a]/40">
                           <td className="px-6 py-4 font-mono text-gray-500">#{u.id}</td>
-                          <td className="px-6 py-4 font-bold text-white">
-                            {u.fullName}
-                            <span className="text-[10px] text-gray-400 block font-normal">{u.email || 'No email provided'}</span>
-                          </td>
-                          <td className="px-6 py-4 font-mono font-bold text-gray-300">{u.phoneNumber}</td>
+                          <td className="px-6 py-4 font-bold text-white">{u.fullName}</td>
+                          <td className="px-6 py-4 font-mono text-gray-300">{u.phoneNumber}</td>
+                          <td className="px-6 py-4 font-mono text-gray-400">{u.email || 'N/A'}</td>
                           <td className="px-6 py-4">
-                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${
-                              u.role === 'admin' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase ${
+                              u.role === 'admin' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' : 'bg-gray-800 text-gray-300'
                             }`}>
                               {u.role}
                             </span>
                           </td>
-                          <td className="px-6 py-4 text-center">
-                            <button onClick={() => setEditingUser(u)} className="text-gray-400 hover:text-emerald-400 p-2 bg-[#1f1f1f] rounded-xl mr-2 transition-colors" title="Edit User"><Edit size={14}/></button>
+                          <td className="px-6 py-4 text-center flex items-center justify-center gap-2">
+                            <button onClick={() => setEditingUser(u)} className="p-2 bg-[#1f1f1f] text-gray-400 hover:text-emerald-400 rounded-xl transition-colors" title="Edit User"><Edit size={14}/></button>
                             <button onClick={async () => {
-                              if (confirm(`Permanently delete user ${u.fullName}?`)) {
-                                try {
-                                  const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
-                                  if (res.ok) {
-                                    showToast('User account deleted', 'success');
-                                    fetchAdminUsers();
-                                  } else {
-                                    showToast('Failed to delete user', 'error');
-                                  }
-                                } catch (err) {
-                                  showToast('Network error deleting user', 'error');
+                              const newRole = u.role === 'admin' ? 'customer' : 'admin';
+                              try {
+                                const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}/role`, {
+                                  method: 'PUT',
+                                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                  body: JSON.stringify({ role: newRole })
+                                });
+                                if (res.ok) {
+                                  showToast(`User role updated to ${newRole}`, 'success');
+                                  fetchAdminUsers();
+                                } else {
+                                  showToast('Failed to toggle user role', 'error');
                                 }
+                              } catch (err) {
+                                showToast('Network error toggling role', 'error');
                               }
-                            }} className="text-gray-400 hover:text-rose-500 p-2 bg-[#1f1f1f] rounded-xl transition-colors" title="Delete User"><Trash2 size={14}/></button>
+                            }} className="p-2 bg-[#1f1f1f] text-gray-400 hover:text-emerald-400 rounded-xl transition-colors" title="Toggle Admin Role">
+                              <Shield size={14}/>
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -1900,117 +1947,78 @@ export default function PremiumRiceStore() {
           {adminTab === 'carousel' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Hero & Carousel Visual Management</h2>
-                <p className="text-gray-400 text-xs mt-1">Configure homepage hero text, background video URLs, opacity, and promotional slides.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Hero Banner & Carousel Configuration</h2>
+                <p className="text-gray-400 text-xs mt-1">Configure active videos, background pictures, badge titles, and promotional slider graphics.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Hero Section Settings</h3>
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Update Main Hero Banner Settings</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Title</label>
+                    <input type="text" value={heroSettings.title} onChange={e=>setHeroSettings({...heroSettings, title:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Badge Text</label>
+                    <input type="text" value={heroSettings.badgeText} onChange={e=>setHeroSettings({...heroSettings, badgeText:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Subtitle Description</label>
+                    <textarea value={heroSettings.subtitle} onChange={e=>setHeroSettings({...heroSettings, subtitle:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs h-20" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Background Video URL 1</label>
+                    <input type="text" placeholder="https://www.youtube.com/embed/..." value={heroSettings.video1 || ''} onChange={e=>setHeroSettings({...heroSettings, video1:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Background Image URL 1</label>
+                    <input type="text" placeholder="https://images.unsplash.com/..." value={heroSettings.img1 || ''} onChange={e=>setHeroSettings({...heroSettings, img1:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                  </div>
+                </div>
+                <button onClick={async () => {
                   try {
                     const res = await fetch(`${API_BASE_URL}/admin/config/hero`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                      method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                       body: JSON.stringify(heroSettings)
                     });
                     if (res.ok) {
-                      showToast('Hero configuration updated successfully!', 'success');
+                      showToast('Hero settings saved successfully!', 'success');
                       fetchHero();
                     } else {
-                      showToast('Failed to update hero settings', 'error');
+                      showToast('Failed to save hero settings', 'error');
                     }
-                  } catch (err) { showToast('Network error updating hero settings', 'error'); }
-                }} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Title</label>
-                      <input type="text" value={heroSettings.title || ''} onChange={e=>setHeroSettings({...heroSettings, title:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Subtitle</label>
-                      <input type="text" value={heroSettings.subtitle || ''} onChange={e=>setHeroSettings({...heroSettings, subtitle:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Badge Text</label>
-                      <input type="text" value={heroSettings.badgeText || ''} onChange={e=>setHeroSettings({...heroSettings, badgeText:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Overlay Opacity</label>
-                      <select value={heroSettings.overlayOpacity || '40'} onChange={e=>setHeroSettings({...heroSettings, overlayOpacity:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs">
-                        <option value="40">40% (Light Dark)</option>
-                        <option value="60">60% (Medium Dark)</option>
-                        <option value="80">80% (Deep Dark)</option>
-                      </select>
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">YouTube Video Embed URL (Video 1)</label>
-                      <input type="text" placeholder="https://www.youtube.com/embed/..." value={heroSettings.video1 || ''} onChange={e=>setHeroSettings({...heroSettings, video1:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Image URL 1</label>
-                      <input type="text" value={heroSettings.img1 || ''} onChange={e=>setHeroSettings({...heroSettings, img1:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Image URL 2</label>
-                      <input type="text" value={heroSettings.img2 || ''} onChange={e=>setHeroSettings({...heroSettings, img2:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                    </div>
-                  </div>
-                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 shadow">Save Hero Configuration</button>
-                </form>
+                  } catch (err) {
+                    showToast('Network error saving hero settings', 'error');
+                  }
+                }} className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6 py-3 rounded-xl text-xs shadow">Save Hero Configuration</button>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Promotional Carousel Slides</h3>
-                
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Add Carousel Slide</h3>
                 <form onSubmit={async (e) => {
                   e.preventDefault();
                   try {
                     const updated = [...carousel, newSlide];
                     const res = await fetch(`${API_BASE_URL}/admin/config/carousel`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                      body: JSON.stringify(updated)
+                      method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                      body: JSON.stringify({ slides: updated })
                     });
                     if (res.ok) {
-                      showToast('Carousel slide added successfully', 'success');
+                      showToast('Carousel updated successfully', 'success');
                       setNewSlide({ title: '', subtitle: '', url: '' });
                       fetchCarousel();
                     } else {
-                      showToast('Failed to add slide', 'error');
+                      showToast('Failed to update carousel', 'error');
                     }
-                  } catch (err) { showToast('Network error adding slide', 'error'); }
-                }} className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                  <input required type="text" placeholder="Slide Title" value={newSlide.title} onChange={e=>setNewSlide({...newSlide, title:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  <input required type="text" placeholder="Slide Subtitle" value={newSlide.subtitle} onChange={e=>setNewSlide({...newSlide, subtitle:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  <input required type="text" placeholder="Image URL" value={newSlide.url} onChange={e=>setNewSlide({...newSlide, url:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 md:col-span-3 shadow">Add Carousel Slide</button>
+                  } catch (err) {
+                    showToast('Network error updating carousel', 'error');
+                  }
+                }} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <input required type="text" placeholder="Slide Title" value={newSlide.title} onChange={e=>setNewSlide({...newSlide, title:e.target.value})} className="bg-white text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  <input required type="text" placeholder="Subtitle" value={newSlide.subtitle} onChange={e=>setNewSlide({...newSlide, subtitle:e.target.value})} className="bg-white text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  <input required type="text" placeholder="Image URL" value={newSlide.url} onChange={e=>setNewSlide({...newSlide, url:e.target.value})} className="bg-white text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 md:col-span-3">Add Slide to Carousel</button>
                 </form>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {carousel.map((slide, idx) => (
-                    <div key={idx} className="bg-[#1a1a1a] border border-gray-800 rounded-2xl p-4 flex flex-col justify-between">
-                      <div className="h-32 rounded-xl overflow-hidden mb-3 bg-black">
-                        <img src={slide.url} alt={slide.title} className="w-full h-full object-cover" />
-                      </div>
-                      <h4 className="font-bold text-sm text-white mb-1">{slide.title}</h4>
-                      <p className="text-xs text-gray-400 mb-3">{slide.subtitle}</p>
-                      <button onClick={async () => {
-                        try {
-                          const updated = carousel.filter((_, i) => i !== idx);
-                          const res = await fetch(`${API_BASE_URL}/admin/config/carousel`, {
-                            method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                            body: JSON.stringify(updated)
-                          });
-                          if (res.ok) {
-                            showToast('Slide removed', 'success');
-                            fetchCarousel();
-                          }
-                        } catch (err) { showToast('Error removing slide', 'error'); }
-                      }} className="text-rose-400 hover:text-rose-300 text-xs font-bold flex items-center"><Trash2 size={14} className="mr-1"/> Remove Slide</button>
-                    </div>
-                  ))}
-                </div>
               </div>
             </div>
           )}
@@ -2018,74 +2026,50 @@ export default function PremiumRiceStore() {
           {adminTab === 'config' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> Counties Logistics & Flash Sale Engine</h2>
-                <p className="text-gray-400 text-xs mt-1">Configure county transport fees and trigger Black Friday flash sales in real time.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> Counties & Logistics Engine</h2>
+                <p className="text-gray-400 text-xs mt-1">Configure county transport fees and regional delivery rules.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Black Friday Flash Sale Engine</h3>
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-[#1a1a1a] p-5 rounded-2xl border border-gray-800">
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Set County Delivery Fee Override</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                   <div>
-                    <h4 className="font-bold text-white text-sm mb-1">Flash Sale Status: <span className={flashSale.active ? 'text-emerald-400' : 'text-gray-400'}>{flashSale.active ? 'ACTIVE 🔥' : 'INACTIVE'}</span></h4>
-                    <p className="text-xs text-gray-400">Enabling Black Friday applies 20% discount across all active grain catalog products and broadcasts live timer updates.</p>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Select County</label>
+                    <select value={countyOverrideForm.county} onChange={e=>setCountyOverrideForm({...countyOverrideForm, county:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs">
+                      {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
                   </div>
-                  <button onClick={async () => {
-                    const action = flashSale.active ? 'stop' : 'start';
-                    try {
-                      const res = await fetch(`${API_BASE_URL}/admin/flashsale`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ action, durationMinutes: 60 })
-                      });
-                      if (res.ok) {
-                        showToast(`Flash sale ${action === 'start' ? 'started successfully!' : 'stopped.'}`, 'success');
-                        fetchProducts();
-                      } else {
-                        showToast('Failed to toggle flash sale', 'error');
-                      }
-                    } catch (err) { showToast('Network error toggling flash sale', 'error'); }
-                  }} className={`px-6 py-3 rounded-xl font-black text-xs shadow-lg transition-all ${flashSale.active ? 'bg-rose-600 hover:bg-rose-500 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}>
-                    {flashSale.active ? 'Stop Flash Sale' : 'Start 1-Hour Flash Sale'}
-                  </button>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Transport Fee (KES)</label>
+                    <input type="number" placeholder="250" value={countyOverrideForm.fee} onChange={e=>setCountyOverrideForm({...countyOverrideForm, fee:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                  </div>
                 </div>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">County Logistics & Transport Fees</h3>
-                
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  const feeNum = Number(countyOverrideForm.fee);
-                  if (isNaN(feeNum)) return showToast('Please enter a valid transport fee amount', 'error');
-                  
+                <button onClick={async () => {
                   try {
-                    const updated = { ...countyOverrides, [countyOverrideForm.county]: feeNum };
+                    const updated = { ...countyOverrides, [countyOverrideForm.county]: Number(countyOverrideForm.fee) };
                     const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                      method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                       body: JSON.stringify(updated)
                     });
                     if (res.ok) {
-                      showToast(`Transport fee for ${countyOverrideForm.county} set to KES ${feeNum}`, 'success');
+                      showToast(`Transport fee for ${countyOverrideForm.county} updated`, 'success');
                       setCountyOverrides(updated);
-                      setCountyOverrideForm({ county: 'Nairobi', fee: '' });
                     } else {
-                      showToast('Failed to update county transport fee', 'error');
+                      showToast('Failed to update county fee', 'error');
                     }
-                  } catch (err) { showToast('Network error updating county fee', 'error'); }
-                }} className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-                  <select value={countyOverrideForm.county} onChange={e=>setCountyOverrideForm({...countyOverrideForm, county:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs">
-                    {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <input required type="number" placeholder="Transport Fee (KES)" value={countyOverrideForm.fee} onChange={e=>setCountyOverrideForm({...countyOverrideForm, fee:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 shadow">Set County Transport Fee</button>
-                </form>
+                  } catch (err) {
+                    showToast('Network error updating county fee', 'error');
+                  }
+                }} className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6 py-3 rounded-xl text-xs shadow">Save County Override</button>
+              </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-h-60 overflow-y-auto">
-                  {Object.entries(countyOverrides).map(([c, fee], idx) => (
-                    <div key={idx} className="bg-[#1a1a1a] border border-gray-800 p-3 rounded-xl flex justify-between items-center text-xs">
-                      <span className="font-bold text-gray-300">{c}</span>
-                      <span className="font-mono text-emerald-400 font-bold">KES {fee}</span>
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
+                <h3 className="font-bold text-sm text-white mb-4">Current County Transport Overrides</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {Object.entries(countyOverrides).map(([county, fee]) => (
+                    <div key={county} className="bg-[#1a1a1a] p-3 rounded-2xl border border-gray-800 text-xs flex justify-between items-center">
+                      <span className="font-bold text-gray-300">{county}</span>
+                      <span className="font-mono font-black text-emerald-400">KES {String(fee)}</span>
                     </div>
                   ))}
                 </div>
@@ -2096,20 +2080,21 @@ export default function PremiumRiceStore() {
           {adminTab === 'logs' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> System Audit Logs & Database Activity</h2>
-                <p className="text-gray-400 text-xs mt-1">Real-time audit log of database queries, order processing, and user requests.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> System Audit Logs</h2>
+                <p className="text-gray-400 text-xs mt-1">Real-time database activity logs and admin actions.</p>
               </div>
 
               <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <div className="space-y-3 font-mono text-xs max-h-[600px] overflow-y-auto">
+                <div className="space-y-3 font-mono text-xs">
                   {adminLogs.length === 0 ? (
-                    <div className="text-gray-500 text-center py-8">No audit logs recorded yet.</div>
+                    <div className="text-center py-8 text-gray-500">No recent audit logs recorded.</div>
                   ) : (
                     adminLogs.map((log, idx) => (
-                      <div key={idx} className="bg-[#1a1a1a] border border-gray-800 p-3 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                        <span className="text-emerald-400 font-bold">[{new Date(log.timestamp || Date.now()).toLocaleTimeString()}]</span>
-                        <span className="text-gray-300 flex-1 px-2">{log.action || log.message || JSON.stringify(log)}</span>
-                        <span className="text-[10px] text-gray-500 bg-black/40 px-2 py-1 rounded">{log.user || 'System Node'}</span>
+                      <div key={idx} className="bg-[#1a1a1a] p-4 rounded-2xl border border-gray-800/80 flex justify-between items-center">
+                        <div>
+                          <span className="text-emerald-400 font-bold">[{log.action || 'SYSTEM'}]</span> <span className="text-gray-300">{log.details || log.message || JSON.stringify(log)}</span>
+                        </div>
+                        <span className="text-[10px] text-gray-500">{new Date(log.createdAt || Date.now()).toLocaleTimeString()}</span>
                       </div>
                     ))
                   )}
@@ -2123,68 +2108,66 @@ export default function PremiumRiceStore() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 font-sans text-gray-900 flex flex-col selection:bg-emerald-500 selection:text-white">
+    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans flex flex-col selection:bg-emerald-500 selection:text-white">
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl font-bold text-white flex items-center animate-bounce ${
-          toast.type === 'error' ? 'bg-rose-600 shadow-rose-600/30' : 'bg-emerald-600 shadow-emerald-600/30'
+        <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl font-black text-white text-sm flex items-center animate-bounce ${
+          toast.type === 'error' ? 'bg-rose-600 border border-rose-700' : 'bg-emerald-600 border border-emerald-500'
         }`}>
-          {toast.type === 'error' ? <AlertCircle className="mr-3 h-5 w-5 shrink-0" /> : <CheckCircle className="mr-3 h-5 w-5 shrink-0" />}
-          <span>{toast.message}</span>
+          {toast.type === 'error' ? <AlertCircle className="mr-2 h-5 w-5" /> : <CheckCircle className="mr-2 h-5 w-5" />}
+          {toast.message}
         </div>
       )}
 
       {renderNav()}
 
-      <main className="flex-1">
+      <div className="flex-1">
         {view === 'home' && renderHome()}
         {view === 'shop' && renderShop()}
         {view === 'cart' && renderCart()}
         {view === 'login' && renderAuth()}
         {view === 'profile' && renderProfile()}
         {view === 'admin' && renderAdmin()}
-      </main>
+      </div>
 
-      <footer className="bg-emerald-950 text-emerald-200 py-12 border-t border-emerald-900">
-        <div className="max-w-7xl mx-auto px-4 grid grid-cols-1 md:grid-cols-4 gap-8 mb-10">
+      <footer className="bg-emerald-950 text-emerald-300 py-12 px-4 border-t border-emerald-900 mt-auto">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
           <div>
             <div className="flex items-center mb-4">
               <Leaf className="h-7 w-7 text-emerald-400 mr-2" />
               <span className="font-black text-xl text-white tracking-tight">MWEA HUB</span>
             </div>
-            <p className="text-xs text-emerald-300/80 leading-relaxed font-medium">
-              Direct agricultural logistics platform connecting Mwea paddy farmers directly to wholesale buyers and households across all 47 counties of Kenya.
+            <p className="text-xs text-emerald-400/80 leading-relaxed font-medium">
+              Direct agricultural logistics platform supplying authentic Mwea Pishori and premium Kenya rice varieties directly from farmers to households and wholesale markets.
             </p>
           </div>
           <div>
-            <h4 className="font-black text-white text-sm uppercase tracking-wider mb-4">Quick Links</h4>
+            <h4 className="font-black text-sm text-white uppercase tracking-wider mb-4">Quick Navigation</h4>
             <ul className="space-y-2 text-xs font-medium">
-              <li><button onClick={() => setView('home')} className="hover:text-white transition-colors">Home Storefront</button></li>
+              <li><button onClick={() => setView('home')} className="hover:text-white transition-colors">Home Dashboard</button></li>
               <li><button onClick={() => setView('shop')} className="hover:text-white transition-colors">Grain Catalog</button></li>
               <li><button onClick={() => setView('cart')} className="hover:text-white transition-colors">Shopping Bag</button></li>
               <li><button onClick={() => setView('profile')} className="hover:text-white transition-colors">Order Tracking</button></li>
             </ul>
           </div>
           <div>
-            <h4 className="font-black text-white text-sm uppercase tracking-wider mb-4">Logistics Support</h4>
-            <ul className="space-y-2 text-xs font-medium text-emerald-300/80">
-              <li>Mwea Milling Station: Wanguru, Kirinyaga</li>
-              <li>Nairobi Logistics Hub: CBD / Industrial Area</li>
-              <li>M-Pesa STK Push Integration Enabled</li>
-              <li>Hotline: +254 700 000000</li>
+            <h4 className="font-black text-sm text-white uppercase tracking-wider mb-4">Logistics Support</h4>
+            <ul className="space-y-2 text-xs font-medium text-emerald-400/80">
+              <li>47 Counties Express Delivery</li>
+              <li>M-Pesa STK Push Integration</li>
+              <li>Real-time Stock Inventory</li>
+              <li>Direct Farmer Partnerships</li>
             </ul>
           </div>
           <div>
-            <h4 className="font-black text-white text-sm uppercase tracking-wider mb-4">Security & Compliance</h4>
-            <p className="text-xs text-emerald-300/80 leading-relaxed font-medium mb-3">
-              Secured with JWT authentication, real-time Socket.io inventory synchronization, and direct M-Pesa API integration.
-            </p>
-            <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 bg-emerald-900/60 p-2.5 rounded-xl border border-emerald-800">
-              <Shield size={16} /> Verified Agricultural Node
+            <h4 className="font-black text-sm text-white uppercase tracking-wider mb-4">Secure Mwea Direct</h4>
+            <p className="text-xs text-emerald-400/80 mb-4 font-medium">All transactions encrypted with secure Socket.io and M-Pesa automated callbacks.</p>
+            <div className="bg-emerald-900/50 p-3 rounded-xl border border-emerald-800 text-[11px] font-mono text-white">
+              Status: All Systems Operational 🟢
             </div>
           </div>
         </div>
-        <div className="max-w-7xl mx-auto px-4 border-t border-emerald-900/80 pt-6 text-center text-xs text-emerald-400/60 font-medium">
-          © {new Date().getFullYear()} MWEA HUB Direct Rice Store & Logistics. All rights reserved.
+        <div className="max-w-7xl mx-auto pt-8 border-t border-emerald-900 text-center text-xs text-emerald-400/60 font-medium">
+          © {new Date().getFullYear()} MWEA HUB DIRECT RICE LOGISTICS. All Rights Reserved.
         </div>
       </footer>
     </div>
