@@ -1204,6 +1204,7 @@ export default function PremiumRiceStore() {
   };
 
   const renderProfile = () => {
+    // Transaction Categories in user profile: Pending / In-transit vs Completed (delivered)
     const pendingTransactions = myOrders.filter(o => o.status !== 'delivered' && o.status !== 'completed' && o.paymentStatus !== 'failed');
     const completedTransactions = myOrders.filter(o => o.status === 'delivered' || o.status === 'completed');
 
@@ -1248,32 +1249,25 @@ export default function PremiumRiceStore() {
               <div className="text-center py-8 text-gray-500 font-medium text-sm">No pending shipping transactions.</div>
             ) : (
               <div className="space-y-4">
-                {pendingTransactions.map(o => {
-                  const isPaidStatus = o.paymentStatus === 'paid' || o.isPaid === true || o.status === 'paid' || o.paymentStatus === 'Completed';
-                  return (
-                    <div key={o.id} className="border border-amber-200 bg-amber-50/40 rounded-2xl p-5">
-                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200 pb-3 mb-3">
-                        <div>
-                          <span className="font-mono font-black text-emerald-950 text-base">TXN #{o.transactionId || o.id}</span>
-                          <span className="text-xs text-gray-500 font-medium ml-3">
-                            Payment Status: <strong className={isPaidStatus ? "text-emerald-700 uppercase font-black" : "text-amber-700 uppercase font-black"}>
-                              {isPaidStatus ? "Paid (Confirmed)" : (o.paymentStatus || 'Pending')}
-                            </strong>
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
-                            ● {o.status} (In Shipping)
-                          </span>
-                          <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
-                        </div>
+                {pendingTransactions.map(o => (
+                  <div key={o.id} className="border border-amber-200 bg-amber-50/40 rounded-2xl p-5">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200 pb-3 mb-3">
+                      <div>
+                        <span className="font-mono font-black text-emerald-950 text-base">TXN #{o.transactionId || o.id}</span>
+                        <span className="text-xs text-gray-500 font-medium ml-3">Payment Status: <strong className="text-emerald-700 uppercase">{o.paymentStatus || 'Paid'}</strong></span>
                       </div>
-                      <div className="text-xs text-gray-700">
-                        <strong>Shipping Route:</strong> {o.county}, {o.town}, {o.location} ({o.shippingAddress?.details || o.shippingAddress || 'Standard Delivery'})
+                      <div className="flex items-center gap-3">
+                        <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
+                          ● {o.status} (In Shipping)
+                        </span>
+                        <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
                       </div>
                     </div>
-                  );
-                })}
+                    <div className="text-xs text-gray-700">
+                      <strong>Shipping Route:</strong> {o.county}, {o.town}, {o.location} ({o.shippingAddress?.details || o.shippingAddress || 'Standard Delivery'})
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -1291,46 +1285,43 @@ export default function PremiumRiceStore() {
               <div className="text-center py-8 text-gray-500 font-medium text-sm">No completed delivery transactions recorded yet.</div>
             ) : (
               <div className="space-y-6">
-                {completedTransactions.map(o => {
-                  const isPaidStatus = o.paymentStatus === 'paid' || o.isPaid === true || o.status === 'paid' || o.paymentStatus === 'Completed';
-                  return (
-                    <div key={o.id} className="border border-gray-200 bg-gray-50/50 rounded-2xl p-5">
-                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-200 pb-4 mb-4">
-                        <div>
-                          <span className="font-mono font-black text-emerald-950 text-base">TXN ID: #{o.transactionId || o.id}</span>
-                          <span className="text-xs text-gray-400 font-medium block sm:inline sm:ml-3">{new Date(o.createdAt).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
-                            ● DELIVERED & COMPLETED
-                          </span>
-                          <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
-                        </div>
+                {completedTransactions.map(o => (
+                  <div key={o.id} className="border border-gray-200 bg-gray-50/50 rounded-2xl p-5">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-200 pb-4 mb-4">
+                      <div>
+                        <span className="font-mono font-black text-emerald-950 text-base">TXN ID: #{o.transactionId || o.id}</span>
+                        <span className="text-xs text-gray-400 font-medium block sm:inline sm:ml-3">{new Date(o.createdAt).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</span>
                       </div>
-
-                      <div className="text-xs text-gray-600 mb-4 bg-white p-4 rounded-xl border border-gray-200">
-                        <div className="font-bold text-gray-800 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-600"/> Delivery Details:</div>
-                        <ul className="space-y-1 pl-5 list-disc text-gray-700">
-                          <li><strong>County:</strong> {o.county || 'N/A'}</li>
-                          <li><strong>Town/District:</strong> {o.town || 'N/A'}</li>
-                          <li><strong>Location:</strong> {o.location || 'N/A'}</li>
-                          <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
-                          <li><strong>Street/Landmark:</strong> {o.shippingAddress?.details || o.shippingAddress || 'N/A'}</li>
-                          <li><strong>Payment Status:</strong> <span className={isPaidStatus ? "uppercase text-emerald-600 font-bold" : "uppercase text-amber-600 font-bold"}>{isPaidStatus ? "Paid (Confirmed)" : (o.paymentStatus || 'Pending')}</span></li>
-                        </ul>
-                      </div>
-
-                      <div className="space-y-1.5 text-xs">
-                        {o.items?.map((item: any, i: number) => (
-                          <div key={i} className="flex justify-between text-gray-700 bg-white px-3 py-2 rounded-lg border border-gray-100 font-medium">
-                            <span>{item.quantity}x {item.name || item.product?.variety}</span>
-                            <span className="font-bold">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
-                          </div>
-                        ))}
+                      <div className="flex items-center gap-3">
+                        <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          ● DELIVERED & COMPLETED
+                        </span>
+                        <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
                       </div>
                     </div>
-                  );
-                })}
+
+                    <div className="text-xs text-gray-600 mb-4 bg-white p-4 rounded-xl border border-gray-200">
+                      <div className="font-bold text-gray-800 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-600"/> Delivery Details:</div>
+                      <ul className="space-y-1 pl-5 list-disc text-gray-700">
+                        <li><strong>County:</strong> {o.county || 'N/A'}</li>
+                        <li><strong>Town/District:</strong> {o.town || 'N/A'}</li>
+                        <li><strong>Location:</strong> {o.location || 'N/A'}</li>
+                        <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
+                        <li><strong>Street/Landmark:</strong> {o.shippingAddress?.details || o.shippingAddress || 'N/A'}</li>
+                        <li><strong>Payment Status:</strong> <span className="uppercase text-emerald-600 font-bold">{o.paymentStatus || 'Paid'}</span></li>
+                      </ul>
+                    </div>
+
+                    <div className="space-y-1.5 text-xs">
+                      {o.items?.map((item: any, i: number) => (
+                        <div key={i} className="flex justify-between text-gray-700 bg-white px-3 py-2 rounded-lg border border-gray-100 font-medium">
+                          <span>{item.quantity}x {item.name || item.product?.variety}</span>
+                          <span className="font-bold">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -1595,6 +1586,7 @@ export default function PremiumRiceStore() {
                }
             });
 
+            const maxMonthValue = Math.max(...monthlyRevenue, 1);
             const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
             const activeMonthName = months[new Date().getMonth()];
             const currentMonthBuyingPriceKey = `${financeYear}-${new Date().getMonth()}`;
@@ -1706,16 +1698,16 @@ export default function PremiumRiceStore() {
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-800 pb-6">
                 <div>
                   <h2 className="text-2xl font-black text-white flex items-center"><ShoppingBag className="mr-3 text-emerald-500"/> Logistics & Orders Management</h2>
-                  <p className="text-gray-400 text-xs mt-1">Review customer orders, inspect payment status (paid or not), and update delivery progress.</p>
+                  <p className="text-gray-400 text-xs mt-1">Review customer orders, inspect delivery locations across counties, and update delivery status.</p>
                 </div>
                 <div className="relative w-full sm:w-72">
-                  <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                  <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500 h-4 w-4" />
                   <input 
                     type="text" 
                     placeholder="Search by order ID or phone..." 
                     value={orderSearchQuery}
                     onChange={(e) => setOrderSearchQuery(e.target.value)}
-                    className="bg-[#141414] text-white border border-gray-700 pl-11 pr-4 py-2.5 rounded-xl text-xs outline-none focus:border-emerald-500 w-full font-bold"
+                    className="w-full bg-[#141414] text-white border border-gray-700 rounded-xl pl-11 pr-4 py-2.5 text-xs font-bold outline-none focus:border-emerald-500" 
                   />
                 </div>
               </div>
@@ -1726,87 +1718,69 @@ export default function PremiumRiceStore() {
                     <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
                       <tr>
                         <th className="px-6 py-4">Order ID & Date</th>
-                        <th className="px-6 py-4">Customer & Phone</th>
-                        <th className="px-6 py-4">Destination</th>
-                        <th className="px-6 py-4">Payment Status</th>
-                        <th className="px-6 py-4">Fulfillment Status</th>
-                        <th className="px-6 py-4">Total Amount</th>
-                        <th className="px-6 py-4 text-center">Update Status</th>
+                        <th className="px-6 py-4">Customer Phone</th>
+                        <th className="px-6 py-4">Delivery Route (County / Town)</th>
+                        <th className="px-6 py-4">Grand Total</th>
+                        <th className="px-6 py-4">Payment & Status</th>
+                        <th className="px-6 py-4 text-center">Status Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800/60">
-                      {adminOrders
-                        .filter(o => {
-                          if (!orderSearchQuery) return true;
-                          const q = orderSearchQuery.toLowerCase();
-                          return String(o.id).includes(q) || String(o.phoneNumber).includes(q) || String(o.county).toLowerCase().includes(q);
-                        })
-                        .map(o => {
-                          const isPaidStatus = o.paymentStatus === 'paid' || o.isPaid === true || o.status === 'paid' || o.paymentStatus === 'Completed';
-                          return (
-                            <tr key={o.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                              <td className="px-6 py-4 font-mono">
-                                <span className="font-bold text-white">#{o.id}</span>
-                                <span className="text-[10px] text-gray-500 block">{new Date(o.createdAt).toLocaleDateString()}</span>
-                              </td>
-                              <td className="px-6 py-4">
-                                <div className="font-bold text-gray-200">{o.user?.fullName || 'Customer'}</div>
-                                <div className="text-[10px] font-mono text-gray-400">{o.phoneNumber || o.user?.phoneNumber}</div>
-                              </td>
-                              <td className="px-6 py-4 text-gray-300">
-                                {o.county}, {o.town} ({o.shippingAddress || 'Standard'})
-                              </td>
-                              <td className="px-6 py-4">
-                                <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black border font-mono uppercase ${
-                                  isPaidStatus 
-                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
-                                    : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                                }`}>
-                                  {isPaidStatus ? 'Paid / Confirmed' : (o.paymentStatus || 'Pending')}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4">
-                                <span className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-blue-500/10 text-blue-400 border border-blue-500/30 uppercase font-mono">
-                                  {o.status || 'Processing'}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 font-mono font-bold text-white">
-                                KES {o.grandTotal?.toLocaleString()}
-                              </td>
-                              <td className="px-6 py-4 text-center">
-                                <select 
-                                  value={o.status}
-                                  onChange={async (e) => {
-                                    const newSt = e.target.value;
-                                    try {
-                                      const res = await fetch(`${API_BASE_URL}/admin/orders/${o.id}/status`, {
-                                        method: 'PUT',
-                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                        body: JSON.stringify({ status: newSt })
-                                      });
-                                      if (res.ok) {
-                                        showToast(`Order #${o.id} status updated to ${newSt}`, 'success');
-                                        fetchAdminOrders();
-                                      } else {
-                                        showToast('Failed to update order status', 'error');
-                                      }
-                                    } catch (err) {
-                                      showToast('Network error updating status', 'error');
-                                    }
-                                  }}
-                                  className="bg-[#222] text-white border border-gray-700 rounded-xl px-3 py-1.5 text-xs font-bold outline-none cursor-pointer hover:border-emerald-500"
-                                >
-                                  <option value="pending">Pending</option>
-                                  <option value="processing">Processing</option>
-                                  <option value="dispatched">Dispatched</option>
-                                  <option value="delivered">Delivered</option>
-                                  <option value="completed">Completed</option>
-                                  <option value="cancelled">Cancelled</option>
-                                </select>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                      {adminOrders.filter(o => {
+                        if (!orderSearchQuery) return true;
+                        const q = orderSearchQuery.toLowerCase();
+                        return String(o.id).includes(q) || String(o.phoneNumber).includes(q) || String(o.county).toLowerCase().includes(q);
+                      }).map(o => (
+                        <tr key={o.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                          <td className="px-6 py-4">
+                            <span className="font-mono font-bold text-white">#{o.transactionId || o.id}</span>
+                            <span className="text-[10px] text-gray-500 block mt-0.5">{new Date(o.createdAt).toLocaleDateString()}</span>
+                          </td>
+                          <td className="px-6 py-4 font-mono font-bold text-gray-300">{o.phoneNumber}</td>
+                          <td className="px-6 py-4">
+                            <div className="font-bold text-emerald-400">{o.county}</div>
+                            <div className="text-[10px] text-gray-400">{o.town}, {o.location} ({o.shippingAddress})</div>
+                          </td>
+                          <td className="px-6 py-4 font-mono font-bold text-white">KES {o.grandTotal?.toLocaleString()}</td>
+                          <td className="px-6 py-4">
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[10px] font-black uppercase text-emerald-400">{o.paymentStatus || 'Paid'}</span>
+                              <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 w-fit">{o.status}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <select 
+                              value={o.status}
+                              onChange={async (e) => {
+                                const newStatus = e.target.value;
+                                try {
+                                  const res = await fetch(`${API_BASE_URL}/admin/orders/${o.id}/status`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                    body: JSON.stringify({ status: newStatus })
+                                  });
+                                  if (res.ok) {
+                                    showToast(`Order #${o.id} status updated to ${newStatus}`, 'success');
+                                    fetchAdminOrders();
+                                  } else {
+                                    showToast('Failed to update order status', 'error');
+                                  }
+                                } catch (err) {
+                                  showToast('Network error updating status', 'error');
+                                }
+                              }}
+                              className="bg-[#1f1f1f] text-emerald-300 font-bold border border-gray-700 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-emerald-500 cursor-pointer"
+                            >
+                              <option value="pending">Pending</option>
+                              <option value="processing">Processing</option>
+                              <option value="dispatched">Dispatched</option>
+                              <option value="delivered">Delivered</option>
+                              <option value="completed">Completed</option>
+                              <option value="cancelled">Cancelled</option>
+                            </select>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
@@ -1817,9 +1791,56 @@ export default function PremiumRiceStore() {
           {adminTab === 'users' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Accounts & Role Clearance</h2>
-                <p className="text-gray-400 text-xs mt-1">Manage registered buyers, assign administrator privileges, or update phone contacts.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Accounts & Role Registry</h2>
+                <p className="text-gray-400 text-xs mt-1">Manage registered customer and administrator accounts.</p>
               </div>
+
+              {editingUser && (
+                <div className="bg-[#1a1a1a] border-2 border-emerald-500/50 rounded-3xl p-6 shadow-2xl animate-fadeIn">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Modifying User #{editingUser.id} - {editingUser.fullName}</h3>
+                    <button onClick={() => setEditingUser(null)} className="text-gray-400 hover:text-white"><X size={18}/></button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Full Name</label>
+                      <input type="text" value={editingUser.fullName} onChange={e=>setEditingUser({...editingUser, fullName:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Phone Number</label>
+                      <input type="text" value={editingUser.phoneNumber} onChange={e=>setEditingUser({...editingUser, phoneNumber:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Role Clearance</label>
+                      <select value={editingUser.role} onChange={e=>setEditingUser({...editingUser, role:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs">
+                        <option value="customer">Customer</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">New Password (Leave blank to keep current)</label>
+                      <input type="password" placeholder="New password" onChange={e=>setEditingUser({...editingUser, newPassword:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                    </div>
+                  </div>
+                  <button onClick={async () => {
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/admin/users/${editingUser.id}`, {
+                        method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify(editingUser)
+                      });
+                      if (res.ok) {
+                        showToast('User account successfully updated', 'success');
+                        setEditingUser(null);
+                        fetchAdminUsers();
+                      } else {
+                        showToast('Failed to update user account', 'error');
+                      }
+                    } catch (err) {
+                      showToast('Network error while updating user', 'error');
+                    }
+                  }} className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs hover:bg-emerald-500 mr-3">Save User Changes</button>
+                </div>
+              )}
 
               <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
                 <div className="overflow-x-auto">
@@ -1827,46 +1848,45 @@ export default function PremiumRiceStore() {
                     <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
                       <tr>
                         <th className="px-6 py-4">User ID</th>
-                        <th className="px-6 py-4">Full Name</th>
-                        <th className="px-6 py-4">Email Address</th>
+                        <th className="px-6 py-4">Full Name & Email</th>
                         <th className="px-6 py-4">Phone Number</th>
-                        <th className="px-6 py-4">Role Clearance</th>
-                        <th className="px-6 py-4 text-center">Toggle Role</th>
+                        <th className="px-6 py-4">Assigned Role</th>
+                        <th className="px-6 py-4 text-center">Controls</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800/60">
                       {adminUsers.map(u => (
                         <tr key={u.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
                           <td className="px-6 py-4 font-mono text-gray-500">#{u.id}</td>
-                          <td className="px-6 py-4 font-bold text-white">{u.fullName}</td>
-                          <td className="px-6 py-4 text-gray-400">{u.email || '---'}</td>
-                          <td className="px-6 py-4 font-mono text-gray-300">{u.phoneNumber}</td>
+                          <td className="px-6 py-4 font-bold text-white">
+                            {u.fullName}
+                            <span className="text-[10px] text-gray-400 block font-normal">{u.email || 'No email provided'}</span>
+                          </td>
+                          <td className="px-6 py-4 font-mono font-bold text-gray-300">{u.phoneNumber}</td>
                           <td className="px-6 py-4">
-                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase font-mono border ${
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${
                               u.role === 'admin' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                             }`}>
                               {u.role}
                             </span>
                           </td>
                           <td className="px-6 py-4 text-center">
+                            <button onClick={() => setEditingUser(u)} className="text-gray-400 hover:text-emerald-400 p-2 bg-[#1f1f1f] rounded-xl mr-2 transition-colors" title="Edit User"><Edit size={14}/></button>
                             <button onClick={async () => {
-                              const newRole = u.role === 'admin' ? 'user' : 'admin';
-                              try {
-                                const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}/role`, {
-                                  method: 'PUT',
-                                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                  body: JSON.stringify({ role: newRole })
-                                });
-                                if (res.ok) {
-                                  showToast(`User role updated to ${newRole}`, 'success');
-                                  fetchAdminUsers();
-                                } else {
-                                  showToast('Failed to update role', 'error');
+                              if (confirm(`Permanently delete user ${u.fullName}?`)) {
+                                try {
+                                  const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+                                  if (res.ok) {
+                                    showToast('User account deleted', 'success');
+                                    fetchAdminUsers();
+                                  } else {
+                                    showToast('Failed to delete user', 'error');
+                                  }
+                                } catch (err) {
+                                  showToast('Network error deleting user', 'error');
                                 }
-                              } catch (err) { showToast('Network error', 'error'); }
-                            }} className="px-3 py-1.5 bg-[#222] hover:bg-emerald-600 hover:text-white rounded-xl font-bold text-xs transition-colors">
-                              Make {u.role === 'admin' ? 'User' : 'Admin'}
-                            </button>
+                              }
+                            }} className="text-gray-400 hover:text-rose-500 p-2 bg-[#1f1f1f] rounded-xl transition-colors" title="Delete User"><Trash2 size={14}/></button>
                           </td>
                         </tr>
                       ))}
@@ -1880,12 +1900,12 @@ export default function PremiumRiceStore() {
           {adminTab === 'carousel' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Hero & Carousel Configuration</h2>
-                <p className="text-gray-400 text-xs mt-1">Customize hero title, subtitle, backdrop videos, images, and carousel slides.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Hero & Carousel Visual Management</h2>
+                <p className="text-gray-400 text-xs mt-1">Configure homepage hero text, background video URLs, opacity, and promotional slides.</p>
               </div>
 
               <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Edit Hero Section Parameters</h3>
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Hero Section Settings</h3>
                 <form onSubmit={async (e) => {
                   e.preventDefault();
                   try {
@@ -1900,28 +1920,97 @@ export default function PremiumRiceStore() {
                     } else {
                       showToast('Failed to update hero settings', 'error');
                     }
-                  } catch (err) { showToast('Network error', 'error'); }
+                  } catch (err) { showToast('Network error updating hero settings', 'error'); }
                 }} className="space-y-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Main Hero Title</label>
-                    <input type="text" value={heroSettings.title || ''} onChange={e=>setHeroSettings({...heroSettings, title:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs outline-none" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Subtitle</label>
-                    <textarea rows={2} value={heroSettings.subtitle || ''} onChange={e=>setHeroSettings({...heroSettings, subtitle:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs outline-none" />
-                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Video 1 URL (YouTube Embed or MP4)</label>
-                      <input type="text" value={heroSettings.video1 || ''} onChange={e=>setHeroSettings({...heroSettings, video1:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs font-mono outline-none" />
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Title</label>
+                      <input type="text" value={heroSettings.title || ''} onChange={e=>setHeroSettings({...heroSettings, title:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Image 1 URL</label>
-                      <input type="text" value={heroSettings.img1 || ''} onChange={e=>setHeroSettings({...heroSettings, img1:e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs font-mono outline-none" />
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Subtitle</label>
+                      <input type="text" value={heroSettings.subtitle || ''} onChange={e=>setHeroSettings({...heroSettings, subtitle:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Badge Text</label>
+                      <input type="text" value={heroSettings.badgeText || ''} onChange={e=>setHeroSettings({...heroSettings, badgeText:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Overlay Opacity</label>
+                      <select value={heroSettings.overlayOpacity || '40'} onChange={e=>setHeroSettings({...heroSettings, overlayOpacity:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs">
+                        <option value="40">40% (Light Dark)</option>
+                        <option value="60">60% (Medium Dark)</option>
+                        <option value="80">80% (Deep Dark)</option>
+                      </select>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">YouTube Video Embed URL (Video 1)</label>
+                      <input type="text" placeholder="https://www.youtube.com/embed/..." value={heroSettings.video1 || ''} onChange={e=>setHeroSettings({...heroSettings, video1:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Image URL 1</label>
+                      <input type="text" value={heroSettings.img1 || ''} onChange={e=>setHeroSettings({...heroSettings, img1:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Image URL 2</label>
+                      <input type="text" value={heroSettings.img2 || ''} onChange={e=>setHeroSettings({...heroSettings, img2:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
                     </div>
                   </div>
-                  <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6 py-3 rounded-xl text-xs shadow">Save Hero Configuration</button>
+                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 shadow">Save Hero Configuration</button>
                 </form>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Promotional Carousel Slides</h3>
+                
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    const updated = [...carousel, newSlide];
+                    const res = await fetch(`${API_BASE_URL}/admin/config/carousel`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                      body: JSON.stringify(updated)
+                    });
+                    if (res.ok) {
+                      showToast('Carousel slide added successfully', 'success');
+                      setNewSlide({ title: '', subtitle: '', url: '' });
+                      fetchCarousel();
+                    } else {
+                      showToast('Failed to add slide', 'error');
+                    }
+                  } catch (err) { showToast('Network error adding slide', 'error'); }
+                }} className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <input required type="text" placeholder="Slide Title" value={newSlide.title} onChange={e=>setNewSlide({...newSlide, title:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  <input required type="text" placeholder="Slide Subtitle" value={newSlide.subtitle} onChange={e=>setNewSlide({...newSlide, subtitle:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  <input required type="text" placeholder="Image URL" value={newSlide.url} onChange={e=>setNewSlide({...newSlide, url:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 md:col-span-3 shadow">Add Carousel Slide</button>
+                </form>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {carousel.map((slide, idx) => (
+                    <div key={idx} className="bg-[#1a1a1a] border border-gray-800 rounded-2xl p-4 flex flex-col justify-between">
+                      <div className="h-32 rounded-xl overflow-hidden mb-3 bg-black">
+                        <img src={slide.url} alt={slide.title} className="w-full h-full object-cover" />
+                      </div>
+                      <h4 className="font-bold text-sm text-white mb-1">{slide.title}</h4>
+                      <p className="text-xs text-gray-400 mb-3">{slide.subtitle}</p>
+                      <button onClick={async () => {
+                        try {
+                          const updated = carousel.filter((_, i) => i !== idx);
+                          const res = await fetch(`${API_BASE_URL}/admin/config/carousel`, {
+                            method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                            body: JSON.stringify(updated)
+                          });
+                          if (res.ok) {
+                            showToast('Slide removed', 'success');
+                            fetchCarousel();
+                          }
+                        } catch (err) { showToast('Error removing slide', 'error'); }
+                      }} className="text-rose-400 hover:text-rose-300 text-xs font-bold flex items-center"><Trash2 size={14} className="mr-1"/> Remove Slide</button>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -1929,61 +2018,76 @@ export default function PremiumRiceStore() {
           {adminTab === 'config' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> Counties Shipping & Engine Settings</h2>
-                <p className="text-gray-400 text-xs mt-1">Configure base transport fees and county-specific overrides for all 47 counties.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> Counties Logistics & Flash Sale Engine</h2>
+                <p className="text-gray-400 text-xs mt-1">Configure county transport fees and trigger Black Friday flash sales in real time.</p>
               </div>
 
               <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Set County Transport Override Fee</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Black Friday Flash Sale Engine</h3>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-[#1a1a1a] p-5 rounded-2xl border border-gray-800">
                   <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Select County</label>
-                    <select 
-                      value={countyOverrideForm.county}
-                      onChange={e => setCountyOverrideForm({...countyOverrideForm, county: e.target.value})}
-                      className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs outline-none"
-                    >
-                      {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
+                    <h4 className="font-bold text-white text-sm mb-1">Flash Sale Status: <span className={flashSale.active ? 'text-emerald-400' : 'text-gray-400'}>{flashSale.active ? 'ACTIVE 🔥' : 'INACTIVE'}</span></h4>
+                    <p className="text-xs text-gray-400">Enabling Black Friday applies 20% discount across all active grain catalog products and broadcasts live timer updates.</p>
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Transport Fee (KES)</label>
-                    <input 
-                      type="number"
-                      placeholder="e.g. 350"
-                      value={countyOverrideForm.fee}
-                      onChange={e => setCountyOverrideForm({...countyOverrideForm, fee: e.target.value})}
-                      className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs font-mono outline-none"
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <button 
-                      onClick={async () => {
-                        const feeNum = Number(countyOverrideForm.fee);
-                        if (feeNum >= 0) {
-                          const newOverrides = { ...countyOverrides, [countyOverrideForm.county]: feeNum };
-                          try {
-                            const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
-                              method: 'PUT',
-                              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                              body: JSON.stringify(newOverrides)
-                            });
-                            if (res.ok) {
-                              setCountyOverrides(newOverrides);
-                              showToast(`Shipping fee for ${countyOverrideForm.county} updated to KES ${feeNum}`, 'success');
-                            } else {
-                              showToast('Failed to update county fee', 'error');
-                            }
-                          } catch (err) { showToast('Network error', 'error'); }
-                        } else {
-                          showToast('Please enter a valid fee', 'error');
-                        }
-                      }}
-                      className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl text-xs shadow"
-                    >
-                      Save County Fee
-                    </button>
-                  </div>
+                  <button onClick={async () => {
+                    const action = flashSale.active ? 'stop' : 'start';
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/admin/flashsale`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ action, durationMinutes: 60 })
+                      });
+                      if (res.ok) {
+                        showToast(`Flash sale ${action === 'start' ? 'started successfully!' : 'stopped.'}`, 'success');
+                        fetchProducts();
+                      } else {
+                        showToast('Failed to toggle flash sale', 'error');
+                      }
+                    } catch (err) { showToast('Network error toggling flash sale', 'error'); }
+                  }} className={`px-6 py-3 rounded-xl font-black text-xs shadow-lg transition-all ${flashSale.active ? 'bg-rose-600 hover:bg-rose-500 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}>
+                    {flashSale.active ? 'Stop Flash Sale' : 'Start 1-Hour Flash Sale'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">County Logistics & Transport Fees</h3>
+                
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const feeNum = Number(countyOverrideForm.fee);
+                  if (isNaN(feeNum)) return showToast('Please enter a valid transport fee amount', 'error');
+                  
+                  try {
+                    const updated = { ...countyOverrides, [countyOverrideForm.county]: feeNum };
+                    const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                      body: JSON.stringify(updated)
+                    });
+                    if (res.ok) {
+                      showToast(`Transport fee for ${countyOverrideForm.county} set to KES ${feeNum}`, 'success');
+                      setCountyOverrides(updated);
+                      setCountyOverrideForm({ county: 'Nairobi', fee: '' });
+                    } else {
+                      showToast('Failed to update county transport fee', 'error');
+                    }
+                  } catch (err) { showToast('Network error updating county fee', 'error'); }
+                }} className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                  <select value={countyOverrideForm.county} onChange={e=>setCountyOverrideForm({...countyOverrideForm, county:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs">
+                    {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <input required type="number" placeholder="Transport Fee (KES)" value={countyOverrideForm.fee} onChange={e=>setCountyOverrideForm({...countyOverrideForm, fee:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 shadow">Set County Transport Fee</button>
+                </form>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-h-60 overflow-y-auto">
+                  {Object.entries(countyOverrides).map(([c, fee], idx) => (
+                    <div key={idx} className="bg-[#1a1a1a] border border-gray-800 p-3 rounded-xl flex justify-between items-center text-xs">
+                      <span className="font-bold text-gray-300">{c}</span>
+                      <span className="font-mono text-emerald-400 font-bold">KES {fee}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -1992,21 +2096,24 @@ export default function PremiumRiceStore() {
           {adminTab === 'logs' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> System Audit Logs</h2>
-                <p className="text-gray-400 text-xs mt-1">Real-time log stream of database transactions, user authentications, and payment events.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> System Audit Logs & Database Activity</h2>
+                <p className="text-gray-400 text-xs mt-1">Real-time audit log of database queries, order processing, and user requests.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl font-mono text-xs space-y-2 max-h-[600px] overflow-y-auto">
-                {adminLogs.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">No audit log records found.</div>
-                ) : (
-                  adminLogs.map((log, idx) => (
-                    <div key={idx} className="bg-[#1a1a1a] p-3 rounded-xl border border-gray-800 flex justify-between items-center">
-                      <span className="text-emerald-400">{log.message || JSON.stringify(log)}</span>
-                      <span className="text-[10px] text-gray-500">{new Date(log.timestamp || Date.now()).toLocaleTimeString()}</span>
-                    </div>
-                  ))
-                )}
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                <div className="space-y-3 font-mono text-xs max-h-[600px] overflow-y-auto">
+                  {adminLogs.length === 0 ? (
+                    <div className="text-gray-500 text-center py-8">No audit logs recorded yet.</div>
+                  ) : (
+                    adminLogs.map((log, idx) => (
+                      <div key={idx} className="bg-[#1a1a1a] border border-gray-800 p-3 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <span className="text-emerald-400 font-bold">[{new Date(log.timestamp || Date.now()).toLocaleTimeString()}]</span>
+                        <span className="text-gray-300 flex-1 px-2">{log.action || log.message || JSON.stringify(log)}</span>
+                        <span className="text-[10px] text-gray-500 bg-black/40 px-2 py-1 rounded">{log.user || 'System Node'}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -2016,13 +2123,13 @@ export default function PremiumRiceStore() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans selection:bg-emerald-500 selection:text-white flex flex-col">
+    <div className="min-h-screen bg-gray-50 font-sans text-gray-900 flex flex-col selection:bg-emerald-500 selection:text-white">
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-[100] px-6 py-4 rounded-2xl shadow-2xl font-black text-sm flex items-center gap-3 animate-bounce text-white ${
-          toast.type === 'error' ? 'bg-rose-600' : 'bg-emerald-600'
+        <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl font-bold text-white flex items-center animate-bounce ${
+          toast.type === 'error' ? 'bg-rose-600 shadow-rose-600/30' : 'bg-emerald-600 shadow-emerald-600/30'
         }`}>
-          {toast.type === 'error' ? <AlertCircle size={20}/> : <CheckCircle size={20}/>}
-          {toast.message}
+          {toast.type === 'error' ? <AlertCircle className="mr-3 h-5 w-5 shrink-0" /> : <CheckCircle className="mr-3 h-5 w-5 shrink-0" />}
+          <span>{toast.message}</span>
         </div>
       )}
 
@@ -2033,43 +2140,51 @@ export default function PremiumRiceStore() {
         {view === 'shop' && renderShop()}
         {view === 'cart' && renderCart()}
         {view === 'login' && renderAuth()}
-        {view === 'admin' && renderAdmin()}
         {view === 'profile' && renderProfile()}
+        {view === 'admin' && renderAdmin()}
       </main>
 
-      <footer className="bg-emerald-950 text-emerald-200 py-12 px-4 border-t border-emerald-900 mt-auto">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
+      <footer className="bg-emerald-950 text-emerald-200 py-12 border-t border-emerald-900">
+        <div className="max-w-7xl mx-auto px-4 grid grid-cols-1 md:grid-cols-4 gap-8 mb-10">
           <div>
             <div className="flex items-center mb-4">
-              <Leaf className="h-6 w-6 text-emerald-400 mr-2" />
+              <Leaf className="h-7 w-7 text-emerald-400 mr-2" />
               <span className="font-black text-xl text-white tracking-tight">MWEA HUB</span>
             </div>
-            <p className="text-xs text-emerald-300/80 leading-relaxed font-medium">Direct agricultural rice logistics from Mwea paddy fields straight to your household and wholesale warehouses across Kenya.</p>
+            <p className="text-xs text-emerald-300/80 leading-relaxed font-medium">
+              Direct agricultural logistics platform connecting Mwea paddy farmers directly to wholesale buyers and households across all 47 counties of Kenya.
+            </p>
           </div>
           <div>
-            <h4 className="font-bold text-sm text-white uppercase tracking-wider mb-3">Quick Links</h4>
+            <h4 className="font-black text-white text-sm uppercase tracking-wider mb-4">Quick Links</h4>
             <ul className="space-y-2 text-xs font-medium">
-              <li><button onClick={() => setView('home')} className="hover:text-white transition-colors">Home Dashboard</button></li>
+              <li><button onClick={() => setView('home')} className="hover:text-white transition-colors">Home Storefront</button></li>
               <li><button onClick={() => setView('shop')} className="hover:text-white transition-colors">Grain Catalog</button></li>
               <li><button onClick={() => setView('cart')} className="hover:text-white transition-colors">Shopping Bag</button></li>
-              <li><button onClick={() => setView('profile')} className="hover:text-white transition-colors">Track Orders</button></li>
+              <li><button onClick={() => setView('profile')} className="hover:text-white transition-colors">Order Tracking</button></li>
             </ul>
           </div>
           <div>
-            <h4 className="font-bold text-sm text-white uppercase tracking-wider mb-3">Customer Support</h4>
+            <h4 className="font-black text-white text-sm uppercase tracking-wider mb-4">Logistics Support</h4>
             <ul className="space-y-2 text-xs font-medium text-emerald-300/80">
-              <li>Hotline: +254 712 345 678</li>
-              <li>Email: support@mweahub.co.ke</li>
-              <li>Mwea, Kirinyaga County, Kenya</li>
+              <li>Mwea Milling Station: Wanguru, Kirinyaga</li>
+              <li>Nairobi Logistics Hub: CBD / Industrial Area</li>
+              <li>M-Pesa STK Push Integration Enabled</li>
+              <li>Hotline: +254 700 000000</li>
             </ul>
           </div>
           <div>
-            <h4 className="font-bold text-sm text-white uppercase tracking-wider mb-3">M-Pesa Secure Checkout</h4>
-            <p className="text-xs text-emerald-300/80 leading-relaxed font-medium">Instant STK Push integration with secure Paybill routing for verified agricultural orders.</p>
+            <h4 className="font-black text-white text-sm uppercase tracking-wider mb-4">Security & Compliance</h4>
+            <p className="text-xs text-emerald-300/80 leading-relaxed font-medium mb-3">
+              Secured with JWT authentication, real-time Socket.io inventory synchronization, and direct M-Pesa API integration.
+            </p>
+            <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 bg-emerald-900/60 p-2.5 rounded-xl border border-emerald-800">
+              <Shield size={16} /> Verified Agricultural Node
+            </div>
           </div>
         </div>
-        <div className="max-w-7xl mx-auto pt-8 border-t border-emerald-900/60 text-center text-[11px] text-emerald-400/60 font-mono">
-          &copy; {new Date().getFullYear()} Mwea Hub Direct Rice Logistics. All rights reserved.
+        <div className="max-w-7xl mx-auto px-4 border-t border-emerald-900/80 pt-6 text-center text-xs text-emerald-400/60 font-medium">
+          © {new Date().getFullYear()} MWEA HUB Direct Rice Store & Logistics. All rights reserved.
         </div>
       </footer>
     </div>
