@@ -32,7 +32,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_
 // Resend Email Client Initialization
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dR7G9AZb_MQdHKVHqAj44JSQF6gxZmEab');
 
-// Pay Hero Credentials Configuration (Cleaned to prevent 401 string corruption)
+// Pay Hero Credentials Configuration
 const getPayHeroAuthHeader = () => {
   if (process.env.PAYHERO_BASIC_AUTH) {
     const cleanAuth = process.env.PAYHERO_BASIC_AUTH.replace(/[\r\n]+/g, '').trim();
@@ -55,7 +55,7 @@ console.log('🚀 Initializing Premium Rice & Grain E-Commerce Backend...');
 console.log('DEBUG: Booting unified agricultural & hardware architecture with Pay Hero Integration...');
 
 // ==========================================
-// 1. OFFLINE & ONLINE UPLOAD DIRECTORY CONFIGURATION (MULTER)
+// 1. UPLOAD DIRECTORY CONFIGURATION (MULTER)
 // ==========================================
 const uploadDir = path.join(__dirname, 'public', 'uploads');
 const imagesDir = path.join(__dirname, 'public', 'images');
@@ -111,7 +111,7 @@ const Cart = sequelize.models.Cart || sequelize.define('Cart', {
   }
 });
 
-// Setup Model Associations for Cart
+// Setup Model Associations
 if (Cart && RiceProduct && !Cart.associations.RiceProduct) {
   Cart.belongsTo(RiceProduct, { foreignKey: 'productId', as: 'product' });
 }
@@ -366,6 +366,7 @@ async function startServer() {
     };
     await SystemConfig.findOrCreate({ where: { key: 'logistics_hierarchy' }, defaults: { value: kenyaLogisticsHierarchy } });
 
+    // --- EXPANDED 10-FIELD HERO CONFIGURATION DEFAULT ---
     await SystemConfig.findOrCreate({
       where: { key: 'hero_settings' },
       defaults: {
@@ -374,6 +375,14 @@ async function startServer() {
           url: 'https://www.youtube.com/embed/gjZAThNHGwI?start=6&autoplay=1&mute=1&loop=1&playlist=gjZAThNHGwI',
           title: 'Direct From Mwea Paddy Fields',
           subtitle: '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.',
+          badgeText: '🌾 100% Authentic Mwea Harvest',
+          buttonText: 'Shop Fresh Harvest Now',
+          buttonLink: '/catalog',
+          secondaryButtonText: 'View Flash Deals',
+          secondaryButtonLink: '#flash-sales',
+          overlayOpacity: 0.4,
+          alignment: 'center',
+          autoPlay: true,
           videoDuration: 5,
           imageDuration: 4
         }
@@ -570,7 +579,7 @@ async function startServer() {
         });
 
         if (!user || !user.isActive) {
-          return res.status(401).json({ error: 'Invalid credentials or account disabled' });
+          return res.status(401).json({ error: 'Invalid credentials or account disabled/suspended' });
         }
 
         if (!user.password) {
@@ -587,6 +596,72 @@ async function startServer() {
       } catch (err) { 
         console.error("Login Error:", err);
         res.status(500).json({ error: err.message || 'Internal server authentication failure' }); 
+      }
+    });
+
+    // --- USER PROFILE SELF-MANAGEMENT & EDIT USER DETAILS ---
+    expressApp.get('/api/user/profile', authenticateToken, async (req, res) => {
+      try {
+        const user = await User.findByPk(req.user.id, { attributes: { exclude: ['password', 'resetToken', 'resetTokenExpires'] } });
+        if (!user) return res.status(404).json({ error: 'User profile not found' });
+        res.json(user);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.put('/api/user/profile', authenticateToken, async (req, res) => {
+      try {
+        const { fullName, email, phoneNumber, currentPassword, newPassword } = req.body || {};
+        const user = await User.findByPk(req.user.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (fullName !== undefined) user.fullName = fullName;
+        if (email !== undefined) user.email = email;
+        if (phoneNumber !== undefined) user.phoneNumber = phoneNumber;
+
+        if (newPassword && newPassword.trim() !== '') {
+          if (user.password) {
+            if (!currentPassword) {
+              return res.status(400).json({ error: 'Current password is required to set a new password' });
+            }
+            const match = await bcrypt.compare(currentPassword, user.password);
+            if (!match) {
+              return res.status(400).json({ error: 'Current password is incorrect' });
+            }
+          }
+          user.password = await bcrypt.hash(newPassword, 12);
+        }
+
+        await user.save();
+        res.json({ 
+          message: 'Profile details updated successfully', 
+          user: { 
+            id: user.id, 
+            fullName: user.fullName, 
+            email: user.email, 
+            phoneNumber: user.phoneNumber, 
+            role: user.role, 
+            rewardPoints: user.rewardPoints || 0 
+          } 
+        });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- USER SELF ACCOUNT SUSPENSION ---
+    expressApp.post('/api/user/suspend', authenticateToken, async (req, res) => {
+      try {
+        const user = await User.findByPk(req.user.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        user.isActive = false;
+        await user.save();
+
+        res.json({ message: 'Account suspended successfully. Contact support if you need to reactivate.' });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
       }
     });
 
@@ -913,7 +988,7 @@ async function startServer() {
       }
     });
 
-    // --- GET SINGLE ORDER BY ID (WITH FULL PAYMENT DETAILS) ---
+    // --- GET SINGLE ORDER BY ID (WITH FULL USER & PAYMENT DETAILS) ---
     expressApp.get('/api/orders/:id', authenticateToken, async (req, res) => {
       try {
         const order = await Order.findByPk(req.params.id, {
@@ -1032,6 +1107,9 @@ async function startServer() {
           builtOrderLineItems.push({ 
             productId: product.id, 
             name: `${product.brandName} ${product.variety || ''} (${product.weightKg || 0}kg)`,
+            variety: product.variety || 'Aromatic Rice',
+            brandName: product.brandName,
+            weightKg: product.weightKg || 0,
             quantity: item.quantity, 
             priceAtPurchase: purchasePrice,
             buyingPrice: product.buyingPrice || (purchasePrice * 0.75),
@@ -1187,7 +1265,7 @@ async function startServer() {
             paidTag: 'PAID',
             paidAt: new Date()
           };
-          order.status = 'pending';
+          if (order.status === 'payment_failed') order.status = 'pending';
           
           const totalKg = order.totalWeightKg || 0;
           const points = Number((totalKg * 0.2).toFixed(2));
@@ -1245,7 +1323,9 @@ async function startServer() {
             const existingPaymentDetails = order.paymentDetails || {};
             
             if (isPaymentSuccessful) {
-              order.status = 'pending'; // Display pending, waiting for admin action
+              if (order.status === 'payment_failed' || order.status === 'pending') {
+                order.status = 'pending'; 
+              }
               order.paymentDetails = {
                 ...existingPaymentDetails,
                 isPaid: true,
@@ -1264,7 +1344,7 @@ async function startServer() {
                 await user.save();
               }
 
-              console.log(`🎉 Payment VERIFIED for Order #${order.id}. Tag: PAID. Waiting for admin status update. M-Pesa Receipt: ${mpesaReceipt}`);
+              console.log(`🎉 Payment VERIFIED for Order #${order.id}. Tag: PAID. Waiting for admin shipping update. M-Pesa Receipt: ${mpesaReceipt}`);
             } else {
               const reason = responseObj.message || responseObj.failure_reason || responseObj.ResultDesc || 'Insufficient balance or user cancelled transaction';
               order.status = 'payment_failed';
@@ -1305,12 +1385,13 @@ async function startServer() {
     // 7. SECURE ADMINISTRATIVE ENGINE & ANALYTICS
     // ==========================================
     
-    // --- ADMIN FINANCIAL ANALYTICS & PROFIT GROWTH ROUTE ---
+    // --- ADMIN FINANCIAL DASHBOARD ROUTE (ONLY RECEIVED MONEY & CATEGORY PROFIT CALCULATIONS) ---
     expressApp.get('/api/admin/analytics/finances', authenticateToken, requireAdmin, async (req, res) => {
       try {
         const selectedYear = Number(req.query.year || new Date().getFullYear());
         
         const allOrders = await Order.findAll({
+          include: [{ model: User, attributes: ['id', 'fullName', 'phoneNumber', 'email'] }],
           order: [['createdAt', 'DESC']]
         });
 
@@ -1320,19 +1401,24 @@ async function startServer() {
           productMap[p.id] = p;
         });
 
-        let totalMoneyPaid = 0;
-        let totalExpectedProfit = 0;
+        let totalReceivedMoney = 0;
+        let totalBuyingCost = 0;
+        let totalNetProfit = 0;
         let totalKgSold = 0;
         let totalPointsAwarded = 0;
 
         const yearsSet = new Set([new Date().getFullYear()]);
 
+        // Category & Rice Variety Sales Map
+        const categorySalesMap = {};
+
         const monthlyStats = Array.from({ length: 12 }, (_, i) => ({
           monthIndex: i,
           month: new Date(2000, i, 1).toLocaleString('en-US', { month: 'short' }),
-          totalSales: 0,
+          totalReceivedSales: 0,
+          totalBuyingCost: 0,
           totalProfit: 0,
-          orderCount: 0
+          paidOrderCount: 0
         }));
 
         allOrders.forEach(order => {
@@ -1340,55 +1426,167 @@ async function startServer() {
           const orderYear = createdAt.getFullYear();
           yearsSet.add(orderYear);
 
-          const isPaid = order.paymentDetails && (order.paymentDetails.isPaid || order.paymentDetails.paidTag === 'PAID' || order.status === 'paid' || order.status === 'completed' || order.status === 'delivered');
-
-          let orderProfit = 0;
-          let orderKg = order.totalWeightKg || 0;
-
-          if (Array.isArray(order.items)) {
-            order.items.forEach(item => {
-              const prod = productMap[item.productId];
-              const qty = item.quantity || 1;
-              const sellPrice = item.priceAtPurchase || (prod ? prod.basePrice : 0);
-              const buyPrice = (prod && prod.buyingPrice) ? prod.buyingPrice : (sellPrice * 0.75);
-              orderProfit += (sellPrice - buyPrice) * qty;
-              
-              if (!order.totalWeightKg && prod) {
-                orderKg += (prod.weightKg || 0) * qty;
-              }
-            });
-          }
-
-          const orderPoints = Number((orderKg * 0.2).toFixed(2));
+          // RECEIVED MONEY CONDITION: ONLY SUCCEEDED/PAID TRANSACTIONS
+          const isPaid = order.paymentDetails && (order.paymentDetails.isPaid === true || order.paymentDetails.paidTag === 'PAID' || order.status === 'paid' || order.status === 'completed' || order.status === 'delivered');
 
           if (isPaid) {
-            totalMoneyPaid += Number(order.grandTotal || 0);
-            totalExpectedProfit += orderProfit;
-            totalKgSold += orderKg;
-            totalPointsAwarded += orderPoints;
-          }
+            const orderMoneyReceived = Number(order.grandTotal || 0);
+            totalReceivedMoney += orderMoneyReceived;
 
-          if (orderYear === selectedYear && isPaid) {
-            const monthIdx = createdAt.getMonth();
-            monthlyStats[monthIdx].totalSales += Number(order.grandTotal || 0);
-            monthlyStats[monthIdx].totalProfit += orderProfit;
-            monthlyStats[monthIdx].orderCount += 1;
+            let orderCost = 0;
+            let orderRevenueFromItems = 0;
+            let orderKg = order.totalWeightKg || 0;
+
+            if (Array.isArray(order.items)) {
+              order.items.forEach(item => {
+                const prod = productMap[item.productId];
+                const qty = item.quantity || 1;
+                const sellPrice = item.priceAtPurchase || (prod ? prod.basePrice : 0);
+                const buyPrice = (prod && prod.buyingPrice !== undefined && prod.buyingPrice !== null) 
+                  ? prod.buyingPrice 
+                  : (item.buyingPrice || (sellPrice * 0.75));
+                
+                const itemRevenue = sellPrice * qty;
+                const itemCost = buyPrice * qty;
+                const itemProfit = itemRevenue - itemCost;
+
+                orderRevenueFromItems += itemRevenue;
+                orderCost += itemCost;
+
+                // Category aggregation
+                const catName = (prod && prod.variety) ? prod.variety : (item.variety || prod?.brandName || 'Standard Rice');
+                if (!categorySalesMap[catName]) {
+                  categorySalesMap[catName] = {
+                    category: catName,
+                    brandName: prod?.brandName || item.name || catName,
+                    quantitySold: 0,
+                    totalRevenue: 0,
+                    totalBuyingCost: 0,
+                    totalProfit: 0,
+                    buyingPricePerUnit: buyPrice,
+                    sellingPricePerUnit: sellPrice
+                  };
+                }
+
+                categorySalesMap[catName].quantitySold += qty;
+                categorySalesMap[catName].totalRevenue += itemRevenue;
+                categorySalesMap[catName].totalBuyingCost += itemCost;
+                categorySalesMap[catName].totalProfit += itemProfit;
+
+                if (!order.totalWeightKg && prod) {
+                  orderKg += (prod.weightKg || 0) * qty;
+                }
+              });
+            }
+
+            const orderProfit = orderMoneyReceived - orderCost;
+            totalBuyingCost += orderCost;
+            totalNetProfit += orderProfit;
+            totalKgSold += orderKg;
+            
+            const orderPoints = Number((orderKg * 0.2).toFixed(2));
+            totalPointsAwarded += orderPoints;
+
+            if (orderYear === selectedYear) {
+              const monthIdx = createdAt.getMonth();
+              monthlyStats[monthIdx].totalReceivedSales += orderMoneyReceived;
+              monthlyStats[monthIdx].totalBuyingCost += orderCost;
+              monthlyStats[monthIdx].totalProfit += orderProfit;
+              monthlyStats[monthIdx].paidOrderCount += 1;
+            }
           }
         });
+
+        const riceCategoryBreakdown = Object.values(categorySalesMap).map(cat => ({
+          ...cat,
+          totalRevenue: Number(cat.totalRevenue.toFixed(2)),
+          totalBuyingCost: Number(cat.totalBuyingCost.toFixed(2)),
+          totalProfit: Number(cat.totalProfit.toFixed(2))
+        }));
 
         res.json({
           selectedYear,
           availableYears: Array.from(yearsSet).sort((a, b) => b - a),
           summary: {
-            totalMoneyPaid: Number(totalMoneyPaid.toFixed(2)),
-            totalExpectedProfit: Number(totalExpectedProfit.toFixed(2)),
+            totalMoneyReceived: Number(totalReceivedMoney.toFixed(2)),
+            totalBuyingCost: Number(totalBuyingCost.toFixed(2)),
+            totalNetProfit: Number(totalNetProfit.toFixed(2)),
             totalKgSold: Number(totalKgSold.toFixed(2)),
             totalPointsAwarded: Number(totalPointsAwarded.toFixed(2))
           },
+          riceCategories: riceCategoryBreakdown,
           monthlySalesGrowth: monthlyStats
         });
       } catch (err) {
         console.error('DEBUG: Financial Analytics Error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- ADMIN UPDATE MONTHLY BUYING PRICE PER PRODUCT ---
+    expressApp.put('/api/admin/products/:id/buying-price', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const { buyingPrice } = req.body || {};
+        if (buyingPrice === undefined || isNaN(Number(buyingPrice))) {
+          return res.status(400).json({ error: 'Valid numerical buyingPrice parameter is required' });
+        }
+
+        const product = await RiceProduct.findByPk(req.params.id);
+        if (!product) return res.status(404).json({ error: 'Rice product not found' });
+
+        const oldBuyingPrice = product.buyingPrice;
+        product.buyingPrice = Number(buyingPrice);
+        await product.save();
+
+        await AdminLog.create({
+          adminId: req.adminUser.id,
+          action: 'UPDATE_PRODUCT_BUYING_PRICE',
+          targetType: 'product',
+          targetId: product.id,
+          changes: { oldBuyingPrice, newBuyingPrice: product.buyingPrice },
+          ipAddress: req.ip
+        });
+
+        res.json({
+          message: `Buying price for ${product.brandName} updated successfully`,
+          productId: product.id,
+          buyingPrice: product.buyingPrice
+        });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- BATCH UPDATE BUYING PRICES FOR ALL PRODUCTS ---
+    expressApp.post('/api/admin/products/buying-prices/batch', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const { updates } = req.body || {}; // Array of { id, buyingPrice }
+        if (!Array.isArray(updates)) {
+          return res.status(400).json({ error: 'Updates must be an array of objects containing id and buyingPrice' });
+        }
+
+        const updatedRecords = [];
+        for (const item of updates) {
+          if (item.id && item.buyingPrice !== undefined) {
+            const product = await RiceProduct.findByPk(item.id);
+            if (product) {
+              product.buyingPrice = Number(item.buyingPrice);
+              await product.save();
+              updatedRecords.push({ id: product.id, brandName: product.brandName, buyingPrice: product.buyingPrice });
+            }
+          }
+        }
+
+        await AdminLog.create({
+          adminId: req.adminUser.id,
+          action: 'BATCH_UPDATE_BUYING_PRICES',
+          targetType: 'product',
+          changes: updates,
+          ipAddress: req.ip
+        });
+
+        res.json({ message: 'Batch buying prices updated successfully', updatedRecords });
+      } catch (err) {
         res.status(500).json({ error: err.message });
       }
     });
@@ -1410,7 +1608,7 @@ async function startServer() {
           variety: req.body.variety || 'Aromatic Pishori',
           weightKg: Number(req.body.weightKg || req.body.weight || 0),
           basePrice: Number(req.body.basePrice || req.body.price || 0),
-          buyingPrice: req.body.buyingPrice ? Number(req.body.buyingPrice) : (Number(req.body.basePrice || req.body.price || 0) * 0.75),
+          buyingPrice: req.body.buyingPrice !== undefined && req.body.buyingPrice !== null && req.body.buyingPrice !== '' ? Number(req.body.buyingPrice) : (Number(req.body.basePrice || req.body.price || 0) * 0.75),
           flashSalePrice: req.body.flashSalePrice !== undefined && req.body.flashSalePrice !== null && req.body.flashSalePrice !== '' ? Number(req.body.flashSalePrice) : null,
           stockQuantity: Number(req.body.stockQuantity || req.body.stock || 0),
           imageUrl: req.body.imageUrl || req.body.image || req.body.url || null,
@@ -1494,25 +1692,28 @@ async function startServer() {
     expressApp.delete('/api/admin/products/:id/destroy', authenticateToken, requireAdmin, deleteProductHandler);
     expressApp.delete('/api/admin/laptops/:id/destroy', authenticateToken, requireAdmin, deleteProductHandler);
 
+    // --- GET ADMIN ORDERS WITH FULL USER DETAILS, SHIPPING DETAILS & CATEGORY FILTERING ---
     expressApp.get('/api/admin/orders', authenticateToken, requireAdmin, async (req, res) => {
       try {
-        const { search } = req.query;
+        const { search, category } = req.query;
         const include = [{
           model: User,
-          attributes: ['id', 'fullName', 'phoneNumber', 'role', 'isActive', 'rewardPoints']
+          attributes: ['id', 'fullName', 'phoneNumber', 'email', 'role', 'isActive', 'rewardPoints']
         }];
 
         let whereCondition = {};
+        
         if (search && search.trim() !== '') {
           const searchStr = `%${search.trim()}%`;
-          whereCondition = {
-            [Op.or]: [
-              { id: { [Op.like]: searchStr } },
-              { county: { [Op.like]: searchStr } },
-              { '$User.fullName$': { [Op.like]: searchStr } },
-              { '$User.phoneNumber$': { [Op.like]: searchStr } }
-            ]
-          };
+          whereCondition[Op.or] = [
+            { id: { [Op.like]: searchStr } },
+            { county: { [Op.like]: searchStr } },
+            { town: { [Op.like]: searchStr } },
+            { location: { [Op.like]: searchStr } },
+            { '$User.fullName$': { [Op.like]: searchStr } },
+            { '$User.phoneNumber$': { [Op.like]: searchStr } },
+            { '$User.email$': { [Op.like]: searchStr } }
+          ];
         }
 
         const orders = await Order.findAll({
@@ -1521,9 +1722,67 @@ async function startServer() {
           order: [['createdAt', 'DESC']]
         });
 
-        res.json(orders);
+        // Dynamic Filtering for Pending Transactions vs Completed Transactions
+        const formattedOrders = orders.map(order => {
+          const o = order.toJSON();
+          const isPaid = o.paymentDetails && (o.paymentDetails.isPaid === true || o.paymentDetails.paidTag === 'PAID' || o.status === 'paid');
+          const isDelivered = o.status === 'delivered';
+          
+          return {
+            ...o,
+            isPaid,
+            isDelivered,
+            // Tag category: "pending_shipping" (paid, awaiting delivery) vs "delivered" (completed)
+            transactionCategory: isPaid ? (isDelivered ? 'completed' : 'pending_shipping') : 'unpaid',
+            userName: o.User ? o.User.fullName : 'Guest/N/A',
+            userPhone: o.User ? o.User.phoneNumber : 'N/A',
+            userEmail: o.User ? o.User.email : 'N/A'
+          };
+        });
+
+        if (category === 'pending_shipping' || category === 'pending') {
+          return res.json(formattedOrders.filter(o => o.transactionCategory === 'pending_shipping'));
+        } else if (category === 'completed' || category === 'delivered') {
+          return res.json(formattedOrders.filter(o => o.transactionCategory === 'completed'));
+        }
+
+        res.json(formattedOrders);
       } catch (err) {
         console.error("DEBUG: Order Fetch Error:", err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- SPECIALIZED ENDPOINT: ALL PENDING SHIPPING TRANSACTIONS ---
+    expressApp.get('/api/admin/orders/pending-transactions', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const orders = await Order.findAll({
+          include: [{
+            model: User,
+            attributes: ['id', 'fullName', 'phoneNumber', 'email']
+          }],
+          order: [['createdAt', 'DESC']]
+        });
+
+        const pendingTransactions = orders
+          .map(order => {
+            const o = order.toJSON();
+            const isPaid = o.paymentDetails && (o.paymentDetails.isPaid === true || o.paymentDetails.paidTag === 'PAID' || o.status === 'paid');
+            const isDelivered = o.status === 'delivered';
+            
+            return {
+              ...o,
+              isPaid,
+              userName: o.User ? o.User.fullName : 'N/A',
+              userPhone: o.User ? o.User.phoneNumber : 'N/A',
+              userEmail: o.User ? o.User.email : 'N/A',
+              transactionCategory: isPaid ? (isDelivered ? 'completed' : 'pending_shipping') : 'unpaid'
+            };
+          })
+          .filter(o => o.isPaid && !o.isDelivered);
+
+        res.json(pendingTransactions);
+      } catch (err) {
         res.status(500).json({ error: err.message });
       }
     });
@@ -1531,24 +1790,26 @@ async function startServer() {
     expressApp.get('/api/admin/orders/export/csv', authenticateToken, requireAdmin, async (req, res) => {
       try {
         const orders = await Order.findAll({
-          include: [{ model: User, attributes: ['fullName', 'phoneNumber'] }],
+          include: [{ model: User, attributes: ['fullName', 'phoneNumber', 'email'] }],
           order: [['createdAt', 'DESC']]
         });
 
-        let csv = 'Order ID,Customer Name,Phone Number,County,Town,Location,Sublocation,Grand Total (KES),Payment Status,M-Pesa Receipt,Delivery Status,Order Date\n';
+        let csv = 'Order ID,Customer Name,Phone Number,Email,County,Town,Location,Sublocation,Street Address,Grand Total (KES),Payment Status,M-Pesa Receipt,Delivery Status,Order Date\n';
         
         orders.forEach(o => {
           const customerName = o.User ? o.User.fullName.replace(/,/g, ' ') : 'N/A';
           const phone = o.User ? o.User.phoneNumber : 'N/A';
+          const email = o.User ? o.User.email || 'N/A' : 'N/A';
           const county = (o.county || '').replace(/,/g, ' ');
           const town = (o.town || '').replace(/,/g, ' ');
           const loc = (o.location || '').replace(/,/g, ' ');
           const subloc = (o.sublocation || '').replace(/,/g, ' ');
+          const street = (o.shippingAddress?.streetAddress || o.shippingAddress?.details || '').replace(/,/g, ' ');
           const payTag = o.paymentDetails ? (o.paymentDetails.paidTag || (o.paymentDetails.isPaid ? 'PAID' : 'PENDING')) : 'PENDING';
           const receipt = o.paymentDetails ? (o.paymentDetails.mpesaReceipt || 'N/A') : 'N/A';
           const dateStr = new Date(o.createdAt).toISOString().split('T')[0];
           
-          csv += `${o.id},"${customerName}",${phone},${county},${town},${loc},${subloc},${o.grandTotal},${payTag},${receipt},${o.status},${dateStr}\n`;
+          csv += `${o.id},"${customerName}",${phone},${email},${county},${town},${loc},${subloc},"${street}",${o.grandTotal},${payTag},${receipt},${o.status},${dateStr}\n`;
         });
 
         res.setHeader('Content-Type', 'text/csv');
@@ -1713,18 +1974,43 @@ async function startServer() {
       }
     });
 
+    // --- EXPANDED HERO BACKDROP CONFIGURATION API (SUPPORTING 10 CONFIGURATIONS) ---
     expressApp.post('/api/admin/config/hero', authenticateToken, requireAdmin, async (req, res) => {
       try {
-        const { type, url, title, subtitle, videoDuration, imageDuration } = req.body || {};
+        const { 
+          type, 
+          url, 
+          title, 
+          subtitle, 
+          badgeText,
+          buttonText,
+          buttonLink,
+          secondaryButtonText,
+          secondaryButtonLink,
+          overlayOpacity,
+          alignment,
+          autoPlay,
+          videoDuration, 
+          imageDuration 
+        } = req.body || {};
+        
         let config = await SystemConfig.findOne({ where: { key: 'hero_settings' } });
         
         const newSettings = { 
           type: type || 'video', 
-          url, 
-          title, 
-          subtitle,
-          videoDuration: videoDuration || 5,
-          imageDuration: imageDuration || 4
+          url: url || '', 
+          title: title || 'Direct From Mwea Paddy Fields', 
+          subtitle: subtitle || '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.', 
+          badgeText: badgeText || '🌾 100% Authentic Mwea Harvest',
+          buttonText: buttonText || 'Shop Fresh Harvest Now',
+          buttonLink: buttonLink || '/catalog',
+          secondaryButtonText: secondaryButtonText || 'View Flash Deals',
+          secondaryButtonLink: secondaryButtonLink || '#flash-sales',
+          overlayOpacity: overlayOpacity !== undefined ? Number(overlayOpacity) : 0.4,
+          alignment: alignment || 'center',
+          autoPlay: autoPlay !== undefined ? Boolean(autoPlay) : true,
+          videoDuration: Number(videoDuration || 5),
+          imageDuration: Number(imageDuration || 4)
         };
 
         if (!config) {
@@ -1744,7 +2030,7 @@ async function startServer() {
         });
 
         io.emit('heroUpdated', config.value);
-        res.json({ message: 'Storefront hero backdrop synchronized successfully', hero: config.value });
+        res.json({ message: 'Storefront hero backdrop synchronized successfully with 10 configurations', hero: config.value });
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
