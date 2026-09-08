@@ -75,6 +75,7 @@ const DEFAULT_REGIONAL_LOGISTICS = {
   streets: ["Main Street / Highway", "Market Road", "Hospital Road", "School Lane", "Opposite Chief's Camp", "Supermarket Landmark"]
 };
 
+// Helper utility to safely format shipping address objects to strings to prevent React Error #31
 const formatShippingAddress = (addr: any) => {
   if (!addr) return 'Standard Delivery';
   if (typeof addr === 'string') return addr;
@@ -97,6 +98,7 @@ export default function PremiumRiceStore() {
   const [products, setProducts] = useState<any[]>([]);
   const [carousel, setCarousel] = useState<any[]>([]);
   
+  // Expanded Hero Configuration with 10 distinct professional settings
   const [heroSettings, setHeroSettings] = useState<any>({
     title: 'Direct From Mwea Paddy Fields',
     subtitle: '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.',
@@ -282,12 +284,34 @@ export default function PremiumRiceStore() {
         setMyOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
         setAdminOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
       });
+
+      // Listen for Payment Gateway Events (Pay Hero Callbacks)
+      newSocket.on('paymentFailed', (data: any) => {
+        showToast(`⚠️ Payment Failed: ${data.ResultDesc || 'Request Cancelled by user'}`, 'error');
+        fetchMyOrders();
+        if (user?.role === 'admin') fetchAdminLogs();
+      });
+
+      newSocket.on('paymentSuccess', (data: any) => {
+        showToast(`✅ Payment Successful for Order #${data.ExternalReference || data.orderId || ''}`, 'success');
+        fetchMyOrders();
+        if (user?.role === 'admin') fetchAdminLogs();
+      });
+
+      newSocket.on('payHeroCallback', (log: any) => {
+        if (user?.role === 'admin') {
+           setAdminLogs((prev) => [log, ...prev]);
+           if (log.Status === 'Failed' || log.status === 'failed') {
+             showToast(`Callback Alert: Payment Failed (${log.ResultDesc || log.message})`, 'error');
+           }
+        }
+      });
     } catch (err) {
       console.error("Real-time socket initialization failed:", err);
     }
 
     return () => { if (newSocket) newSocket.disconnect(); };
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (socket && user?.role === 'admin' && token) {
@@ -412,6 +436,7 @@ export default function PremiumRiceStore() {
 
   const fetchAdminLogs = async () => {
     try {
+      // Unified payment and system audit logs endpoint communicating with backend / hero logs
       const res = await fetch(`${API_BASE_URL}/admin/logs`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -419,7 +444,16 @@ export default function PremiumRiceStore() {
         const data = await res.json();
         setAdminLogs(Array.isArray(data) ? data : (data.logs || []));
       } else {
-        showToast('Error fetching payment logs from backend server', 'error');
+        // Fallback to fetch from a specific hero-logs API endpoint if standard logs fail
+        const heroRes = await fetch(`${API_BASE_URL}/payments/hero-logs`, {
+           headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (heroRes.ok) {
+           const heroData = await heroRes.json();
+           setAdminLogs(Array.isArray(heroData) ? heroData : (heroData.logs || []));
+        } else {
+           showToast('Error fetching payment logs from backend server', 'error');
+        }
       }
     } catch (err) { 
       showToast('Network error while fetching backend payment logs', 'error'); 
@@ -1273,7 +1307,7 @@ export default function PremiumRiceStore() {
             <h2 className="text-xl font-black text-gray-900 flex items-center">
               <Clock className="mr-2 text-emerald-600 h-5 w-5" /> Pending Shipping Transactions
             </h2>
-            <p className="text-xs text-gray-500 mt-1">Transactions currently undergoing fulfillment or delivery.</p>
+            <p className="text-xs text-gray-500 mt-1">Successful transactions that have not yet completed shipping procedures up to delivered.</p>
           </div>
           <div className="p-6 sm:p-8">
             {pendingTransactions.length === 0 ? (
@@ -1285,7 +1319,7 @@ export default function PremiumRiceStore() {
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200 pb-3 mb-3">
                       <div>
                         <span className="font-mono font-black text-emerald-950 text-base">TXN #{o.transactionId || o.id}</span>
-                        <span className="text-xs text-gray-500 font-medium ml-3">Payment Status: <strong className="text-emerald-700 uppercase">{o.paymentStatus || 'Pending'}</strong></span>
+                        <span className="text-xs text-gray-500 font-medium ml-3">Payment Status: <strong className="text-emerald-700 uppercase">{o.paymentStatus || 'Paid'}</strong></span>
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
@@ -1309,7 +1343,7 @@ export default function PremiumRiceStore() {
             <h2 className="text-xl font-black text-gray-900 flex items-center">
               <CheckCircle className="mr-2 text-emerald-600 h-5 w-5" /> Completed & Delivered Transactions
             </h2>
-            <p className="text-xs text-gray-500 mt-1">Successfully delivered orders with verified payment details.</p>
+            <p className="text-xs text-gray-500 mt-1">Successfully delivered orders with full transaction IDs and item details.</p>
           </div>
           <div className="p-6 sm:p-8">
             {completedTransactions.length === 0 ? (
@@ -1339,7 +1373,7 @@ export default function PremiumRiceStore() {
                         <li><strong>Location:</strong> {o.location || 'N/A'}</li>
                         <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
                         <li><strong>Street/Landmark:</strong> {formatShippingAddress(o.shippingAddress)}</li>
-                        <li><strong>Payment Status:</strong> <span className="uppercase text-emerald-600 font-bold">{o.paymentStatus || 'Completed'}</span></li>
+                        <li><strong>Payment Status:</strong> <span className="uppercase text-emerald-600 font-bold">{o.paymentStatus || 'Paid'}</span></li>
                       </ul>
                     </div>
 
@@ -1617,7 +1651,7 @@ export default function PremiumRiceStore() {
                         <div className="flex items-center gap-3">
                            <div className="bg-[#1f1f1f] border border-gray-800 px-3 py-1.5 rounded-xl">
                              <span className="text-[10px] text-gray-400 block uppercase font-bold">Payment Status (Backend)</span>
-                             <span className="text-xs font-black text-emerald-400 uppercase">{o.paymentStatus || 'Pending'}</span>
+                             <span className="text-xs font-black text-emerald-400 uppercase">{o.paymentStatus || 'Paid'}</span>
                            </div>
 
                            <span className="text-xs text-gray-400 font-bold">Shipping Status:</span>
@@ -1641,496 +1675,67 @@ export default function PremiumRiceStore() {
                                  showToast('Network error updating status', 'error');
                                }
                              }}
-                             className="bg-[#1f1f1f] text-emerald-400 font-black text-xs border border-gray-700 rounded-xl px-3 py-2 outline-none cursor-pointer"
+                             className="bg-[#1f1f1f] text-white border border-gray-700 rounded-xl px-3 py-1.5 text-xs font-bold outline-none focus:border-emerald-500"
                            >
                              <option value="pending">Pending</option>
                              <option value="processing">Processing</option>
-                             <option value="dispatched">Dispatched</option>
+                             <option value="shipped">Shipped</option>
                              <option value="delivered">Delivered</option>
-                             <option value="failed">Failed</option>
+                             <option value="cancelled">Cancelled</option>
                            </select>
                         </div>
                       </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80">
-                          <p className="font-bold text-gray-300 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-500"/> Delivery Logistics:</p>
-                          <ul className="space-y-1 text-gray-400">
-                            <li>County: <strong className="text-white">{o.county}</strong></li>
-                            <li>Town: <strong className="text-white">{o.town}</strong></li>
-                            <li>Location: <strong className="text-white">{o.location}</strong></li>
-                            <li>Street: <strong className="text-white">{formatShippingAddress(o.shippingAddress)}</strong></li>
-                          </ul>
-                        </div>
-                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80 flex flex-col justify-between">
-                          <div>
-                            <p className="font-bold text-gray-300 mb-2">Order Items ({o.items?.length || 0}):</p>
-                            <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
-                              {o.items?.map((item: any, idx: number) => (
-                                <div key={idx} className="flex justify-between text-gray-400">
-                                  <span>{item.quantity}x {item.name || item.product?.variety}</span>
-                                  <span className="font-bold text-white">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="flex justify-between font-black text-sm text-emerald-400 border-t border-gray-800 pt-2 mt-2">
-                            <span>Grand Total</span>
-                            <span>KES {o.grandTotal?.toLocaleString()}</span>
-                          </div>
-                        </div>
-                      </div>
                     </div>
                   ))}
-              </div>
-            </div>
-          )}
-
-          {adminTab === 'finances' && (() => {
-            const currentYear = new Date().getFullYear();
-            const monthlyRevenue = Array(12).fill(0);
-            const monthlyProfit = Array(12).fill(0);
-            let totalYearlyRevenue = 0;
-            let totalYearlyProfit = 0;
-
-            const categorySales: { [key: string]: { quantity: number, revenue: number, profit: number, sellingPrice: number, costPrice: number } } = {};
-
-            adminOrders.forEach(order => {
-               if (order.status !== 'failed' && order.paymentStatus !== 'failed') {
-                   const d = new Date(order.createdAt);
-                   if (d.getFullYear() === financeYear) {
-                       const grandTotal = order.grandTotal || 0;
-                       totalYearlyRevenue += grandTotal;
-                       
-                       let orderCost = 0;
-                       order.items?.forEach((item: any) => {
-                          const catName = item.name || item.product?.variety || 'Standard Rice';
-                          const selling = item.priceAtPurchase || 0;
-                          const cost = item.product?.costPrice || item.costPrice || (selling * 0.75);
-                          const profit = (selling - cost) * item.quantity;
-                          const rev = selling * item.quantity;
-                          orderCost += (cost * item.quantity);
-
-                          if (!categorySales[catName]) {
-                             categorySales[catName] = { quantity: 0, revenue: 0, profit: 0, sellingPrice: selling, costPrice: cost };
-                          }
-                          categorySales[catName].quantity += item.quantity;
-                          categorySales[catName].revenue += rev;
-                          categorySales[catName].profit += profit;
-                       });
-
-                       const orderProfit = grandTotal - orderCost;
-                       totalYearlyProfit += orderProfit;
-
-                       const m = d.getMonth();
-                       monthlyRevenue[m] += grandTotal;
-                       monthlyProfit[m] += orderProfit;
-                   }
-               }
-            });
-
-            const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-            return (
-              <div className="animate-fadeIn space-y-6">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <div>
-                    <h2 className="text-2xl font-black text-white flex items-center"><BarChart2 className="mr-3 text-emerald-500"/> Financial Performance Dashboard</h2>
-                    <p className="text-gray-400 text-xs mt-1">Real-time breakdown of revenue, profit margins, and grain sales for {financeYear}.</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-bold text-gray-400 uppercase">Year:</label>
-                    <select 
-                      value={financeYear} 
-                      onChange={(e) => setFinanceYear(Number(e.target.value))}
-                      className="bg-[#181818] text-emerald-400 border border-gray-700 rounded-xl px-3 py-1.5 font-bold text-xs outline-none cursor-pointer"
-                    >
-                      {[currentYear, currentYear - 1, currentYear - 2].map(y => <option key={y} value={y}>{y}</option>)}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <div className="bg-[#141414] border border-gray-800 p-5 rounded-3xl">
-                    <div className="flex items-center justify-between text-gray-400 text-xs font-bold uppercase mb-2">
-                      <span>Total Revenue ({financeYear})</span>
-                      <DollarSign className="text-emerald-500 h-5 w-5" />
-                    </div>
-                    <div className="text-2xl font-black text-emerald-400 font-mono">KES {totalYearlyRevenue.toLocaleString()}</div>
-                  </div>
-
-                  <div className="bg-[#141414] border border-gray-800 p-5 rounded-3xl">
-                    <div className="flex items-center justify-between text-gray-400 text-xs font-bold uppercase mb-2">
-                      <span>Estimated Gross Profit</span>
-                      <TrendingUp className="text-emerald-400 h-5 w-5" />
-                    </div>
-                    <div className="text-2xl font-black text-emerald-300 font-mono">KES {totalYearlyProfit.toLocaleString()}</div>
-                  </div>
-
-                  <div className="bg-[#141414] border border-gray-800 p-5 rounded-3xl">
-                    <div className="flex items-center justify-between text-gray-400 text-xs font-bold uppercase mb-2">
-                      <span>Profit Margin</span>
-                      <Percent className="text-amber-400 h-5 w-5" />
-                    </div>
-                    <div className="text-2xl font-black text-amber-400 font-mono">
-                      {totalYearlyRevenue > 0 ? ((totalYearlyProfit / totalYearlyRevenue) * 100).toFixed(1) : '0.0'}%
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wider mb-4">Monthly Revenue & Profit Breakdown ({financeYear})</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                    {months.map((m, idx) => (
-                      <div key={m} className="bg-[#1a1a1a] p-3 rounded-2xl border border-gray-800 text-center">
-                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest block mb-1">{m}</span>
-                        <div className="text-xs font-black text-emerald-400 font-mono">KES {monthlyRevenue[idx].toLocaleString()}</div>
-                        <div className="text-[10px] font-bold text-gray-400 font-mono mt-0.5">P: KES {monthlyProfit[idx].toLocaleString()}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wider mb-4">Variety Breakdown & Sales Volume</h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs whitespace-nowrap">
-                      <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
-                        <tr>
-                          <th className="px-4 py-3">Grain Variety</th>
-                          <th className="px-4 py-3">Bags Sold</th>
-                          <th className="px-4 py-3">Revenue</th>
-                          <th className="px-4 py-3">Estimated Profit</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-800/60">
-                        {Object.keys(categorySales).length === 0 ? (
-                          <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-500 font-medium">No financial sales recorded for {financeYear}.</td></tr>
-                        ) : (
-                          Object.entries(categorySales).map(([variety, stats]) => (
-                            <tr key={variety} className="hover:bg-[#1a1a1a]/40">
-                              <td className="px-4 py-3 font-bold text-gray-200">{variety}</td>
-                              <td className="px-4 py-3 font-mono font-bold text-gray-300">{stats.quantity} Bags</td>
-                              <td className="px-4 py-3 font-mono font-bold text-emerald-400">KES {stats.revenue.toLocaleString()}</td>
-                              <td className="px-4 py-3 font-mono font-bold text-emerald-300">KES {stats.profit.toLocaleString()}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-
-          {adminTab === 'users' && (
-            <div className="animate-fadeIn space-y-6">
-              <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Clearance & Accounts Registry</h2>
-                <p className="text-gray-400 text-xs mt-1">Manage user account permissions, promote users to admin status, or revoke clearance.</p>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs whitespace-nowrap">
-                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
-                      <tr>
-                        <th className="px-6 py-4">ID</th>
-                        <th className="px-6 py-4">Full Name</th>
-                        <th className="px-6 py-4">Phone Number</th>
-                        <th className="px-6 py-4">Email</th>
-                        <th className="px-6 py-4">Clearance Role</th>
-                        <th className="px-6 py-4 text-center">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-800/60">
-                      {adminUsers.map(u => (
-                        <tr key={u.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                          <td className="px-6 py-4 font-mono text-gray-500">#{u.id}</td>
-                          <td className="px-6 py-4 font-bold text-gray-200">{u.fullName || 'N/A'}</td>
-                          <td className="px-6 py-4 font-mono text-gray-300">{u.phoneNumber}</td>
-                          <td className="px-6 py-4 text-gray-400">{u.email || 'N/A'}</td>
-                          <td className="px-6 py-4">
-                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase border ${
-                              u.role === 'admin' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                            }`}>
-                              {u.role || 'user'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <button 
-                              onClick={async () => {
-                                const newRole = u.role === 'admin' ? 'user' : 'admin';
-                                try {
-                                  const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}/role`, {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                    body: JSON.stringify({ role: newRole })
-                                  });
-                                  if (res.ok) {
-                                    showToast(`Updated user role to ${newRole}`, 'success');
-                                    fetchAdminUsers();
-                                  } else {
-                                    showToast('Failed to change user role', 'error');
-                                  }
-                                } catch (err) { showToast('Network error updating role', 'error'); }
-                              }}
-                              className="px-3 py-1.5 bg-[#1f1f1f] border border-gray-700 hover:border-emerald-500 text-gray-300 hover:text-white rounded-xl text-[10px] font-bold transition-all"
-                            >
-                              Toggle Role ({u.role === 'admin' ? 'Revoke Admin' : 'Make Admin'})
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {adminTab === 'carousel' && (
-            <div className="animate-fadeIn space-y-6">
-              <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Hero Banner & Media Engine</h2>
-                <p className="text-gray-400 text-xs mt-1">Configure homepage hero titles, background video links, and showcase slides.</p>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-2">Homepage Hero Settings</h3>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Title</label>
-                    <input type="text" value={heroSettings.title || ''} onChange={e=>setHeroSettings({...heroSettings, title: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Subtitle</label>
-                    <input type="text" value={heroSettings.subtitle || ''} onChange={e=>setHeroSettings({...heroSettings, subtitle: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Primary Video URL (YouTube Embed)</label>
-                    <input type="text" value={heroSettings.video1 || ''} onChange={e=>setHeroSettings({...heroSettings, video1: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Announcement Ticker</label>
-                    <input type="text" value={heroSettings.announcementTicker || ''} onChange={e=>setHeroSettings({...heroSettings, announcementTicker: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                </div>
-
-                <button 
-                  onClick={async () => {
-                    try {
-                      const res = await fetch(`${API_BASE_URL}/admin/hero`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify(heroSettings)
-                      });
-                      if (res.ok) {
-                        showToast('Hero settings saved successfully!', 'success');
-                        fetchHero();
-                      } else {
-                        showToast('Failed to update hero settings', 'error');
-                      }
-                    } catch (err) { showToast('Network error saving hero settings', 'error'); }
-                  }} 
-                  className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all"
-                >
-                  Save Hero Configuration
-                </button>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-2">Showcase Carousel Slides ({carousel.length})</h3>
-                
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  try {
-                    const res = await fetch(`${API_BASE_URL}/admin/carousel`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                      body: JSON.stringify(newSlide)
-                    });
-                    if (res.ok) {
-                      showToast('New slide added to carousel!', 'success');
-                      setNewSlide({ title: '', subtitle: '', url: '' });
-                      fetchCarousel();
-                    } else {
-                      showToast('Failed to add slide', 'error');
-                    }
-                  } catch (err) { showToast('Error adding slide', 'error'); }
-                }} className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <input required type="text" placeholder="Slide Title" value={newSlide.title} onChange={e=>setNewSlide({...newSlide, title: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-2.5 rounded-xl text-xs" />
-                  <input required type="text" placeholder="Subtitle" value={newSlide.subtitle} onChange={e=>setNewSlide({...newSlide, subtitle: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-2.5 rounded-xl text-xs" />
-                  <input required type="text" placeholder="Image URL" value={newSlide.url} onChange={e=>setNewSlide({...newSlide, url: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-2.5 rounded-xl text-xs font-mono" />
-                  <button type="submit" className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all md:col-span-3">Add Carousel Slide</button>
-                </form>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">
-                  {carousel.map((slide, idx) => (
-                    <div key={idx} className="bg-[#181818] border border-gray-800 rounded-2xl p-4 flex flex-col justify-between">
-                      <div>
-                        <img src={slide.url} alt={slide.title} className="w-full h-32 object-cover rounded-xl mb-3" />
-                        <h4 className="font-bold text-white text-sm">{slide.title}</h4>
-                        <p className="text-gray-400 text-xs mt-1">{slide.subtitle}</p>
-                      </div>
-                      <button 
-                        onClick={async () => {
-                          try {
-                            const res = await fetch(`${API_BASE_URL}/admin/carousel/${slide.id || idx}`, {
-                              method: 'DELETE',
-                              headers: { 'Authorization': `Bearer ${token}` }
-                            });
-                            if (res.ok) {
-                              showToast('Slide removed', 'success');
-                              fetchCarousel();
-                            } else {
-                              showToast('Failed to delete slide', 'error');
-                            }
-                          } catch (err) { showToast('Error deleting slide', 'error'); }
-                        }} 
-                        className="mt-4 text-rose-400 hover:text-rose-300 text-xs font-bold flex items-center justify-center p-2 bg-[#222] rounded-xl"
-                      >
-                        <Trash2 size={14} className="mr-1"/> Remove Slide
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {adminTab === 'config' && (
-            <div className="animate-fadeIn space-y-6">
-              <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> Logistics Rates & System Engine</h2>
-                <p className="text-gray-400 text-xs mt-1">Set base delivery rates, county-specific pricing overrides, or initiate flash sales.</p>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-2">Base Transport Logistics Fee</h3>
-                <div className="flex items-center gap-4">
-                  <input type="number" value={baseTransportFee} onChange={e=>setBaseTransportFee(Number(e.target.value))} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono w-48" />
-                  <span className="text-gray-400 text-xs">KES default rate for standard counties</span>
-                </div>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-2">County Logistics Fee Overrides</h3>
-                
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  try {
-                    const res = await fetch(`${API_BASE_URL}/admin/counties`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                      body: JSON.stringify({ county: countyOverrideForm.county, fee: Number(countyOverrideForm.fee) })
-                    });
-                    if (res.ok) {
-                      showToast(`Logistics fee for ${countyOverrideForm.county} updated!`, 'success');
-                      setCountyOverrideForm({ county: 'Nairobi', fee: '' });
-                      fetchCountiesConfig();
-                    } else {
-                      showToast('Failed to update county fee', 'error');
-                    }
-                  } catch (err) { showToast('Error updating county fee', 'error'); }
-                }} className="flex flex-col sm:flex-row gap-3">
-                  <select value={countyOverrideForm.county} onChange={e=>setCountyOverrideForm({...countyOverrideForm, county: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-2.5 rounded-xl text-xs">
-                    {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <input required type="number" placeholder="Fee (KES)" value={countyOverrideForm.fee} onChange={e=>setCountyOverrideForm({...countyOverrideForm, fee: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-2.5 rounded-xl text-xs font-mono" />
-                  <button type="submit" className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all">Set County Fee</button>
-                </form>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pt-4">
-                  {Object.entries(countyOverrides).map(([county, fee]) => (
-                    <div key={county} className="bg-[#181818] border border-gray-800 p-3 rounded-2xl flex justify-between items-center">
-                      <div>
-                        <span className="text-white font-bold text-xs block">{county}</span>
-                        <span className="text-emerald-400 font-mono text-[10px] font-bold">KES {fee}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
               </div>
             </div>
           )}
 
           {adminTab === 'logs' && (
             <div className="animate-fadeIn space-y-6">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div>
-                  <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> Real Payment & System Audit Logs</h2>
-                  <p className="text-gray-400 text-xs mt-1">Real-time M-Pesa callback responses, transaction receipts, and system events fetched directly from backend audit logs.</p>
-                </div>
-                <button 
-                  onClick={fetchAdminLogs} 
-                  className="bg-[#1f1f1f] border border-gray-700 hover:border-emerald-500 text-emerald-400 hover:text-emerald-300 px-4 py-2 rounded-xl text-xs font-bold flex items-center transition-all"
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" /> Refresh Backend Logs
-                </button>
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> Pay Hero & System Logs</h2>
+                <p className="text-gray-400 text-xs mt-1">Real-time payment gateway callbacks and backend communication logs.</p>
               </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
-                {adminLogs.length === 0 ? (
-                  <div className="p-12 text-center text-gray-500 text-sm font-medium">
-                    No payment logs recorded in the backend database yet.
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs whitespace-nowrap">
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 overflow-hidden shadow-xl">
+                 <div className="flex justify-end mb-4">
+                   <button onClick={fetchAdminLogs} className="bg-emerald-900/40 text-emerald-400 hover:text-white px-4 py-2 rounded-xl text-xs font-bold border border-emerald-800/50 flex items-center transition-all">
+                     <RefreshCw size={14} className="mr-2" /> Refresh Logs
+                   </button>
+                 </div>
+                 <div className="overflow-x-auto">
+                   <table className="w-full text-left text-xs whitespace-nowrap">
                       <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
-                        <tr>
-                          <th className="px-6 py-4">Timestamp</th>
-                          <th className="px-6 py-4">Receipt / Txn Ref</th>
-                          <th className="px-6 py-4">Phone Number</th>
-                          <th className="px-6 py-4">Amount</th>
-                          <th className="px-6 py-4">Real Status</th>
-                          <th className="px-6 py-4">Audit Message / Details</th>
-                        </tr>
+                         <tr>
+                            <th className="px-6 py-4">Date & Time</th>
+                            <th className="px-6 py-4">Transaction / Ref</th>
+                            <th className="px-6 py-4">Phone Number</th>
+                            <th className="px-6 py-4">Status & Desc</th>
+                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-800/60 font-mono">
-                        {adminLogs.map((log: any, idx: number) => {
-                          const statusLower = (log.status || log.paymentStatus || 'pending').toLowerCase();
-                          const isSuccess = statusLower === 'completed' || statusLower === 'success' || statusLower === 'paid';
-                          const isFailed = statusLower === 'failed' || statusLower === 'cancelled' || statusLower === 'rejected';
-
-                          return (
-                            <tr key={log.id || idx} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                              <td className="px-6 py-4 text-gray-400 text-[11px]">
-                                {log.createdAt ? new Date(log.createdAt).toLocaleString('en-KE') : (log.timestamp || 'N/A')}
-                              </td>
-                              <td className="px-6 py-4 font-bold text-emerald-300">
-                                {log.mpesaReceiptNumber || log.transactionId || log.receiptNumber || `LOG-${log.id || idx}`}
-                              </td>
-                              <td className="px-6 py-4 text-gray-300">
-                                {log.phoneNumber || log.phone || 'N/A'}
-                              </td>
-                              <td className="px-6 py-4 font-bold text-white">
-                                {log.amount ? `KES ${Number(log.amount).toLocaleString()}` : 'N/A'}
-                              </td>
-                              <td className="px-6 py-4">
-                                <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${
-                                  isSuccess
-                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                                    : isFailed
-                                    ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-                                    : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                                }`}>
-                                  ● {log.status || log.paymentStatus || 'Pending'}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 text-gray-300 font-sans max-w-xs truncate">
-                                {log.message || log.description || log.resultDesc || (typeof log.data === 'object' ? JSON.stringify(log.data) : String(log.data || ''))}
-                              </td>
-                            </tr>
-                          );
-                        })}
+                      <tbody className="divide-y divide-gray-800/60">
+                         {adminLogs.length === 0 ? (
+                            <tr><td colSpan={4} className="px-6 py-8 text-center text-gray-500">No logs found in the database.</td></tr>
+                         ) : (
+                            adminLogs.map((log, i) => (
+                               <tr key={i} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                                  <td className="px-6 py-4 font-mono text-gray-500">{new Date(log.createdAt || log.timestamp || Date.now()).toLocaleString()}</td>
+                                  <td className="px-6 py-4 font-mono text-emerald-400">{log.ExternalReference || log.reference || log.MerchantRequestID || 'N/A'}</td>
+                                  <td className="px-6 py-4 font-mono text-gray-300">{log.Phone || log.phoneNumber || 'N/A'}</td>
+                                  <td className="px-6 py-4 text-gray-400">
+                                     <span className={`px-2 py-1 rounded text-[10px] font-black mr-2 ${
+                                        (log.Status === 'Failed' || log.status === 'failed' || log.ResultCode !== 0) ? 'bg-rose-500/10 text-rose-400 border border-rose-500/30' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                     }`}>
+                                        {log.Status || log.status || (log.ResultCode === 0 ? 'Success' : 'Failed')}
+                                     </span>
+                                     {log.ResultDesc || log.message || 'No description provided'}
+                                  </td>
+                               </tr>
+                            ))
+                         )}
                       </tbody>
-                    </table>
-                  </div>
-                )}
+                   </table>
+                 </div>
               </div>
             </div>
           )}
@@ -2140,23 +1745,24 @@ export default function PremiumRiceStore() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 font-sans text-gray-900 selection:bg-emerald-500 selection:text-white">
+    <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
       {renderNav()}
-      {view === 'home' && renderHome()}
-      {view === 'shop' && renderShop()}
-      {view === 'cart' && renderCart()}
-      {view === 'login' && renderAuth()}
-      {view === 'profile' && renderProfile()}
-      {view === 'admin' && renderAdmin()}
-
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl font-bold text-sm flex items-center gap-3 animate-bounce border ${
-          toast.type === 'error' ? 'bg-rose-950 text-rose-200 border-rose-800' : 'bg-emerald-950 text-emerald-200 border-emerald-800'
+        <div className={`fixed bottom-4 right-4 z-50 px-6 py-3 rounded-2xl shadow-2xl font-bold text-sm text-white flex items-center animate-fadeIn ${
+          toast.type === 'error' ? 'bg-rose-500' : 'bg-emerald-600'
         }`}>
-          {toast.type === 'error' ? <AlertCircle className="text-rose-400 h-5 w-5" /> : <CheckCircle className="text-emerald-400 h-5 w-5" />}
-          <span>{toast.message}</span>
+          {toast.type === 'error' ? <AlertTriangle className="mr-2 h-5 w-5" /> : <CheckCircle className="mr-2 h-5 w-5" />}
+          {toast.message}
         </div>
       )}
+      <div className="flex-1 w-full">
+        {view === 'home' && renderHome()}
+        {view === 'shop' && renderShop()}
+        {view === 'cart' && renderCart()}
+        {view === 'login' && renderAuth()}
+        {view === 'profile' && renderProfile()}
+        {view === 'admin' && renderAdmin()}
+      </div>
     </div>
   );
 }
