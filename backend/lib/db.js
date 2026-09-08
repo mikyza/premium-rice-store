@@ -12,7 +12,7 @@ if (isCloud && process.env.DB_CLOUD_URL) {
     logging: false,
     dialectOptions: {
       ssl: {
-        rejectUnauthorized: false
+        rejectUnauthorized: false // Required for secure Aiven SSL handshakes
       }
     }
   });
@@ -133,18 +133,20 @@ export const Transaction = sequelize.define('Transaction', {
   status: { type: DataTypes.STRING, defaultValue: 'completed' }
 });
 
-// Configure Relationships
-User.hasMany(Order, { foreignKey: 'userId', onDelete: 'CASCADE' });
-Order.belongsTo(User, { foreignKey: 'userId' });
-
-Order.hasMany(Payment, { foreignKey: 'orderId', onDelete: 'CASCADE' });
-Payment.belongsTo(Order, { foreignKey: 'orderId' });
-
+// ==========================================
+// CONFIGURE RELATIONSHIPS
+// ==========================================
 User.hasMany(Cart, { foreignKey: 'userId', onDelete: 'CASCADE' });
 Cart.belongsTo(User, { foreignKey: 'userId' });
 
 RiceProduct.hasMany(Cart, { foreignKey: 'productId', onDelete: 'CASCADE' });
 Cart.belongsTo(RiceProduct, { foreignKey: 'productId' });
+
+User.hasMany(Order, { foreignKey: 'userId', onDelete: 'CASCADE' });
+Order.belongsTo(User, { foreignKey: 'userId' });
+
+Order.hasMany(Payment, { foreignKey: 'orderId', onDelete: 'CASCADE' });
+Payment.belongsTo(Order, { foreignKey: 'orderId' });
 
 User.hasMany(UserAddress, { foreignKey: 'userId', onDelete: 'CASCADE' });
 UserAddress.belongsTo(User, { foreignKey: 'userId' });
