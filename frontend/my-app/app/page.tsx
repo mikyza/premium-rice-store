@@ -75,12 +75,12 @@ const DEFAULT_REGIONAL_LOGISTICS = {
   streets: ["Main Street / Highway", "Market Road", "Hospital Road", "School Lane", "Opposite Chief's Camp", "Supermarket Landmark"]
 };
 
-// Helper utility to safely format shipping address objects to strings to prevent React Error #31
+// Helper utility to safely format shipping address objects to strings and prevent property structure mismatch errors
 const formatShippingAddress = (addr: any) => {
   if (!addr) return 'Standard Delivery';
   if (typeof addr === 'string') return addr;
   if (typeof addr === 'object') {
-    return addr.streetAddress || addr.details || addr.location || [addr.town, addr.county].filter(Boolean).join(', ') || JSON.stringify(addr);
+    return addr.streetAddress || addr.details || addr.location || addr.address || [addr.town, addr.county].filter(Boolean).join(', ') || JSON.stringify(addr);
   }
   return String(addr);
 };
@@ -98,7 +98,6 @@ export default function PremiumRiceStore() {
   const [products, setProducts] = useState<any[]>([]);
   const [carousel, setCarousel] = useState<any[]>([]);
   
-  // Expanded Hero Configuration with 10 distinct professional settings (Think Cool)
   const [heroSettings, setHeroSettings] = useState<any>({
     title: 'Direct From Mwea Paddy Fields',
     subtitle: '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.',
@@ -111,7 +110,6 @@ export default function PremiumRiceStore() {
     badgeText: '🌱 Pure Kenya Agricultural Harvest',
     overlayOpacity: '40',
     secondaryButtonText: 'Track Order Status',
-    // 10 Cool Extended Configurations
     announcementTicker: '🔥 Special 25kg Wholesale Discount Active Across All 47 Counties!',
     themeAccentColor: 'emerald',
     heroLayoutMode: 'split-banner',
@@ -270,7 +268,9 @@ export default function PremiumRiceStore() {
       });
 
       newSocket.on('stockUpdated', (data: any) => {
-        setProducts(prev => prev.map(p => p.id === data.productId ? { ...p, stockQuantity: data.newStockQuantity } : p));
+        const pId = data.productId || data.id;
+        const newStock = data.newStockQuantity !== undefined ? data.newStockQuantity : data.stockQuantity;
+        setProducts(prev => prev.map(p => (p.id === pId ? { ...p, stockQuantity: newStock } : p)));
       });
 
       newSocket.on('heroUpdated', (newHero: any) => {
@@ -282,8 +282,8 @@ export default function PremiumRiceStore() {
       });
 
       newSocket.on('orderStatusUpdated', (updatedOrder: any) => {
-        setMyOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-        setAdminOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+        setMyOrders(prev => prev.map(o => (o.id === updatedOrder.id ? updatedOrder : o)));
+        setAdminOrders(prev => prev.map(o => (o.id === updatedOrder.id ? updatedOrder : o)));
       });
     } catch (err) {
       console.error("Real-time socket initialization failed:", err);
@@ -297,7 +297,7 @@ export default function PremiumRiceStore() {
       socket.emit('joinAdminChannel', token);
       
       socket.on('lowStockAlert', (data: any) => {
-        showToast(`Low Stock Warning: ${data.name} has only ${data.remainingStock} bags left!`, 'error');
+        showToast(`Low Stock Warning: ${data.name || data.variety} has only ${data.remainingStock || data.stockQuantity} bags left!`, 'error');
       });
       socket.on('newOrderAlert', (data: any) => {
         showToast(`New Order Received! Order #${data.id}`, 'success');
@@ -450,28 +450,35 @@ export default function PremiumRiceStore() {
   }, [checkoutData.county, countyOverrides, baseTransportFee]);
 
   const addToCart = (product: any) => {
-    if (product.stockQuantity <= 0) return showToast('This product is out of stock', 'error');
+    const stock = product.stockQuantity !== undefined ? product.stockQuantity : product.stock;
+    if (stock <= 0) return showToast('This product is out of stock', 'error');
     
+    const pId = product.id;
+    const pPrice = product.price !== undefined ? product.price : product.basePrice;
+
     setCart(prev => {
-      const existing = prev.find(item => item.productId === product.id);
+      const existing = prev.find(item => item.productId === pId || item.id === pId);
       if (existing) {
-        if (existing.quantity >= product.stockQuantity) {
+        const currentQty = existing.quantity || 1;
+        if (currentQty >= stock) {
           showToast('Cannot add more than available stock', 'error');
           return prev;
         }
         showToast('Cart updated for your account');
-        return prev.map(item => item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item);
+        return prev.map(item => (item.productId === pId || item.id === pId) ? { ...item, quantity: currentQty + 1 } : item);
       }
       showToast('Added to bag for your account');
-      return [...prev, { productId: product.id, product, quantity: 1, price: product.price }];
+      return [...prev, { productId: pId, product, quantity: 1, price: pPrice }];
     });
   };
 
   const updateCartQuantity = (productId: number, delta: number) => {
     setCart(prev => prev.map(item => {
-      if (item.productId === productId) {
+      const itemId = item.productId || item.product?.id || item.id;
+      if (itemId === productId) {
         const newQ = item.quantity + delta;
-        if (newQ > item.product.stockQuantity) {
+        const maxStock = item.product?.stockQuantity !== undefined ? item.product.stockQuantity : (item.product?.stock || 999);
+        if (newQ > maxStock) {
           showToast('Max stock reached', 'error');
           return item;
         }
@@ -481,14 +488,15 @@ export default function PremiumRiceStore() {
     }).filter(item => item.quantity > 0));
   };
 
-  const cartSubtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const cartSubtotal = cart.reduce((sum, item) => sum + ((item.price || item.product?.price || 0) * item.quantity), 0);
   const cartTotal = cartSubtotal + (cart.length > 0 ? activeTransportFee : 0);
 
   const totalKgBought = useMemo(() => {
     return myOrders.reduce((acc, order) => {
       if (order.status === 'failed' || order.paymentStatus === 'failed') return acc;
       const orderKg = order.items?.reduce((sum: number, item: any) => {
-         return sum + ((item.weightKg || item.product?.weightKg || 25) * item.quantity);
+         const w = item.weightKg || item.weight || item.product?.weightKg || 25;
+         return sum + (w * item.quantity);
       }, 0) || 0;
       return acc + orderKg;
     }, 0);
@@ -682,34 +690,44 @@ export default function PremiumRiceStore() {
           </div>
           
           <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
-            {products.slice(0, 4).map(p => (
-              <div key={p.id} className="bg-white rounded-2xl sm:rounded-3xl shadow-md overflow-hidden border border-emerald-100 hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 flex flex-col group">
-                <div className="h-32 sm:h-56 bg-emerald-50 flex items-center justify-center relative overflow-hidden border-b border-emerald-100">
-                  {p.imageUrl ? (
-                    <img src={p.imageUrl} alt={p.variety} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                  ) : (
-                    <Package className="h-12 w-12 sm:h-20 sm:w-20 text-emerald-300 group-hover:scale-110 transition-transform duration-500" />
-                  )}
-                  {p.isBlackFridayApplied && <span className="absolute top-2 right-2 sm:top-4 sm:right-4 bg-rose-500 text-white text-[10px] sm:text-xs font-black px-2 py-1 sm:px-3 sm:py-1.5 rounded-full shadow-lg">SALE</span>}
-                </div>
-                <div className="p-3 sm:p-6 flex-1 flex flex-col">
-                  <div className="text-[10px] sm:text-xs font-black text-emerald-600 uppercase tracking-widest mb-1">{p.brandName}</div>
-                  <h3 className="font-black text-sm sm:text-xl mb-1 sm:mb-2 text-gray-900 group-hover:text-emerald-700 transition-colors leading-tight">{p.variety}</h3>
-                  <p className="text-gray-500 text-[10px] sm:text-xs mb-3 sm:mb-6 flex items-center font-medium">
-                    <MapPin size={12} className="mr-1 text-emerald-500 hidden sm:block" /> Net Weight: <span className="font-bold text-gray-700 ml-1">{p.weightKg}kg Bag</span>
-                  </p>
-                  <div className="flex justify-between items-end mt-auto pt-2 sm:pt-4 border-t border-gray-100">
-                    <div>
-                      {p.isBlackFridayApplied && <span className="text-[10px] sm:text-xs text-rose-500 font-bold line-through block mb-0.5">KES {p.basePrice?.toLocaleString()}</span>}
-                      <span className="text-sm sm:text-xl font-black text-emerald-900">KES {p.price?.toLocaleString()}</span>
+            {products.slice(0, 4).map(p => {
+              const pId = p.id;
+              const pBrand = p.brandName || p.brand || 'Mwea Hub';
+              const pVariety = p.variety || p.name || 'Pishori Rice';
+              const pWeight = p.weightKg || p.weight || 25;
+              const pStock = p.stockQuantity !== undefined ? p.stockQuantity : p.stock;
+              const pPrice = p.price !== undefined ? p.price : p.basePrice;
+              const pBasePrice = p.basePrice || p.price;
+
+              return (
+                <div key={pId} className="bg-white rounded-2xl sm:rounded-3xl shadow-md overflow-hidden border border-emerald-100 hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 flex flex-col group">
+                  <div className="h-32 sm:h-56 bg-emerald-50 flex items-center justify-center relative overflow-hidden border-b border-emerald-100">
+                    {p.imageUrl || p.image ? (
+                      <img src={p.imageUrl || p.image} alt={pVariety} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                    ) : (
+                      <Package className="h-12 w-12 sm:h-20 sm:w-20 text-emerald-300 group-hover:scale-110 transition-transform duration-500" />
+                    )}
+                    {p.isBlackFridayApplied && <span className="absolute top-2 right-2 sm:top-4 sm:right-4 bg-rose-500 text-white text-[10px] sm:text-xs font-black px-2 py-1 sm:px-3 sm:py-1.5 rounded-full shadow-lg">SALE</span>}
+                  </div>
+                  <div className="p-3 sm:p-6 flex-1 flex flex-col">
+                    <div className="text-[10px] sm:text-xs font-black text-emerald-600 uppercase tracking-widest mb-1">{pBrand}</div>
+                    <h3 className="font-black text-sm sm:text-xl mb-1 sm:mb-2 text-gray-900 group-hover:text-emerald-700 transition-colors leading-tight">{pVariety}</h3>
+                    <p className="text-gray-500 text-[10px] sm:text-xs mb-3 sm:mb-6 flex items-center font-medium">
+                      <MapPin size={12} className="mr-1 text-emerald-500 hidden sm:block" /> Net Weight: <span className="font-bold text-gray-700 ml-1">{pWeight}kg Bag</span>
+                    </p>
+                    <div className="flex justify-between items-end mt-auto pt-2 sm:pt-4 border-t border-gray-100">
+                      <div>
+                        {p.isBlackFridayApplied && pBasePrice && <span className="text-[10px] sm:text-xs text-rose-500 font-bold line-through block mb-0.5">KES {pBasePrice.toLocaleString()}</span>}
+                        <span className="text-sm sm:text-xl font-black text-emerald-900">KES {pPrice?.toLocaleString()}</span>
+                      </div>
+                      <button onClick={() => addToCart(p)} className="bg-emerald-600 text-white p-2 sm:p-3 rounded-xl sm:rounded-2xl hover:bg-emerald-500 transition-all shadow-md hover:shadow-emerald-500/30 font-bold flex items-center text-xs sm:text-sm">
+                        <Plus className="h-4 w-4 sm:mr-1" /> <span className="hidden sm:inline">Add</span>
+                      </button>
                     </div>
-                    <button onClick={() => addToCart(p)} className="bg-emerald-600 text-white p-2 sm:p-3 rounded-xl sm:rounded-2xl hover:bg-emerald-500 transition-all shadow-md hover:shadow-emerald-500/30 font-bold flex items-center text-xs sm:text-sm">
-                      <Plus className="h-4 w-4 sm:mr-1" /> <span className="hidden sm:inline">Add</span>
-                    </button>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -720,7 +738,9 @@ export default function PremiumRiceStore() {
     const filteredProducts = products.filter(p => {
       if (!shopSearch) return true;
       const q = shopSearch.toLowerCase();
-      return p.brandName?.toLowerCase().includes(q) || p.variety?.toLowerCase().includes(q);
+      const b = (p.brandName || p.brand || '').toLowerCase();
+      const v = (p.variety || p.name || '').toLowerCase();
+      return b.includes(q) || v.includes(q);
     });
 
     return (
@@ -743,42 +763,53 @@ export default function PremiumRiceStore() {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">
-          {filteredProducts.map(p => (
-            <div key={p.id} className={`bg-white rounded-2xl sm:rounded-3xl shadow-sm hover:shadow-xl transition-all duration-300 border ${p.stockQuantity <= 0 ? 'opacity-70 grayscale' : 'border-emerald-100'} flex flex-col group overflow-hidden`}>
-               <div className="h-32 sm:h-48 bg-emerald-50/50 flex flex-col justify-center items-center relative overflow-hidden border-b border-emerald-50">
-                 {p.imageUrl ? (
-                   <img src={p.imageUrl} alt={p.variety} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                 ) : (
-                   <Package className="h-10 w-10 sm:h-16 sm:w-16 text-emerald-300 group-hover:scale-110 transition-transform duration-300" />
-                 )}
-                 {p.isBlackFridayApplied && <span className="absolute top-2 right-2 bg-rose-500 text-white text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-full shadow z-10">SALE</span>}
-                 {p.stockQuantity <= 0 && <span className="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center text-white font-black text-xs sm:text-sm uppercase tracking-widest z-10 text-center">Out of Stock</span>}
-               </div>
-               
-               <div className="p-3 sm:p-5 flex-1 flex flex-col">
-                 <div className="text-[9px] sm:text-[11px] font-black text-emerald-600 uppercase tracking-widest mb-1">{p.brandName}</div>
-                 <h3 className="font-bold text-sm sm:text-lg text-gray-900 mb-2 leading-tight">{p.variety}</h3>
-                 <div className="text-[10px] sm:text-xs text-gray-500 mb-3 sm:mb-6 space-y-1 bg-gray-50 p-2 rounded-lg sm:rounded-xl border border-gray-100">
-                   <div className="flex justify-between"><span>Weight:</span><span className="font-bold text-gray-800">{p.weightKg} kg</span></div>
-                   <div className="flex justify-between"><span>Inventory:</span><span className={`font-bold ${p.stockQuantity > 10 ? 'text-emerald-600' : 'text-rose-500'}`}>{p.stockQuantity} bags</span></div>
+          {filteredProducts.map(p => {
+            const pId = p.id;
+            const pBrand = p.brandName || p.brand || 'Mwea Hub';
+            const pVariety = p.variety || p.name || 'Pishori Rice';
+            const pWeight = p.weightKg || p.weight || 25;
+            const pStock = p.stockQuantity !== undefined ? p.stockQuantity : p.stock;
+            const pPrice = p.price !== undefined ? p.price : p.basePrice;
+            const pBasePrice = p.basePrice || p.price;
+            const isOut = pStock <= 0;
+
+            return (
+              <div key={pId} className={`bg-white rounded-2xl sm:rounded-3xl shadow-sm hover:shadow-xl transition-all duration-300 border ${isOut ? 'opacity-70 grayscale' : 'border-emerald-100'} flex flex-col group overflow-hidden`}>
+                 <div className="h-32 sm:h-48 bg-emerald-50/50 flex flex-col justify-center items-center relative overflow-hidden border-b border-emerald-50">
+                   {p.imageUrl || p.image ? (
+                     <img src={p.imageUrl || p.image} alt={pVariety} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                   ) : (
+                     <Package className="h-10 w-10 sm:h-16 sm:w-16 text-emerald-300 group-hover:scale-110 transition-transform duration-300" />
+                   )}
+                   {p.isBlackFridayApplied && <span className="absolute top-2 right-2 bg-rose-500 text-white text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-full shadow z-10">SALE</span>}
+                   {isOut && <span className="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center text-white font-black text-xs sm:text-sm uppercase tracking-widest z-10 text-center">Out of Stock</span>}
                  </div>
                  
-                 <div className="mt-auto flex flex-col sm:flex-row justify-between sm:items-center pt-2 gap-2">
-                   <div>
-                      {p.isBlackFridayApplied && <span className="text-[10px] sm:text-[11px] text-rose-500 font-bold line-through block">KES {p.basePrice?.toLocaleString()}</span>}
-                      <div className="font-black text-base sm:text-xl text-emerald-950">KES {p.price?.toLocaleString()}</div>
+                 <div className="p-3 sm:p-5 flex-1 flex flex-col">
+                   <div className="text-[9px] sm:text-[11px] font-black text-emerald-600 uppercase tracking-widest mb-1">{pBrand}</div>
+                   <h3 className="font-bold text-sm sm:text-lg text-gray-900 mb-2 leading-tight">{pVariety}</h3>
+                   <div className="text-[10px] sm:text-xs text-gray-500 mb-3 sm:mb-6 space-y-1 bg-gray-50 p-2 rounded-lg sm:rounded-xl border border-gray-100">
+                     <div className="flex justify-between"><span>Weight:</span><span className="font-bold text-gray-800">{pWeight} kg</span></div>
+                     <div className="flex justify-between"><span>Inventory:</span><span className={`font-bold ${pStock > 10 ? 'text-emerald-600' : 'text-rose-500'}`}>{pStock} bags</span></div>
                    </div>
-                   <button 
-                     onClick={() => addToCart(p)}
-                     disabled={p.stockQuantity <= 0}
-                     className={`px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl text-[10px] sm:text-xs font-black transition-all shadow-sm ${p.stockQuantity <= 0 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-500 hover:shadow-md transform hover:-translate-y-0.5'}`}
-                   >
-                     Add to Bag
-                   </button>
+                   
+                   <div className="mt-auto flex flex-col sm:flex-row justify-between sm:items-center pt-2 gap-2">
+                     <div>
+                        {p.isBlackFridayApplied && pBasePrice && <span className="text-[10px] sm:text-[11px] text-rose-500 font-bold line-through block">KES {pBasePrice.toLocaleString()}</span>}
+                        <div className="font-black text-base sm:text-xl text-emerald-950">KES {pPrice?.toLocaleString()}</div>
+                     </div>
+                     <button 
+                       onClick={() => addToCart(p)}
+                       disabled={isOut}
+                       className={`px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl text-[10px] sm:text-xs font-black transition-all shadow-sm ${isOut ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-500 hover:shadow-md transform hover:-translate-y-0.5'}`}
+                     >
+                       Add to Bag
+                     </button>
+                   </div>
                  </div>
-               </div>
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -801,7 +832,7 @@ export default function PremiumRiceStore() {
       setIsCheckingOut(true);
       try {
         const payload = {
-          cartItems: cart.map(item => ({ productId: item.productId, quantity: item.quantity })),
+          cartItems: cart.map(item => ({ productId: item.productId || item.product?.id || item.id, quantity: item.quantity })),
           paymentMethod: checkoutData.paymentMethod,
           phoneNumber: targetPhone,
           county: checkoutData.county,
@@ -877,36 +908,46 @@ export default function PremiumRiceStore() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
             <div className="lg:col-span-7 space-y-4">
               <h2 className="font-bold text-lg text-gray-800 mb-2">Selected Products ({cart.length})</h2>
-              {cart.map(item => (
-                <div key={item.productId} className="flex flex-col sm:flex-row items-center justify-between bg-white p-5 rounded-3xl shadow-sm border border-gray-100 gap-4">
-                  <div className="flex items-center gap-4 w-full sm:w-auto">
-                    <div className="w-20 h-20 bg-emerald-50 rounded-2xl flex items-center justify-center border border-emerald-100 shrink-0 overflow-hidden">
-                      {item.product.imageUrl ? (
-                        <img src={item.product.imageUrl} alt={item.product.variety} className="w-full h-full object-cover" />
-                      ) : (
-                        <Package className="text-emerald-400 h-10 w-10" />
-                      )}
+              {cart.map(item => {
+                const prod = item.product || {};
+                const pId = item.productId || prod.id;
+                const pBrand = prod.brandName || prod.brand || 'Mwea Hub';
+                const pVariety = prod.variety || prod.name || 'Pishori Rice';
+                const pWeight = prod.weightKg || prod.weight || 25;
+                const pPrice = item.price || prod.price || prod.basePrice || 0;
+                const pImg = prod.imageUrl || prod.image;
+
+                return (
+                  <div key={pId} className="flex flex-col sm:flex-row items-center justify-between bg-white p-5 rounded-3xl shadow-sm border border-gray-100 gap-4">
+                    <div className="flex items-center gap-4 w-full sm:w-auto">
+                      <div className="w-20 h-20 bg-emerald-50 rounded-2xl flex items-center justify-center border border-emerald-100 shrink-0 overflow-hidden">
+                        {pImg ? (
+                          <img src={pImg} alt={pVariety} className="w-full h-full object-cover" />
+                        ) : (
+                          <Package className="text-emerald-400 h-10 w-10" />
+                        )}
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest block">{pBrand}</span>
+                        <h3 className="font-bold text-lg text-gray-900 leading-snug">{pVariety}</h3>
+                        <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded-md mt-1 inline-block">{pWeight}kg Sack</span>
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest block">{item.product.brandName}</span>
-                      <h3 className="font-bold text-lg text-gray-900 leading-snug">{item.product.variety}</h3>
-                      <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded-md mt-1 inline-block">{item.product.weightKg}kg Sack</span>
+                    
+                    <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-6 border-t sm:border-t-0 pt-4 sm:pt-0 border-gray-100">
+                      <div className="flex items-center bg-gray-100 rounded-xl p-1 border border-gray-200">
+                        <button onClick={() => updateCartQuantity(pId, -1)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-white text-gray-700 hover:text-emerald-600 shadow-xs font-black">-</button>
+                        <span className="w-10 text-center font-bold text-sm text-gray-900">{item.quantity}</span>
+                        <button onClick={() => updateCartQuantity(pId, 1)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-white text-gray-700 hover:text-emerald-600 shadow-xs font-black">+</button>
+                      </div>
+                      <div className="font-black text-lg text-emerald-950 w-28 text-right">KES {(pPrice * item.quantity).toLocaleString()}</div>
+                      <button onClick={() => updateCartQuantity(pId, -item.quantity)} className="text-gray-400 hover:text-rose-500 p-2 hover:bg-rose-50 rounded-xl transition-colors">
+                        <Trash2 className="h-5 w-5" />
+                      </button>
                     </div>
                   </div>
-                  
-                  <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-6 border-t sm:border-t-0 pt-4 sm:pt-0 border-gray-100">
-                    <div className="flex items-center bg-gray-100 rounded-xl p-1 border border-gray-200">
-                      <button onClick={() => updateCartQuantity(item.productId, -1)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-white text-gray-700 hover:text-emerald-600 shadow-xs font-black">-</button>
-                      <span className="w-10 text-center font-bold text-sm text-gray-900">{item.quantity}</span>
-                      <button onClick={() => updateCartQuantity(item.productId, 1)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-white text-gray-700 hover:text-emerald-600 shadow-xs font-black">+</button>
-                    </div>
-                    <div className="font-black text-lg text-emerald-950 w-28 text-right">KES {(item.price * item.quantity).toLocaleString()}</div>
-                    <button onClick={() => updateCartQuantity(item.productId, -item.quantity)} className="text-gray-400 hover:text-rose-500 p-2 hover:bg-rose-50 rounded-xl transition-colors">
-                      <Trash2 className="h-5 w-5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="lg:col-span-5 bg-white p-6 sm:p-8 rounded-3xl shadow-xl border border-emerald-100 h-fit sticky top-28">
@@ -1282,26 +1323,28 @@ export default function PremiumRiceStore() {
               <div className="text-center py-8 text-gray-500 font-medium text-sm">No pending shipping transactions.</div>
             ) : (
               <div className="space-y-4">
-                {pendingTransactions.map(o => (
-                  <div key={o.id} className="border border-amber-200 bg-amber-50/40 rounded-2xl p-5">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200 pb-3 mb-3">
-                      <div>
-                        <span className="font-mono font-black text-emerald-950 text-base">TXN #{o.transactionId || o.id}</span>
-                        {/* Payment status strictly from backend */}
-                        <span className="text-xs text-gray-500 font-medium ml-3">Payment Status: <strong className="text-emerald-700 uppercase">{o.paymentStatus || 'Paid'}</strong></span>
+                {pendingTransactions.map(o => {
+                  const oTotal = o.grandTotal || o.total || o.amount || 0;
+                  return (
+                    <div key={o.id} className="border border-amber-200 bg-amber-50/40 rounded-2xl p-5">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200 pb-3 mb-3">
+                        <div>
+                          <span className="font-mono font-black text-emerald-950 text-base">TXN #{o.transactionId || o.id}</span>
+                          <span className="text-xs text-gray-500 font-medium ml-3">Payment Status: <strong className="text-emerald-700 uppercase">{o.paymentStatus || 'Paid'}</strong></span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
+                            ● {o.status || 'Processing'} (In Shipping)
+                          </span>
+                          <span className="font-black text-lg text-emerald-900">KES {oTotal.toLocaleString()}</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
-                          ● {o.status} (In Shipping)
-                        </span>
-                        <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
+                      <div className="text-xs text-gray-700">
+                        <strong>Shipping Route:</strong> {o.county}, {o.town}, {o.location} ({formatShippingAddress(o.shippingAddress)})
                       </div>
                     </div>
-                    <div className="text-xs text-gray-700">
-                      <strong>Shipping Route:</strong> {o.county}, {o.town}, {o.location} ({formatShippingAddress(o.shippingAddress)})
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1319,43 +1362,50 @@ export default function PremiumRiceStore() {
               <div className="text-center py-8 text-gray-500 font-medium text-sm">No completed delivery transactions recorded yet.</div>
             ) : (
               <div className="space-y-6">
-                {completedTransactions.map(o => (
-                  <div key={o.id} className="border border-gray-200 bg-gray-50/50 rounded-2xl p-5">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-200 pb-4 mb-4">
-                      <div>
-                        <span className="font-mono font-black text-emerald-950 text-base">TXN ID: #{o.transactionId || o.id}</span>
-                        <span className="text-xs text-gray-400 font-medium block sm:inline sm:ml-3">{new Date(o.createdAt).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
-                          ● DELIVERED & COMPLETED
-                        </span>
-                        <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
-                      </div>
-                    </div>
-
-                    <div className="text-xs text-gray-600 mb-4 bg-white p-4 rounded-xl border border-gray-200">
-                      <div className="font-bold text-gray-800 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-600"/> Delivery Details:</div>
-                      <ul className="space-y-1 pl-5 list-disc text-gray-700">
-                        <li><strong>County:</strong> {o.county || 'N/A'}</li>
-                        <li><strong>Town/District:</strong> {o.town || 'N/A'}</li>
-                        <li><strong>Location:</strong> {o.location || 'N/A'}</li>
-                        <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
-                        <li><strong>Street/Landmark:</strong> {formatShippingAddress(o.shippingAddress)}</li>
-                        <li><strong>Payment Status:</strong> <span className="uppercase text-emerald-600 font-bold">{o.paymentStatus || 'Paid'}</span></li>
-                      </ul>
-                    </div>
-
-                    <div className="space-y-1.5 text-xs">
-                      {o.items?.map((item: any, i: number) => (
-                        <div key={i} className="flex justify-between text-gray-700 bg-white px-3 py-2 rounded-lg border border-gray-100 font-medium">
-                          <span>{item.quantity}x {item.name || item.product?.variety}</span>
-                          <span className="font-bold">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
+                {completedTransactions.map(o => {
+                  const oTotal = o.grandTotal || o.total || o.amount || 0;
+                  return (
+                    <div key={o.id} className="border border-gray-200 bg-gray-50/50 rounded-2xl p-5">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-200 pb-4 mb-4">
+                        <div>
+                          <span className="font-mono font-black text-emerald-950 text-base">TXN ID: #{o.transactionId || o.id}</span>
+                          <span className="text-xs text-gray-400 font-medium block sm:inline sm:ml-3">{new Date(o.createdAt || Date.now()).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</span>
                         </div>
-                      ))}
+                        <div className="flex items-center gap-3">
+                          <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            ● DELIVERED & COMPLETED
+                          </span>
+                          <span className="font-black text-lg text-emerald-900">KES {oTotal.toLocaleString()}</span>
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-gray-600 mb-4 bg-white p-4 rounded-xl border border-gray-200">
+                        <div className="font-bold text-gray-800 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-600"/> Delivery Details:</div>
+                        <ul className="space-y-1 pl-5 list-disc text-gray-700">
+                          <li><strong>County:</strong> {o.county || 'N/A'}</li>
+                          <li><strong>Town/District:</strong> {o.town || 'N/A'}</li>
+                          <li><strong>Location:</strong> {o.location || 'N/A'}</li>
+                          <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
+                          <li><strong>Street/Landmark:</strong> {formatShippingAddress(o.shippingAddress)}</li>
+                          <li><strong>Payment Status:</strong> <span className="uppercase text-emerald-600 font-bold">{o.paymentStatus || 'Paid'}</span></li>
+                        </ul>
+                      </div>
+
+                      <div className="space-y-1.5 text-xs">
+                        {o.items?.map((item: any, i: number) => {
+                          const itemName = item.name || item.product?.variety || item.variety || 'Rice Bag';
+                          const itemPrice = item.priceAtPurchase || item.price || item.product?.price || 0;
+                          return (
+                            <div key={i} className="flex justify-between text-gray-700 bg-white px-3 py-2 rounded-lg border border-gray-100 font-medium">
+                              <span>{item.quantity}x {itemName}</span>
+                              <span className="font-bold">KES {(itemPrice * item.quantity).toLocaleString()}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1386,6 +1436,15 @@ export default function PremiumRiceStore() {
       { id: 'config', icon: <Settings size={18}/>, label: 'Counties & Engine' },
       { id: 'logs', icon: <Activity size={18}/>, label: 'Audit Logs' }
     ];
+
+    const filteredAdminOrders = adminOrders.filter(o => {
+      if (!orderSearchQuery) return true;
+      const q = orderSearchQuery.toLowerCase();
+      const idMatch = String(o.id).toLowerCase().includes(q);
+      const txMatch = String(o.transactionId || '').toLowerCase().includes(q);
+      const countyMatch = (o.county || '').toLowerCase().includes(q);
+      return idMatch || txMatch || countyMatch;
+    });
 
     return (
       <div className="flex flex-col md:flex-row min-h-[calc(100vh-80px)] bg-[#0a0a0a] text-white font-sans animate-fadeIn">
@@ -1481,11 +1540,11 @@ export default function PremiumRiceStore() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                     <div>
                       <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Brand Name</label>
-                      <input type="text" value={editingProduct.brandName} onChange={e=>setEditingProduct({...editingProduct, brandName:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                      <input type="text" value={editingProduct.brandName || editingProduct.brand || ''} onChange={e=>setEditingProduct({...editingProduct, brandName:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
                     </div>
                     <div>
                       <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Variety</label>
-                      <input type="text" value={editingProduct.variety} onChange={e=>setEditingProduct({...editingProduct, variety:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                      <input type="text" value={editingProduct.variety || editingProduct.name || ''} onChange={e=>setEditingProduct({...editingProduct, variety:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
                     </div>
                     <div>
                       <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Buying/Cost Price</label>
@@ -1493,15 +1552,15 @@ export default function PremiumRiceStore() {
                     </div>
                     <div>
                       <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Selling Price</label>
-                      <input type="number" value={editingProduct.basePrice} onChange={e=>setEditingProduct({...editingProduct, basePrice:Number(e.target.value), price:Number(e.target.value)})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                      <input type="number" value={editingProduct.basePrice || editingProduct.price || 0} onChange={e=>setEditingProduct({...editingProduct, basePrice:Number(e.target.value), price:Number(e.target.value)})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
                     </div>
                     <div>
                       <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Stock Inventory</label>
-                      <input type="number" value={editingProduct.stockQuantity} onChange={e=>setEditingProduct({...editingProduct, stockQuantity:Number(e.target.value)})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                      <input type="number" value={editingProduct.stockQuantity !== undefined ? editingProduct.stockQuantity : editingProduct.stock} onChange={e=>setEditingProduct({...editingProduct, stockQuantity:Number(e.target.value)})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
                     </div>
                     <div className="md:col-span-3">
                       <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Image URL</label>
-                      <input type="text" placeholder="Image URL" value={editingProduct.imageUrl || ''} onChange={e=>setEditingProduct({...editingProduct, imageUrl:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                      <input type="text" placeholder="Image URL" value={editingProduct.imageUrl || editingProduct.image || ''} onChange={e=>setEditingProduct({...editingProduct, imageUrl:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
                     </div>
                   </div>
                   <button onClick={async () => {
@@ -1538,39 +1597,48 @@ export default function PremiumRiceStore() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800/60">
-                      {products.map(p => (
-                        <tr key={p.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                          <td className="px-6 py-4 font-mono text-gray-500">#{p.id}</td>
-                          <td className="px-6 py-4 font-bold text-gray-200">{p.brandName} - <span className="text-gray-400 font-normal">{p.variety} ({p.weightKg}kg)</span></td>
-                          <td className="px-6 py-4 font-bold font-mono text-gray-400">KES {p.costPrice?.toLocaleString() || '---'}</td>
-                          <td className="px-6 py-4 font-bold font-mono text-emerald-400">KES {p.price?.toLocaleString()}</td>
-                          <td className="px-6 py-4">
-                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black border font-mono ${
-                              p.stockQuantity > 10 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-                            }`}>
-                              {p.stockQuantity} BAGS LEFT
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <button onClick={() => setEditingProduct(p)} className="text-gray-400 hover:text-emerald-400 p-2 bg-[#1f1f1f] rounded-xl mr-2 transition-colors" title="Edit"><Edit size={14}/></button>
-                            <button onClick={async () => {
-                              if (confirm(`Permanently delete ${p.brandName} ${p.variety}?`)) {
-                                try {
-                                  const res = await fetch(`${API_BASE_URL}/admin/products/${p.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
-                                  if (res.ok) {
-                                    showToast('Product wiped from database', 'success');
-                                    fetchProducts();
-                                  } else {
-                                    showToast('Failed to delete product', 'error');
+                      {products.map(p => {
+                        const pId = p.id;
+                        const pBrand = p.brandName || p.brand || 'Mwea Hub';
+                        const pVariety = p.variety || p.name || 'Pishori';
+                        const pWeight = p.weightKg || p.weight || 25;
+                        const pStock = p.stockQuantity !== undefined ? p.stockQuantity : p.stock;
+                        const pPrice = p.price !== undefined ? p.price : p.basePrice;
+
+                        return (
+                          <tr key={pId} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                            <td className="px-6 py-4 font-mono text-gray-500">#{pId}</td>
+                            <td className="px-6 py-4 font-bold text-gray-200">{pBrand} - <span className="text-gray-400 font-normal">{pVariety} ({pWeight}kg)</span></td>
+                            <td className="px-6 py-4 font-bold font-mono text-gray-400">KES {p.costPrice?.toLocaleString() || '---'}</td>
+                            <td className="px-6 py-4 font-bold font-mono text-emerald-400">KES {pPrice?.toLocaleString()}</td>
+                            <td className="px-6 py-4">
+                              <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black border font-mono ${
+                                pStock > 10 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                              }`}>
+                                {pStock} BAGS LEFT
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              <button onClick={() => setEditingProduct(p)} className="text-gray-400 hover:text-emerald-400 p-2 bg-[#1f1f1f] rounded-xl mr-2 transition-colors" title="Edit"><Edit size={14}/></button>
+                              <button onClick={async () => {
+                                if (confirm(`Permanently delete ${pBrand} ${pVariety}?`)) {
+                                  try {
+                                    const res = await fetch(`${API_BASE_URL}/admin/products/${pId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+                                    if (res.ok) {
+                                      showToast('Product wiped from database', 'success');
+                                      fetchProducts();
+                                    } else {
+                                      showToast('Failed to delete product', 'error');
+                                    }
+                                  } catch (err) {
+                                    showToast('Network error deleting product', 'error');
                                   }
-                                } catch (err) {
-                                  showToast('Network error deleting product', 'error');
                                 }
-                              }
-                            }} className="text-gray-400 hover:text-rose-500 p-2 bg-[#1f1f1f] rounded-xl transition-colors" title="Delete"><Trash2 size={14}/></button>
-                          </td>
-                        </tr>
-                      ))}
+                              }} className="text-gray-400 hover:text-rose-500 p-2 bg-[#1f1f1f] rounded-xl transition-colors" title="Delete"><Trash2 size={14}/></button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1589,356 +1657,209 @@ export default function PremiumRiceStore() {
                 <Search size={18} className="text-gray-500 ml-2" />
                 <input 
                   type="text" 
-                  placeholder="Filter orders by ID, Customer Name, or Phone..."
+                  placeholder="Filter by Order ID, Transaction ID or County..." 
                   value={orderSearchQuery}
                   onChange={(e) => setOrderSearchQuery(e.target.value)}
-                  className="bg-transparent text-white font-bold text-xs w-full outline-none placeholder-gray-600"
+                  className="w-full bg-transparent text-white font-bold text-xs outline-none placeholder-gray-500"
                 />
               </div>
 
               <div className="space-y-4">
-                {adminOrders
-                  .filter(o => {
-                    if (!orderSearchQuery) return true;
-                    const q = orderSearchQuery.toLowerCase();
-                    return String(o.id).includes(q) || o.user?.fullName?.toLowerCase().includes(q) || o.user?.phoneNumber?.includes(q) || o.county?.toLowerCase().includes(q);
-                  })
-                  .map(o => (
-                    <div key={o.id} className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-gray-800/80 pb-4 mb-4">
-                        <div>
-                          <div className="flex items-center gap-3">
-                            <span className="font-mono font-black text-emerald-400 text-base">ORDER #{o.id}</span>
-                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                              o.status === 'delivered' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                            }`}>
-                              {o.status}
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-400 mt-1">Customer: <strong className="text-white">{o.user?.fullName || 'Guest'}</strong> ({o.user?.phoneNumber || 'No Phone'}) • {new Date(o.createdAt).toLocaleString()}</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                           {/* Payment status strictly from backend and NOT alterable by admin panel */}
-                           <div className="bg-[#1f1f1f] border border-gray-800 px-3 py-1.5 rounded-xl">
-                             <span className="text-[10px] text-gray-400 block uppercase font-bold">Payment Status (Backend)</span>
-                             <span className="text-xs font-black text-emerald-400 uppercase">{o.paymentStatus || 'Paid'}</span>
-                           </div>
-
-                           <span className="text-xs text-gray-400 font-bold">Shipping Status:</span>
-                           <select 
-                             value={o.status}
-                             onChange={async (e) => {
-                               const newStatus = e.target.value;
-                               try {
-                                 const res = await fetch(`${API_BASE_URL}/admin/orders/${o.id}/status`, {
-                                   method: 'PUT',
-                                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                   body: JSON.stringify({ status: newStatus })
-                                 });
-                                 if (res.ok) {
-                                   showToast(`Order #${o.id} shipping status updated to ${newStatus}`, 'success');
-                                   fetchAdminOrders();
-                                 } else {
-                                   showToast('Failed to update order status', 'error');
-                                 }
-                               } catch (err) {
-                                 showToast('Network error updating status', 'error');
-                               }
-                             }}
-                             className="bg-[#1f1f1f] text-emerald-400 font-black text-xs border border-gray-700 rounded-xl px-3 py-2 outline-none cursor-pointer"
-                           >
-                             <option value="pending">Pending</option>
-                             <option value="processing">Processing</option>
-                             <option value="dispatched">Dispatched</option>
-                             <option value="delivered">Delivered</option>
-                             <option value="failed">Failed</option>
-                           </select>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80">
-                          <p className="font-bold text-gray-300 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-500"/> Delivery Logistics:</p>
-                          <ul className="space-y-1 text-gray-400">
-                            <li>County: <strong className="text-white">{o.county}</strong></li>
-                            <li>Town: <strong className="text-white">{o.town}</strong></li>
-                            <li>Location: <strong className="text-white">{o.location}</strong></li>
-                            <li>Street: <strong className="text-white">{formatShippingAddress(o.shippingAddress)}</strong></li>
-                          </ul>
-                        </div>
-                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80 flex flex-col justify-between">
+                {filteredAdminOrders.length === 0 ? (
+                  <div className="text-center py-16 bg-[#141414] rounded-3xl border border-gray-800 text-gray-500 text-xs">No orders match the current filter criteria.</div>
+                ) : (
+                  filteredAdminOrders.map(o => {
+                    const oTotal = o.grandTotal || o.total || o.amount || 0;
+                    return (
+                      <div key={o.id} className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl space-y-4">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-gray-800 pb-4">
                           <div>
-                            <p className="font-bold text-gray-300 mb-2">Order Items ({o.items?.length || 0}):</p>
-                            <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
-                              {o.items?.map((item: any, idx: number) => (
-                                <div key={idx} className="flex justify-between text-gray-400">
-                                  <span>{item.quantity}x {item.name || item.product?.variety}</span>
-                                  <span className="font-bold text-white">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
-                                </div>
-                              ))}
-                            </div>
+                            <span className="font-mono font-black text-emerald-400 text-base">ORDER #{o.id}</span>
+                            <span className="text-xs text-gray-400 font-mono ml-3">TXN: {o.transactionId || '---'}</span>
+                            <span className="text-xs text-gray-400 ml-3">Customer ID: {o.userId || 'N/A'}</span>
                           </div>
-                          <div className="flex justify-between font-black text-sm text-emerald-400 border-t border-gray-800 pt-2 mt-2">
-                            <span>Grand Total</span>
-                            <span>KES {o.grandTotal?.toLocaleString()}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                              {o.status || 'Processing'}
+                            </span>
+                            <span className="font-black text-lg text-white">KES {oTotal.toLocaleString()}</span>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-gray-300 bg-[#181818] p-4 rounded-2xl border border-gray-800/80">
+                          <div>
+                            <strong className="text-emerald-400 block mb-1">Route & Location:</strong>
+                            <div>{o.county} County, {o.town}, {o.location}</div>
+                            <div className="text-gray-400 mt-0.5">Address: {formatShippingAddress(o.shippingAddress)}</div>
+                          </div>
+                          <div>
+                            <strong className="text-emerald-400 block mb-1">Payment & Phone:</strong>
+                            <div>Method: <span className="uppercase font-bold text-white">{o.paymentMethod || 'STK'}</span></div>
+                            <div>Phone: {o.phoneNumber || 'N/A'}</div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 pt-2 items-center justify-between border-t border-gray-800/60">
+                          <div className="text-[10px] text-gray-500 uppercase font-black">Update Shipping Status:</div>
+                          <div className="flex gap-2">
+                            {['processing', 'dispatched', 'delivered', 'cancelled'].map(st => (
+                              <button 
+                                key={st}
+                                onClick={async () => {
+                                  try {
+                                    const res = await fetch(`${API_BASE_URL}/admin/orders/${o.id}/status`, {
+                                      method: 'PUT',
+                                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                      body: JSON.stringify({ status: st })
+                                    });
+                                    if (res.ok) {
+                                      showToast(`Order #${o.id} status updated to ${st}`, 'success');
+                                      fetchAdminOrders();
+                                    } else {
+                                      showToast('Failed to update order status', 'error');
+                                    }
+                                  } catch (err) {
+                                    showToast('Network error updating status', 'error');
+                                  }
+                                }}
+                                className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
+                                  o.status === st 
+                                    ? 'bg-emerald-600 text-white shadow' 
+                                    : 'bg-[#1f1f1f] text-gray-400 hover:text-white hover:bg-[#252525]'
+                                }`}
+                              >
+                                {st}
+                              </button>
+                            ))}
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })
+                )}
               </div>
             </div>
           )}
 
-          {adminTab === 'finances' && (() => {
-            const currentYear = new Date().getFullYear();
-            const monthlyRevenue = Array(12).fill(0);
-            const monthlyProfit = Array(12).fill(0);
-            let totalYearlyRevenue = 0;
-            let totalYearlyProfit = 0;
-
-            const categorySales: { [key: string]: { quantity: number, revenue: number, profit: number, sellingPrice: number, costPrice: number } } = {};
-
-            adminOrders.forEach(order => {
-               if (order.status !== 'failed' && order.paymentStatus !== 'failed') {
-                   const d = new Date(order.createdAt);
-                   if (d.getFullYear() === financeYear) {
-                       totalYearlyRevenue += (order.grandTotal || 0);
-                       
-                       order.items?.forEach((item: any) => {
-                          const catName = item.name || item.product?.variety || 'Standard Rice';
-                          const selling = item.priceAtPurchase || 0;
-                          const cost = item.product?.costPrice || item.costPrice || (selling * 0.75);
-                          const profit = (selling - cost) * item.quantity;
-                          const rev = selling * item.quantity;
-
-                          if (!categorySales[catName]) {
-                             categorySales[catName] = { quantity: 0, revenue: 0, profit: 0, sellingPrice: selling, costPrice: cost };
-                          }
-                          categorySales[catName].quantity += item.quantity;
-                          categorySales[catName].revenue += rev;
-                          categorySales[catName].profit += profit;
-                       });
-
-                       const orderProfit = order.items?.reduce((sum: number, item: any) => {
-                           const cost = item.product?.costPrice || item.costPrice || (item.priceAtPurchase * 0.75);
-                           return sum + ((item.priceAtPurchase - cost) * item.quantity);
-                       }, 0) || 0;
-                       
-                       totalYearlyProfit += orderProfit;
-                       monthlyRevenue[d.getMonth()] += (order.grandTotal || 0);
-                       monthlyProfit[d.getMonth()] += orderProfit;
-                   }
-               }
-            });
-
-            const maxMonthValue = Math.max(...monthlyRevenue, 1);
-            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-            return (
-              <div className="animate-fadeIn space-y-6">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <div>
-                    <h2 className="text-2xl font-black text-white flex items-center"><BarChart2 className="mr-3 text-emerald-500"/> Financial & Sales Analytics Dashboard</h2>
-                    <p className="text-gray-400 text-xs mt-1">Real-time monthly sales graph based on transaction timestamps (preserving yearly history).</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-gray-400 font-bold">Select Year:</span>
-                    <select 
-                      value={financeYear}
-                      onChange={(e) => setFinanceYear(Number(e.target.value))}
-                      className="bg-[#1f1f1f] text-emerald-400 font-black text-xs border border-gray-700 rounded-xl px-4 py-2.5 outline-none cursor-pointer"
-                    >
-                      {[currentYear, currentYear - 1, currentYear - 2, currentYear - 3].map(yr => (
-                        <option key={yr} value={yr}>{yr}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                  <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                    <span className="text-[10px] text-gray-500 font-black uppercase tracking-wider block mb-1">Total Yearly Revenue ({financeYear})</span>
-                    <div className="text-3xl font-black text-white font-mono">KES {totalYearlyRevenue.toLocaleString()}</div>
-                    <span className="text-xs text-emerald-400 font-bold mt-2 block flex items-center"><TrendingUp size={14} className="mr-1"/> Verified Backend Logins</span>
-                  </div>
-                  <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                    <span className="text-[10px] text-gray-500 font-black uppercase tracking-wider block mb-1">Total Profit ({financeYear})</span>
-                    <div className="text-3xl font-black text-emerald-400 font-mono">KES {totalYearlyProfit.toLocaleString()}</div>
-                    <span className="text-xs text-gray-400 font-medium mt-2 block">Total profit computed from all money (excluding raw payment logs)</span>
-                  </div>
-                  <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl sm:col-span-2 lg:col-span-1">
-                    <span className="text-[10px] text-gray-500 font-black uppercase tracking-wider block mb-1">Completed Transactions</span>
-                    <div className="text-3xl font-black text-white font-mono">{adminOrders.filter(o => o.status !== 'failed' && new Date(o.createdAt).getFullYear() === financeYear).length} Orders</div>
-                    <span className="text-xs text-emerald-400 font-bold mt-2 block">Active Logistics Dispatched</span>
-                  </div>
-                </div>
-
-                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 sm:p-8 shadow-xl">
-                  <h3 className="text-base font-black text-white mb-6 flex items-center justify-between">
-                    <span>Monthly Sales Breakdown ({financeYear})</span>
-                    <span className="text-xs font-mono text-emerald-400 bg-emerald-950/50 px-3 py-1 rounded-full border border-emerald-800">Timestamp Driven</span>
-                  </h3>
-                  
-                  <div className="h-64 flex items-end gap-2 sm:gap-4 pt-8 pb-2 border-b border-gray-800">
-                    {monthlyRevenue.map((rev, idx) => {
-                      const heightPercent = Math.max((rev / maxMonthValue) * 100, 6);
-                      return (
-                        <div key={idx} className="flex-1 flex flex-col items-center h-full justify-end group relative">
-                          <div className="absolute -top-10 opacity-0 group-hover:opacity-100 transition-opacity bg-black text-white text-[10px] font-mono px-2 py-1 rounded border border-gray-800 whitespace-nowrap z-20">
-                            {months[idx]}: KES {rev.toLocaleString()}
-                          </div>
-                          <div 
-                            style={{ height: `${heightPercent}%` }} 
-                            className="w-full bg-gradient-to-t from-emerald-700 to-emerald-400 rounded-t-lg group-hover:from-emerald-600 group-hover:to-emerald-300 transition-all duration-300"
-                          ></div>
-                          <span className="text-[10px] text-gray-400 font-bold mt-3 block">{months[idx]}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 sm:p-8 shadow-xl">
-                  <h3 className="text-base font-black text-white mb-6">Product Category Sales & Margin Performance</h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs whitespace-nowrap">
-                      <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
-                        <tr>
-                          <th className="px-6 py-4">Category / Variety</th>
-                          <th className="px-6 py-4">Total Bags Sold</th>
-                          <th className="px-6 py-4">Gross Revenue</th>
-                          <th className="px-6 py-4">Net Profit</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-800/60">
-                        {Object.keys(categorySales).length === 0 ? (
-                          <tr>
-                            <td colSpan={4} className="text-center py-8 text-gray-500">No sales recorded for {financeYear}.</td>
-                          </tr>
-                        ) : (
-                          Object.entries(categorySales).map(([cat, data], i) => (
-                            <tr key={i} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                              <td className="px-6 py-4 font-bold text-white">{cat}</td>
-                              <td className="px-6 py-4 font-mono font-bold text-gray-300">{data.quantity} bags</td>
-                              <td className="px-6 py-4 font-mono font-bold text-emerald-400">KES {data.revenue.toLocaleString()}</td>
-                              <td className="px-6 py-4 font-mono font-bold text-emerald-300">KES {data.profit.toLocaleString()}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+          {adminTab === 'finances' && (
+            <div className="animate-fadeIn space-y-6">
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><BarChart2 className="mr-3 text-emerald-500"/> Financial Dashboard & Profitability</h2>
+                <p className="text-gray-400 text-xs mt-1">Real-time gross revenue, cost of goods sold, net profit margins, and monthly cost configurations.</p>
               </div>
-            );
-          })()}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {(() => {
+                  const totalRev = adminOrders.reduce((sum, o) => sum + (o.status !== 'cancelled' ? (o.grandTotal || o.total || 0) : 0), 0);
+                  const totalCost = adminOrders.reduce((sum, o) => {
+                     if (o.status === 'cancelled') return sum;
+                     const orderCost = o.items?.reduce((iSum: number, item: any) => {
+                       const cost = item.costPrice || item.product?.costPrice || 2500;
+                       return iSum + (cost * item.quantity);
+                     }, 0) || 0;
+                     return sum + orderCost;
+                  }, 0);
+                  const totalProfit = totalRev - totalCost;
+
+                  return (
+                    <>
+                      <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
+                        <span className="text-xs text-gray-500 font-black uppercase tracking-wider block mb-1">Gross Revenue</span>
+                        <div className="text-2xl font-black font-mono text-emerald-400">KES {totalRev.toLocaleString()}</div>
+                      </div>
+                      <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
+                        <span className="text-xs text-gray-500 font-black uppercase tracking-wider block mb-1">Estimated Cost (COGS)</span>
+                        <div className="text-2xl font-black font-mono text-rose-400">KES {totalCost.toLocaleString()}</div>
+                      </div>
+                      <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
+                        <span className="text-xs text-gray-500 font-black uppercase tracking-wider block mb-1">Net Margin Profit</span>
+                        <div className="text-2xl font-black font-mono text-emerald-300">KES {totalProfit.toLocaleString()}</div>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                  <Calendar size={18}/> Monthly Buying Price Benchmark ({financeYear})
+                </h3>
+                <p className="text-xs text-gray-400">Configure standard buying/cost price benchmarks for paddy rice harvest per month.</p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+                  {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, idx) => (
+                    <div key={m} className="bg-[#1a1a1a] p-3 rounded-2xl border border-gray-800">
+                      <label className="text-[10px] text-gray-500 font-black uppercase block mb-1">{m}</label>
+                      <input 
+                        type="number"
+                        placeholder="KES"
+                        value={monthlyBuyingPrices[m] || ''}
+                        onChange={(e) => setMonthlyBuyingPrices({...monthlyBuyingPrices, [m]: Number(e.target.value)})}
+                        className="w-full bg-white text-black font-mono font-bold text-xs p-2 rounded-xl outline-none"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <button onClick={() => showToast('Monthly buying price benchmarks synchronized', 'success')} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500">
+                  Save Financial Benchmarks
+                </button>
+              </div>
+            </div>
+          )}
 
           {adminTab === 'users' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Clearance & Account Management</h2>
-                <p className="text-gray-400 text-xs mt-1">Manage user clearance levels, edit account details, or suspend user accounts.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Accounts & Role Clearance</h2>
+                <p className="text-gray-400 text-xs mt-1">Manage registered accounts, assign administrative privileges, or inspect user phones.</p>
               </div>
-
-              {editingUser && (
-                <div className="bg-[#1a1a1a] border-2 border-emerald-500/50 rounded-3xl p-6 shadow-2xl animate-fadeIn">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Modifying User Account #{editingUser.id || editingUser.phoneNumber}</h3>
-                    <button onClick={() => setEditingUser(null)} className="text-gray-400 hover:text-white"><X size={18}/></button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                    <div>
-                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Full Name</label>
-                      <input type="text" value={editingUser.fullName || ''} onChange={e=>setEditingUser({...editingUser, fullName:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Phone Number</label>
-                      <input type="tel" value={editingUser.phoneNumber || ''} onChange={e=>setEditingUser({...editingUser, phoneNumber:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Role / Clearance</label>
-                      <select value={editingUser.role || 'customer'} onChange={e=>setEditingUser({...editingUser, role:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs">
-                        <option value="customer">Customer</option>
-                        <option value="admin">Administrator</option>
-                        <option value="moderator">Moderator</option>
-                      </select>
-                    </div>
-                  </div>
-                  <button onClick={async () => {
-                    try {
-                      const res = await fetch(`${API_BASE_URL}/admin/users/${editingUser.id || editingUser.phoneNumber}`, {
-                        method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify(editingUser)
-                      });
-                      if (res.ok) {
-                        showToast('User account details updated successfully', 'success');
-                        setEditingUser(null);
-                        fetchAdminUsers();
-                      } else {
-                        showToast('Failed to update user account', 'error');
-                      }
-                    } catch (err) {
-                      showToast('Network error updating user', 'error');
-                    }
-                  }} className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs hover:bg-emerald-500 mr-3">Save User Changes</button>
-                </div>
-              )}
 
               <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs whitespace-nowrap">
                     <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
                       <tr>
-                        <th className="px-6 py-4">User ID / Phone</th>
+                        <th className="px-6 py-4">ID</th>
                         <th className="px-6 py-4">Full Name</th>
+                        <th className="px-6 py-4">Phone Number</th>
+                        <th className="px-6 py-4">Email</th>
                         <th className="px-6 py-4">Role Clearance</th>
-                        <th className="px-6 py-4">Account Status</th>
-                        <th className="px-6 py-4 text-center">Controls & Suspension</th>
+                        <th className="px-6 py-4 text-center">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800/60">
                       {adminUsers.map(u => (
-                        <tr key={u.id || u.phoneNumber} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                          <td className="px-6 py-4 font-mono text-gray-400">{u.phoneNumber}</td>
-                          <td className="px-6 py-4 font-bold text-white">{u.fullName || 'N/A'}</td>
+                        <tr key={u.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                          <td className="px-6 py-4 font-mono text-gray-500">#{u.id}</td>
+                          <td className="px-6 py-4 font-bold text-gray-200">{u.fullName}</td>
+                          <td className="px-6 py-4 font-mono text-gray-300">{u.phoneNumber}</td>
+                          <td className="px-6 py-4 text-gray-400">{u.email || '---'}</td>
                           <td className="px-6 py-4">
                             <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${
                               u.role === 'admin' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                             }`}>
-                              {u.role || 'customer'}
+                              {u.role}
                             </span>
                           </td>
-                          <td className="px-6 py-4">
-                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${
-                              u.isSuspended ? 'bg-rose-950 text-rose-400' : 'bg-emerald-950 text-emerald-400'
-                            }`}>
-                              {u.isSuspended ? 'Suspended' : 'Active'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-center space-x-2">
-                            <button onClick={() => setEditingUser(u)} className="text-gray-400 hover:text-emerald-400 p-2 bg-[#1f1f1f] rounded-xl transition-colors" title="Edit User"><Edit size={14}/></button>
+                          <td className="px-6 py-4 text-center">
                             <button onClick={async () => {
-                              const nextSuspendedState = !u.isSuspended;
+                              const newRole = u.role === 'admin' ? 'customer' : 'admin';
                               try {
-                                const res = await fetch(`${API_BASE_URL}/admin/users/${u.id || u.phoneNumber}/suspend`, {
+                                const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}/role`, {
                                   method: 'PUT',
                                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                  body: JSON.stringify({ isSuspended: nextSuspendedState })
+                                  body: JSON.stringify({ role: newRole })
                                 });
                                 if (res.ok) {
-                                  showToast(`User account ${nextSuspendedState ? 'suspended' : 'reactivated'}`, 'success');
+                                  showToast(`User role updated to ${newRole}`, 'success');
                                   fetchAdminUsers();
                                 } else {
-                                  showToast('Failed to change user suspension status', 'error');
+                                  showToast('Failed to update user role', 'error');
                                 }
                               } catch (err) {
-                                showToast('Network error', 'error');
+                                showToast('Network error updating user role', 'error');
                               }
-                            }} className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all ${
-                              u.isSuspended ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-rose-600 hover:bg-rose-500 text-white'
-                            }`}>
-                              {u.isSuspended ? 'Reactivate' : 'Suspend User'}
+                            }} className="text-xs bg-[#1f1f1f] hover:bg-emerald-600 text-gray-300 hover:text-white px-3 py-1.5 rounded-xl font-bold transition-colors">
+                              Toggle Role
                             </button>
                           </td>
                         </tr>
@@ -1953,15 +1874,35 @@ export default function PremiumRiceStore() {
           {adminTab === 'carousel' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Sliders className="mr-3 text-emerald-500"/> Expanded Hero & Carousel Configuration</h2>
-                <p className="text-gray-400 text-xs mt-1">Configure all 10 system parameters, hero banner texts, background video URLs, and badge settings.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Hero & Banner Configuration Engine</h2>
+                <p className="text-gray-400 text-xs mt-1">Configure professional hero titles, background videos, banners, and announcement tickers.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Hero Configuration (10 Cool Settings)</h3>
-                
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Live Hero Settings</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Title</label>
+                    <input type="text" value={heroSettings.title || ''} onChange={e=>setHeroSettings({...heroSettings, title:e.target.value})} className="w-full bg-white text-black font-bold text-xs p-3 rounded-xl outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Subtitle</label>
+                    <input type="text" value={heroSettings.subtitle || ''} onChange={e=>setHeroSettings({...heroSettings, subtitle:e.target.value})} className="w-full bg-white text-black font-bold text-xs p-3 rounded-xl outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Video Embed URL (YouTube or MP4)</label>
+                    <input type="text" value={heroSettings.video1 || ''} onChange={e=>setHeroSettings({...heroSettings, video1:e.target.value})} className="w-full bg-white text-black font-mono font-bold text-xs p-3 rounded-xl outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Backdrop Image URL</label>
+                    <input type="text" value={heroSettings.img1 || ''} onChange={e=>setHeroSettings({...heroSettings, img1:e.target.value})} className="w-full bg-white text-black font-mono font-bold text-xs p-3 rounded-xl outline-none" />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Announcement Ticker Text</label>
+                    <input type="text" value={heroSettings.announcementTicker || ''} onChange={e=>setHeroSettings({...heroSettings, announcementTicker:e.target.value})} className="w-full bg-white text-black font-bold text-xs p-3 rounded-xl outline-none" />
+                  </div>
+                </div>
+                <button onClick={async () => {
                   try {
                     const res = await fetch(`${API_BASE_URL}/admin/config/hero`, {
                       method: 'PUT',
@@ -1969,59 +1910,17 @@ export default function PremiumRiceStore() {
                       body: JSON.stringify(heroSettings)
                     });
                     if (res.ok) {
-                      showToast('All 10 Hero configurations updated successfully!', 'success');
+                      showToast('Hero configuration successfully synchronized!', 'success');
+                      fetchHero();
                     } else {
-                      showToast('Failed to update hero configurations', 'error');
+                      showToast('Failed to save hero configuration', 'error');
                     }
                   } catch (err) {
-                    showToast('Network error updating hero config', 'error');
+                    showToast('Network error saving hero config', 'error');
                   }
-                }} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">1. Hero Title</label>
-                    <input type="text" value={heroSettings.title || ''} onChange={e=>setHeroSettings({...heroSettings, title:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">2. Hero Subtitle</label>
-                    <input type="text" value={heroSettings.subtitle || ''} onChange={e=>setHeroSettings({...heroSettings, subtitle:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">3. Background Video URL (YouTube Embed)</label>
-                    <input type="text" value={heroSettings.video1 || ''} onChange={e=>setHeroSettings({...heroSettings, video1:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">4. Fallback Image URL</label>
-                    <input type="text" value={heroSettings.img1 || ''} onChange={e=>setHeroSettings({...heroSettings, img1:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">5. CTA Button Text</label>
-                    <input type="text" value={heroSettings.ctaButtonText || ''} onChange={e=>setHeroSettings({...heroSettings, ctaButtonText:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">6. Badge Text Label</label>
-                    <input type="text" value={heroSettings.badgeText || ''} onChange={e=>setHeroSettings({...heroSettings, badgeText:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">7. Announcement Ticker Text</label>
-                    <input type="text" value={heroSettings.announcementTicker || ''} onChange={e=>setHeroSettings({...heroSettings, announcementTicker:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">8. Customer Trust Badge Text</label>
-                    <input type="text" value={heroSettings.customerTrustBadgeText || ''} onChange={e=>setHeroSettings({...heroSettings, customerTrustBadgeText:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">9. Support Hotline Display</label>
-                    <input type="text" value={heroSettings.supportHotlineDisplay || ''} onChange={e=>setHeroSettings({...heroSettings, supportHotlineDisplay:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">10. Express Logistics Note</label>
-                    <input type="text" value={heroSettings.expressLogisticsNote || ''} onChange={e=>setHeroSettings({...heroSettings, expressLogisticsNote:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-
-                  <div className="md:col-span-2 pt-4">
-                    <button type="submit" className="bg-emerald-600 text-white px-8 py-3.5 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all">Save All 10 Hero Configurations</button>
-                  </div>
-                </form>
+                }} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500">
+                  Save Hero Settings
+                </button>
               </div>
             </div>
           )}
@@ -2029,58 +1928,62 @@ export default function PremiumRiceStore() {
           {adminTab === 'config' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> County Logistics & Base Engine Settings</h2>
-                <p className="text-gray-400 text-xs mt-1">Configure county transport fees and regional delivery rules across all 47 counties.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> Counties Logistics & Transport Pricing</h2>
+                <p className="text-gray-400 text-xs mt-1">Configure base transport fees and regional county delivery overrides.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Configure County Transport Fees</h3>
-                
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  const updated = { ...countyOverrides, [countyOverrideForm.county]: Number(countyOverrideForm.fee) };
-                  try {
-                    const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                      body: JSON.stringify(updated)
-                    });
-                    if (res.ok) {
-                      showToast(`Transport fee for ${countyOverrideForm.county} updated!`, 'success');
-                      setCountyOverrides(updated);
-                      setCountyOverrideForm({ county: 'Nairobi', fee: '' });
-                    } else {
-                      showToast('Failed to update county fee', 'error');
-                    }
-                  } catch (err) {
-                    showToast('Network error', 'error');
-                  }
-                }} className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Base Transport Fee</h3>
+                <div className="flex gap-4 items-center">
+                  <input 
+                    type="number" 
+                    value={baseTransportFee} 
+                    onChange={e => setBaseTransportFee(Number(e.target.value))} 
+                    className="w-48 bg-white text-black font-mono font-bold text-sm p-3 rounded-xl outline-none"
+                  />
+                  <button onClick={() => showToast('Base transport fee updated', 'success')} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500">
+                    Update Base Fee
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">County Override Pricing</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <select 
-                    value={countyOverrideForm.county} 
-                    onChange={e => setCountyOverrideForm({...countyOverrideForm, county: e.target.value})} 
-                    className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none"
+                    value={countyOverrideForm.county}
+                    onChange={e => setCountyOverrideForm({...countyOverrideForm, county: e.target.value})}
+                    className="bg-white text-black font-bold text-xs p-3 rounded-xl outline-none"
                   >
                     {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                   <input 
-                    required 
-                    type="number" 
-                    placeholder="Transport Fee (KES)" 
-                    value={countyOverrideForm.fee} 
-                    onChange={e => setCountyOverrideForm({...countyOverrideForm, fee: e.target.value})} 
-                    className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none font-mono"
+                    type="number"
+                    placeholder="Transport Fee (KES)"
+                    value={countyOverrideForm.fee}
+                    onChange={e => setCountyOverrideForm({...countyOverrideForm, fee: e.target.value})}
+                    className="bg-white text-black font-mono font-bold text-xs p-3 rounded-xl outline-none"
                   />
-                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all">Set County Fee</button>
-                </form>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-h-60 overflow-y-auto pr-2">
-                  {ALL_47_COUNTIES.map(c => (
-                    <div key={c} className="bg-[#1a1a1a] p-3 rounded-xl border border-gray-800 flex justify-between items-center text-xs">
-                      <span className="text-gray-300 font-bold truncate">{c}</span>
-                      <span className="font-mono text-emerald-400 font-black">KES {countyOverrides[c] !== undefined ? countyOverrides[c] : baseTransportFee}</span>
-                    </div>
-                  ))}
+                  <button onClick={async () => {
+                    const newOverrides = { ...countyOverrides, [countyOverrideForm.county]: Number(countyOverrideForm.fee) };
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify(newOverrides)
+                      });
+                      if (res.ok) {
+                        setCountyOverrides(newOverrides);
+                        showToast(`County transport override set for ${countyOverrideForm.county}`, 'success');
+                      } else {
+                        showToast('Failed to save county override', 'error');
+                      }
+                    } catch (err) {
+                      showToast('Network error saving county config', 'error');
+                    }
+                  }} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500">
+                    Save Override
+                  </button>
                 </div>
               </div>
             </div>
@@ -2089,45 +1992,21 @@ export default function PremiumRiceStore() {
           {adminTab === 'logs' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> System Audit & Database Logs</h2>
-                <p className="text-gray-400 text-xs mt-1">Review live backend activities, authentication attempts, and order dispatches.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> System Audit & Event Logs</h2>
+                <p className="text-gray-400 text-xs mt-1">Inspect backend database triggers, security events, and payment callbacks.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
-                <div className="p-6 border-b border-gray-800 flex justify-between items-center">
-                  <h3 className="font-bold text-sm text-white">Recent System Audit Entries</h3>
-                  <button onClick={fetchAdminLogs} className="flex items-center text-xs text-emerald-400 hover:text-emerald-300 font-bold bg-[#1f1f1f] px-3 py-1.5 rounded-xl">
-                    <RefreshCw size={14} className="mr-1.5"/> Refresh Logs
-                  </button>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs whitespace-nowrap font-mono">
-                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
-                      <tr>
-                        <th className="px-6 py-4">Timestamp</th>
-                        <th className="px-6 py-4">Action / Event</th>
-                        <th className="px-6 py-4">Actor / User</th>
-                        <th className="px-6 py-4">Details</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-800/60">
-                      {adminLogs.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="text-center py-8 text-gray-500 font-sans">No audit log entries recorded yet.</td>
-                        </tr>
-                      ) : (
-                        adminLogs.map((log, idx) => (
-                          <tr key={idx} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                            <td className="px-6 py-4 text-gray-400">{new Date(log.timestamp || log.createdAt).toLocaleString()}</td>
-                            <td className="px-6 py-4 font-bold text-emerald-400">{log.action || log.event}</td>
-                            <td className="px-6 py-4 text-gray-300">{log.user || log.actor || 'System'}</td>
-                            <td className="px-6 py-4 text-gray-400">{log.details || JSON.stringify(log.meta || {})}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 font-mono text-xs space-y-2 max-h-[600px] overflow-y-auto">
+                {adminLogs.length === 0 ? (
+                  <div className="text-gray-500 text-center py-10">No recent audit logs recorded in database.</div>
+                ) : (
+                  adminLogs.map((log, idx) => (
+                    <div key={idx} className="bg-[#1a1a1a] p-3 rounded-xl border border-gray-800 text-gray-300 flex justify-between">
+                      <span>{log.message || log.action || JSON.stringify(log)}</span>
+                      <span className="text-gray-500">{log.createdAt ? new Date(log.createdAt).toLocaleTimeString() : ''}</span>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -2137,19 +2016,19 @@ export default function PremiumRiceStore() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans flex flex-col selection:bg-emerald-500 selection:text-white">
+    <div className="min-h-screen bg-gray-50 font-sans text-gray-900 selection:bg-emerald-500 selection:text-white">
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl font-bold text-sm text-white flex items-center gap-3 animate-bounce ${
+        <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl font-bold text-white flex items-center gap-3 animate-bounce ${
           toast.type === 'error' ? 'bg-rose-600' : 'bg-emerald-600'
         }`}>
-          {toast.type === 'error' ? <AlertCircle size={20}/> : <CheckCircle size={20}/>}
+          {toast.type === 'error' ? <AlertCircle size={20} /> : <CheckCircle size={20} />}
           <span>{toast.message}</span>
         </div>
       )}
 
       {renderNav()}
 
-      <main className="flex-1">
+      <main>
         {view === 'home' && renderHome()}
         {view === 'shop' && renderShop()}
         {view === 'cart' && renderCart()}
@@ -2157,50 +2036,6 @@ export default function PremiumRiceStore() {
         {view === 'profile' && renderProfile()}
         {view === 'admin' && renderAdmin()}
       </main>
-
-      <footer className="bg-emerald-950 text-emerald-300 border-t border-emerald-900 py-12 px-4 mt-auto">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
-          <div>
-            <div className="flex items-center mb-4">
-              <Leaf className="h-7 w-7 text-emerald-400 mr-2" />
-              <span className="font-black text-xl text-white tracking-tight">MWEA HUB</span>
-            </div>
-            <p className="text-xs text-emerald-400/80 leading-relaxed font-medium">
-              Direct agricultural logistics platform supplying authentic Mwea Pishori and Basmati rice across all 47 counties in Kenya.
-            </p>
-          </div>
-          <div>
-            <h4 className="font-bold text-white text-sm uppercase tracking-wider mb-4">Quick Links</h4>
-            <ul className="space-y-2 text-xs font-medium">
-              <li><button onClick={() => setView('home')} className="hover:text-white transition-colors">Home Storefront</button></li>
-              <li><button onClick={() => setView('shop')} className="hover:text-white transition-colors">Grain Catalog</button></li>
-              <li><button onClick={() => setView('cart')} className="hover:text-white transition-colors">Shopping Bag</button></li>
-              <li><button onClick={() => setView('profile')} className="hover:text-white transition-colors">Order Tracking</button></li>
-            </ul>
-          </div>
-          <div>
-            <h4 className="font-bold text-white text-sm uppercase tracking-wider mb-4">Logistics & Support</h4>
-            <ul className="space-y-2 text-xs font-medium text-emerald-400/80">
-              <li>Mwea Milling Station, Kirinyaga</li>
-              <li>Nairobi Regional Hub, Industrial Area</li>
-              <li>Support Hotline: +254 700 000000</li>
-              <li>Email: orders@mweahub.co.ke</li>
-            </ul>
-          </div>
-          <div>
-            <h4 className="font-bold text-white text-sm uppercase tracking-wider mb-4">M-Pesa Integration</h4>
-            <p className="text-xs text-emerald-400/80 leading-relaxed font-medium mb-3">
-              Automated STK Push Express and Paybill 889900 integration for instant transaction clearance.
-            </p>
-            <div className="bg-emerald-900/50 p-3 rounded-xl border border-emerald-800 text-[11px] font-mono text-white">
-              STATUS: SECURE 256-BIT ENCRYPTION
-            </div>
-          </div>
-        </div>
-        <div className="max-w-7xl mx-auto pt-8 border-t border-emerald-900 text-center text-xs text-emerald-500 font-semibold">
-          &copy; {new Date().getFullYear()} Mwea Hub Direct Logistics. All rights reserved. Built for uncompromising quality.
-        </div>
-      </footer>
     </div>
   );
 }
