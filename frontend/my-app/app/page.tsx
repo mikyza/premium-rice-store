@@ -5,7 +5,7 @@ import {
   ShoppingCart, User as UserIcon, LogIn, Menu, X, Plus, 
   Trash2, Shield, Clock, Search, Edit, Package, Activity, 
   CheckCircle, AlertCircle, Settings, Leaf, ChevronRight,
-  ShoppingBag, Users, Image as ImageIcon, Download,
+  ShoppingBag, Users, Image as ImageIcon, Video, Download,
   MapPin, Eye, RefreshCw, LogOut, Check, AlertTriangle, Smartphone, CreditCard,
   BarChart2, DollarSign, Award, Calendar, Lock, Unlock, TrendingUp, Filter, FileText, Percent, Layers, Globe, Sliders, Bell
 } from 'lucide-react';
@@ -152,6 +152,8 @@ export default function PremiumRiceStore() {
   const [adminOrders, setAdminOrders] = useState<any[]>([]);
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
   const [adminLogs, setAdminLogs] = useState<any[]>([]);
+  const [logStatusFilter, setLogStatusFilter] = useState<'all' | 'paid' | 'failed' | 'canceled' | 'pending'>('all');
+  const [logSearchQuery, setLogSearchQuery] = useState('');
   const [orderSearchQuery, setOrderSearchQuery] = useState('');
   const [shopSearch, setShopSearch] = useState('');
   const [newSlide, setNewSlide] = useState({ title: '', subtitle: '', url: '' });
@@ -281,29 +283,9 @@ export default function PremiumRiceStore() {
         setAdminOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
       });
 
-      // ==========================================
-      // REAL-TIME PAYMENT CALLBACK LISTENERS
-      // ==========================================
-      newSocket.on('paymentSuccess', (data: any) => {
-        showToast(`🎉 Payment of KES ${data.amount?.toLocaleString() || ''} received for Order #${data.orderId || data.id}!`, 'success');
-        fetchMyOrders();
-        if (user?.role === 'admin') fetchAdminOrders();
-      });
-
-      newSocket.on('paymentFailed', (data: any) => {
-        showToast(`❌ Payment failed for Order #${data.orderId || data.id}: ${data.message || data.ResultDesc || 'Transaction cancelled'}`, 'error');
-        fetchMyOrders();
-        if (user?.role === 'admin') fetchAdminOrders();
-      });
-
-      newSocket.on('stkCallback', (data: any) => {
-        if (data.ResultCode === 0) {
-          showToast(`✅ M-Pesa Payment Confirmed! Receipt: ${data.MpesaReceiptNumber || 'Success'}`, 'success');
-        } else {
-          showToast(`⚠️ STK Push Failed: ${data.ResultDesc || 'Payment was not completed'}`, 'error');
-        }
-        fetchMyOrders();
-        if (user?.role === 'admin') fetchAdminOrders();
+      newSocket.on('newPaymentLog', (newLog: any) => {
+        setAdminLogs(prev => [newLog, ...prev]);
+        showToast(`Payment Callback: ${newLog.status || 'Updated'} for KES ${newLog.amount || 0}`, 'success');
       });
     } catch (err) {
       console.error("Real-time socket initialization failed:", err);
@@ -515,18 +497,6 @@ export default function PremiumRiceStore() {
     }, 0);
   }, [myOrders]);
   const loyaltyPoints = (totalKgBought * 0.2).toFixed(1);
-
-  const renderToast = () => {
-    if (!toast) return null;
-    return (
-      <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 text-white font-bold text-sm border backdrop-blur-md animate-slideUp ${
-        toast.type === 'success' ? 'bg-emerald-900/90 border-emerald-500/50' : 'bg-rose-900/90 border-rose-500/50'
-      }`}>
-        {toast.type === 'success' ? <CheckCircle className="h-5 w-5 text-emerald-400" /> : <AlertCircle className="h-5 w-5 text-rose-400" />}
-        <span>{toast.message}</span>
-      </div>
-    );
-  };
 
   const renderNav = () => (
     <nav className="bg-emerald-900 text-emerald-50 sticky top-0 z-50 shadow-xl border-b border-emerald-800">
@@ -1416,7 +1386,7 @@ export default function PremiumRiceStore() {
       { id: 'users', icon: <Users size={18}/>, label: 'User Clearance' },
       { id: 'carousel', icon: <ImageIcon size={18}/>, label: 'Hero Config' },
       { id: 'config', icon: <Settings size={18}/>, label: 'Counties & Engine' },
-      { id: 'logs', icon: <Activity size={18}/>, label: 'Audit Logs' }
+      { id: 'logs', icon: <Activity size={18}/>, label: 'Payment & Audit Logs' }
     ];
 
     return (
@@ -1651,7 +1621,7 @@ export default function PremiumRiceStore() {
                         </div>
                         <div className="flex items-center gap-3">
                            <div className="bg-[#1f1f1f] border border-gray-800 px-3 py-1.5 rounded-xl">
-                             <span className="text-[10px] text-gray-400 block uppercase font-bold">Payment Status (Backend)</span>
+                             <span className="text-[10px] text-gray-400 block uppercase font-bold">Payment Status</span>
                              <span className="text-xs font-black text-emerald-400 uppercase">{o.paymentStatus || 'Paid'}</span>
                            </div>
 
@@ -1722,6 +1692,7 @@ export default function PremiumRiceStore() {
           )}
 
           {adminTab === 'finances' && (() => {
+            const currentYear = new Date().getFullYear();
             const monthlyRevenue = Array(12).fill(0);
             const monthlyProfit = Array(12).fill(0);
             let totalYearlyRevenue = 0;
@@ -1752,10 +1723,10 @@ export default function PremiumRiceStore() {
 
                        const m = d.getMonth();
                        monthlyRevenue[m] += (order.grandTotal || 0);
-                       const orderProfit = order.items?.reduce((sum: number, item: any) => {
-                          const selling = item.priceAtPurchase || 0;
-                          const cost = item.product?.costPrice || item.costPrice || (selling * 0.75);
-                          return sum + ((selling - cost) * item.quantity);
+                       const orderProfit = order.items?.reduce((pSum: number, it: any) => {
+                          const s = it.priceAtPurchase || 0;
+                          const c = it.product?.costPrice || it.costPrice || (s * 0.75);
+                          return pSum + ((s - c) * it.quantity);
                        }, 0) || 0;
                        monthlyProfit[m] += orderProfit;
                        totalYearlyProfit += orderProfit;
@@ -1769,77 +1740,91 @@ export default function PremiumRiceStore() {
               <div className="animate-fadeIn space-y-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                   <div>
-                    <h2 className="text-2xl font-black text-white flex items-center"><BarChart2 className="mr-3 text-emerald-500"/> Financial Analytics & Profits</h2>
-                    <p className="text-gray-400 text-xs mt-1">Real-time revenue, net margins, and monthly financial breakdowns.</p>
+                    <h2 className="text-2xl font-black text-white flex items-center"><BarChart2 className="mr-3 text-emerald-500"/> Financial Performance Dashboard</h2>
+                    <p className="text-gray-400 text-xs mt-1">Real-time revenue, gross profit margin, and sales metrics.</p>
                   </div>
-                  <div className="flex items-center gap-2 bg-[#141414] border border-gray-800 p-2 rounded-2xl">
-                    <Calendar className="text-emerald-500 h-4 w-4 ml-2" />
-                    <span className="text-xs font-bold text-gray-400">Year:</span>
+                  <div className="flex items-center gap-3">
+                    <label className="text-xs text-gray-400 font-bold uppercase">Fiscal Year:</label>
                     <select 
                       value={financeYear} 
                       onChange={(e) => setFinanceYear(Number(e.target.value))}
-                      className="bg-[#1f1f1f] text-emerald-400 font-black text-xs border border-gray-700 rounded-xl px-3 py-1.5 outline-none cursor-pointer"
+                      className="bg-[#1f1f1f] text-emerald-400 font-bold text-xs border border-gray-700 rounded-xl px-3 py-2 outline-none"
                     >
-                      {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+                      {[currentYear - 2, currentYear - 1, currentYear, currentYear + 1].map(y => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-gray-500 block mb-1">Gross Revenue ({financeYear})</span>
-                    <div className="text-2xl font-black font-mono text-emerald-400">KES {totalYearlyRevenue.toLocaleString()}</div>
-                  </div>
-                  <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-gray-500 block mb-1">Estimated Net Profit</span>
-                    <div className="text-2xl font-black font-mono text-emerald-300">KES {totalYearlyProfit.toLocaleString()}</div>
-                  </div>
-                  <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-gray-500 block mb-1">Average Profit Margin</span>
-                    <div className="text-2xl font-black font-mono text-amber-400">
-                      {totalYearlyRevenue > 0 ? ((totalYearlyProfit / totalYearlyRevenue) * 100).toFixed(1) : '0'}%
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-[#141414] border border-gray-800 p-5 rounded-3xl shadow-xl">
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Gross Revenue</span>
+                      <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400"><DollarSign size={16}/></div>
                     </div>
+                    <div className="text-2xl font-black text-white font-mono">KES {totalYearlyRevenue.toLocaleString()}</div>
+                    <span className="text-[10px] text-emerald-400 font-bold mt-1 block">YTD Total ({financeYear})</span>
+                  </div>
+
+                  <div className="bg-[#141414] border border-gray-800 p-5 rounded-3xl shadow-xl">
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Estimated Gross Profit</span>
+                      <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400"><TrendingUp size={16}/></div>
+                    </div>
+                    <div className="text-2xl font-black text-emerald-400 font-mono">KES {totalYearlyProfit.toLocaleString()}</div>
+                    <span className="text-[10px] text-gray-400 font-bold mt-1 block">Net Profit Margin</span>
+                  </div>
+
+                  <div className="bg-[#141414] border border-gray-800 p-5 rounded-3xl shadow-xl">
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Profit Margin %</span>
+                      <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400"><Percent size={16}/></div>
+                    </div>
+                    <div className="text-2xl font-black text-white font-mono">
+                      {totalYearlyRevenue > 0 ? ((totalYearlyProfit / totalYearlyRevenue) * 100).toFixed(1) : '0.0'}%
+                    </div>
+                    <span className="text-[10px] text-emerald-400 font-bold mt-1 block">Avg Return Rate</span>
+                  </div>
+
+                  <div className="bg-[#141414] border border-gray-800 p-5 rounded-3xl shadow-xl">
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Orders Count</span>
+                      <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400"><ShoppingBag size={16}/></div>
+                    </div>
+                    <div className="text-2xl font-black text-white font-mono">
+                      {adminOrders.filter(o => o.status !== 'failed' && o.paymentStatus !== 'failed').length}
+                    </div>
+                    <span className="text-[10px] text-gray-400 font-bold mt-1 block">Successful Orders</span>
                   </div>
                 </div>
 
-                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                  <h3 className="font-bold text-sm text-gray-200 mb-4 uppercase tracking-wider">Monthly Breakdown ({financeYear})</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
-                    {monthNames.map((m, idx) => (
-                      <div key={m} className="bg-[#181818] p-3 rounded-2xl border border-gray-800/80">
-                        <span className="text-xs font-black text-emerald-400 block">{m}</span>
-                        <div className="text-xs font-mono font-bold text-white mt-1">KES {monthlyRevenue[idx].toLocaleString()}</div>
-                        <div className="text-[10px] font-mono text-gray-500 mt-0.5">Profit: KES {monthlyProfit[idx].toLocaleString()}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden p-6">
-                  <h3 className="font-bold text-sm text-gray-200 mb-4 uppercase tracking-wider">Itemized Variety Profitability</h3>
+                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wider mb-4">Monthly Breakdown ({financeYear})</h3>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs whitespace-nowrap">
                       <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
                         <tr>
-                          <th className="px-4 py-3">Grain Variety</th>
-                          <th className="px-4 py-3">Units Sold</th>
-                          <th className="px-4 py-3">Gross Revenue</th>
-                          <th className="px-4 py-3">Calculated Profit</th>
+                          <th className="px-6 py-4">Month</th>
+                          <th className="px-6 py-4">Revenue</th>
+                          <th className="px-6 py-4">Gross Profit</th>
+                          <th className="px-6 py-4 text-center">Margin %</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-800/60">
-                        {Object.keys(categorySales).length === 0 ? (
-                          <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-500">No sales recorded for this year.</td></tr>
-                        ) : (
-                          Object.entries(categorySales).map(([cat, data]) => (
-                            <tr key={cat}>
-                              <td className="px-4 py-3 font-bold text-gray-200">{cat}</td>
-                              <td className="px-4 py-3 font-mono text-gray-400">{data.quantity} bags</td>
-                              <td className="px-4 py-3 font-mono text-emerald-400">KES {data.revenue.toLocaleString()}</td>
-                              <td className="px-4 py-3 font-mono text-emerald-300 font-bold">KES {data.profit.toLocaleString()}</td>
+                        {monthNames.map((mName, idx) => {
+                          const rev = monthlyRevenue[idx];
+                          const prof = monthlyProfit[idx];
+                          const margin = rev > 0 ? ((prof / rev) * 100).toFixed(1) : '0.0';
+                          return (
+                            <tr key={mName} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                              <td className="px-6 py-4 font-bold text-gray-200">{mName} {financeYear}</td>
+                              <td className="px-6 py-4 font-mono font-bold text-white">KES {rev.toLocaleString()}</td>
+                              <td className="px-6 py-4 font-mono font-bold text-emerald-400">KES {prof.toLocaleString()}</td>
+                              <td className="px-6 py-4 text-center font-mono font-bold text-gray-300">{margin}%</td>
                             </tr>
-                          ))
-                        )}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1852,7 +1837,7 @@ export default function PremiumRiceStore() {
             <div className="animate-fadeIn space-y-6">
               <div>
                 <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Accounts Clearance</h2>
-                <p className="text-gray-400 text-xs mt-1">Manage user account permissions and administrator privileges.</p>
+                <p className="text-gray-400 text-xs mt-1">Manage user account roles, roles, and administrative permissions.</p>
               </div>
 
               <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
@@ -1863,7 +1848,8 @@ export default function PremiumRiceStore() {
                         <th className="px-6 py-4">ID</th>
                         <th className="px-6 py-4">Full Name</th>
                         <th className="px-6 py-4">Phone Number</th>
-                        <th className="px-6 py-4">Role Clearance</th>
+                        <th className="px-6 py-4">Email Address</th>
+                        <th className="px-6 py-4">Role</th>
                         <th className="px-6 py-4 text-center">Actions</th>
                       </tr>
                     </thead>
@@ -1871,35 +1857,39 @@ export default function PremiumRiceStore() {
                       {adminUsers.map(u => (
                         <tr key={u.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
                           <td className="px-6 py-4 font-mono text-gray-500">#{u.id}</td>
-                          <td className="px-6 py-4 font-bold text-gray-200">{u.fullName}</td>
-                          <td className="px-6 py-4 font-mono text-gray-400">{u.phoneNumber}</td>
+                          <td className="px-6 py-4 font-bold text-gray-200">{u.fullName || 'N/A'}</td>
+                          <td className="px-6 py-4 font-mono text-gray-300">{u.phoneNumber}</td>
+                          <td className="px-6 py-4 text-gray-400">{u.email || 'N/A'}</td>
                           <td className="px-6 py-4">
-                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black border uppercase ${
-                              u.role === 'admin' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                              u.role === 'admin' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                             }`}>
                               {u.role}
                             </span>
                           </td>
                           <td className="px-6 py-4 text-center">
-                            <button onClick={async () => {
-                              const nextRole = u.role === 'admin' ? 'user' : 'admin';
-                              try {
-                                const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}/role`, {
-                                  method: 'PUT',
-                                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                  body: JSON.stringify({ role: nextRole })
-                                });
-                                if (res.ok) {
-                                  showToast(`User ${u.fullName} clearance updated to ${nextRole}`, 'success');
-                                  fetchAdminUsers();
-                                } else {
-                                  showToast('Failed to update user clearance', 'error');
+                            <button 
+                              onClick={async () => {
+                                const newRole = u.role === 'admin' ? 'customer' : 'admin';
+                                try {
+                                  const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}/role`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                    body: JSON.stringify({ role: newRole })
+                                  });
+                                  if (res.ok) {
+                                    showToast(`User role updated to ${newRole}`, 'success');
+                                    fetchAdminUsers();
+                                  } else {
+                                    showToast('Failed to update user role', 'error');
+                                  }
+                                } catch (err) {
+                                  showToast('Network error updating role', 'error');
                                 }
-                              } catch (err) {
-                                showToast('Network error updating clearance', 'error');
-                              }
-                            }} className="text-gray-400 hover:text-emerald-400 p-2 bg-[#1f1f1f] rounded-xl font-bold text-[10px] uppercase transition-colors">
-                              Toggle Role
+                              }}
+                              className="text-emerald-400 hover:underline font-bold text-xs"
+                            >
+                              Toggle Role ({u.role === 'admin' ? 'Demote' : 'Promote'})
                             </button>
                           </td>
                         </tr>
@@ -1914,54 +1904,45 @@ export default function PremiumRiceStore() {
           {adminTab === 'carousel' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Dynamic Hero & Carousel Engine</h2>
-                <p className="text-gray-400 text-xs mt-1">Configure landing page hero videos, images, and announcement text.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Hero & Media Settings</h2>
+                <p className="text-gray-400 text-xs mt-1">Configure homepage video URLs, banner titles, and slide images.</p>
               </div>
 
               <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Update Hero Headline & Media</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Update Hero Headline & Banner</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Hero Title</label>
-                    <input type="text" value={heroSettings?.title || ''} onChange={e=>setHeroSettings({...heroSettings, title: e.target.value})} className="w-full bg-white text-black font-bold px-4 py-2.5 rounded-xl outline-none" />
+                    <label className="text-[10px] text-gray-500 uppercase font-bold block mb-1">Title</label>
+                    <input type="text" value={heroSettings?.title || ''} onChange={e=>setHeroSettings({...heroSettings, title:e.target.value})} className="w-full bg-[#1c1c1c] text-white border border-gray-700 px-4 py-2.5 rounded-xl text-xs font-bold" />
                   </div>
                   <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Subtitle</label>
-                    <input type="text" value={heroSettings?.subtitle || ''} onChange={e=>setHeroSettings({...heroSettings, subtitle: e.target.value})} className="w-full bg-white text-black font-bold px-4 py-2.5 rounded-xl outline-none" />
+                    <label className="text-[10px] text-gray-500 uppercase font-bold block mb-1">Subtitle</label>
+                    <input type="text" value={heroSettings?.subtitle || ''} onChange={e=>setHeroSettings({...heroSettings, subtitle:e.target.value})} className="w-full bg-[#1c1c1c] text-white border border-gray-700 px-4 py-2.5 rounded-xl text-xs font-bold" />
                   </div>
                   <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Video 1 Embed URL</label>
-                    <input type="text" value={heroSettings?.video1 || ''} onChange={e=>setHeroSettings({...heroSettings, video1: e.target.value})} className="w-full bg-white text-black font-mono px-4 py-2.5 rounded-xl outline-none" />
+                    <label className="text-[10px] text-gray-500 uppercase font-bold block mb-1">Video Embed URL 1</label>
+                    <input type="text" value={heroSettings?.video1 || ''} onChange={e=>setHeroSettings({...heroSettings, video1:e.target.value})} className="w-full bg-[#1c1c1c] text-white border border-gray-700 px-4 py-2.5 rounded-xl text-xs font-mono" />
                   </div>
                   <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Image 1 Backdrop URL</label>
-                    <input type="text" value={heroSettings?.img1 || ''} onChange={e=>setHeroSettings({...heroSettings, img1: e.target.value})} className="w-full bg-white text-black font-mono px-4 py-2.5 rounded-xl outline-none" />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Announcement Ticker Text</label>
-                    <input type="text" value={heroSettings?.announcementTicker || ''} onChange={e=>setHeroSettings({...heroSettings, announcementTicker: e.target.value})} className="w-full bg-white text-black font-bold px-4 py-2.5 rounded-xl outline-none" />
+                    <label className="text-[10px] text-gray-500 uppercase font-bold block mb-1">Banner Image URL 1</label>
+                    <input type="text" value={heroSettings?.img1 || ''} onChange={e=>setHeroSettings({...heroSettings, img1:e.target.value})} className="w-full bg-[#1c1c1c] text-white border border-gray-700 px-4 py-2.5 rounded-xl text-xs font-mono" />
                   </div>
                 </div>
                 <button 
                   onClick={async () => {
                     try {
-                      const res = await fetch(`${API_BASE_URL}/config/hero`, {
-                        method: 'POST',
+                      const res = await fetch(`${API_BASE_URL}/admin/config/hero`, {
+                        method: 'PUT',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                         body: JSON.stringify(heroSettings)
                       });
-                      if (res.ok) {
-                        showToast('Hero settings saved successfully!', 'success');
-                      } else {
-                        showToast('Failed to save hero settings', 'error');
-                      }
-                    } catch (err) {
-                      showToast('Network error saving hero settings', 'error');
-                    }
-                  }}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-6 py-3 rounded-xl mt-4 transition-all"
+                      if (res.ok) showToast('Hero settings saved successfully', 'success');
+                      else showToast('Failed to save hero settings', 'error');
+                    } catch (e) { showToast('Error saving settings', 'error'); }
+                  }} 
+                  className="mt-4 bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl font-bold text-xs"
                 >
-                  Save Hero Settings
+                  Save Hero Configuration
                 </button>
               </div>
             </div>
@@ -1971,54 +1952,47 @@ export default function PremiumRiceStore() {
             <div className="animate-fadeIn space-y-6">
               <div>
                 <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> Regional Delivery & Transport Fees</h2>
-                <p className="text-gray-400 text-xs mt-1">Set county-specific delivery fees across all 47 counties in Kenya.</p>
+                <p className="text-gray-400 text-xs mt-1">Configure default county logistics fees and special location overrides.</p>
               </div>
 
               <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">County Delivery Rate Override</h3>
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  try {
-                    const updated = { ...countyOverrides, [countyOverrideForm.county]: Number(countyOverrideForm.fee) };
-                    const res = await fetch(`${API_BASE_URL}/config/counties`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                      body: JSON.stringify(updated)
-                    });
-                    if (res.ok) {
-                      setCountyOverrides(updated);
-                      showToast(`Transport fee for ${countyOverrideForm.county} set to KES ${countyOverrideForm.fee}`, 'success');
-                      setCountyOverrideForm({ county: 'Nairobi', fee: '' });
-                    } else {
-                      showToast('Failed to update transport fee', 'error');
-                    }
-                  } catch (err) {
-                    showToast('Network error updating rate', 'error');
-                  }
-                }} className="flex flex-col sm:flex-row gap-4 items-end">
-                  <div className="flex-1 w-full">
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">County</label>
-                    <select value={countyOverrideForm.county} onChange={e=>setCountyOverrideForm({...countyOverrideForm, county: e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs outline-none">
-                      {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-                  <div className="flex-1 w-full">
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Custom Fee (KES)</label>
-                    <input required type="number" placeholder="250" value={countyOverrideForm.fee} onChange={e=>setCountyOverrideForm({...countyOverrideForm, fee: e.target.value})} className="w-full bg-white text-black font-bold px-4 py-3 rounded-xl text-xs outline-none" />
-                  </div>
-                  <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-6 py-3.5 rounded-xl transition-all w-full sm:w-auto">Save Override</button>
-                </form>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                <h3 className="font-bold text-sm text-gray-300 uppercase tracking-wider mb-4">Active County Rate Overrides</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {Object.entries(countyOverrides).map(([county, fee]) => (
-                    <div key={county} className="bg-[#181818] p-3 rounded-2xl border border-gray-800/80 flex justify-between items-center text-xs">
-                      <span className="font-bold text-gray-300">{county}</span>
-                      <span className="font-mono font-black text-emerald-400">KES {fee}</span>
-                    </div>
-                  ))}
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Set Transport Fee Override</h3>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <select 
+                    value={countyOverrideForm.county} 
+                    onChange={e => setCountyOverrideForm({...countyOverrideForm, county: e.target.value})}
+                    className="bg-[#1c1c1c] text-white border border-gray-700 rounded-xl px-4 py-2.5 text-xs font-bold"
+                  >
+                    {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <input 
+                    type="number" 
+                    placeholder="Custom Fee (KES)" 
+                    value={countyOverrideForm.fee}
+                    onChange={e => setCountyOverrideForm({...countyOverrideForm, fee: e.target.value})}
+                    className="bg-[#1c1c1c] text-white border border-gray-700 rounded-xl px-4 py-2.5 text-xs font-bold"
+                  />
+                  <button 
+                    onClick={async () => {
+                      if (!countyOverrideForm.fee) return showToast('Enter a fee amount', 'error');
+                      try {
+                        const updated = { ...countyOverrides, [countyOverrideForm.county]: Number(countyOverrideForm.fee) };
+                        const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                          body: JSON.stringify(updated)
+                        });
+                        if (res.ok) {
+                          setCountyOverrides(updated);
+                          showToast(`Transport fee for ${countyOverrideForm.county} set to KES ${countyOverrideForm.fee}`, 'success');
+                          setCountyOverrideForm({ county: 'Nairobi', fee: '' });
+                        }
+                      } catch (err) { showToast('Error setting fee', 'error'); }
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl font-bold text-xs"
+                  >
+                    Save County Fee
+                  </button>
                 </div>
               </div>
             </div>
@@ -2026,32 +2000,170 @@ export default function PremiumRiceStore() {
 
           {adminTab === 'logs' && (
             <div className="animate-fadeIn space-y-6">
-              <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> M-Pesa Callbacks & Audit Logs</h2>
-                <p className="text-gray-400 text-xs mt-1">Live M-Pesa STK callbacks, response payloads, and order event streams.</p>
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                  <h2 className="text-2xl font-black text-white flex items-center">
+                    <Activity className="mr-3 text-emerald-500"/> Real-Time Payment Audit & Callback Logs
+                  </h2>
+                  <p className="text-gray-400 text-xs mt-1">Live callback responses for Paid, Failed, and Canceled Hero / M-Pesa payments.</p>
+                </div>
+                <button 
+                  onClick={fetchAdminLogs}
+                  className="flex items-center gap-2 bg-[#1f1f1f] hover:bg-[#282828] text-emerald-400 font-bold px-4 py-2.5 rounded-xl border border-gray-700 text-xs transition-all shadow"
+                >
+                  <RefreshCw size={14} /> Refresh Payment Logs
+                </button>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
-                <div className="p-4 bg-[#1a1a1a] border-b border-gray-800 flex justify-between items-center">
-                  <span className="text-xs font-bold text-gray-300 uppercase tracking-wider">Server Logs Registry ({adminLogs.length})</span>
-                  <button onClick={fetchAdminLogs} className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1">
-                    <RefreshCw size={14}/> Refresh
-                  </button>
+              {/* Log Summary Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="bg-[#141414] border border-gray-800 p-4 rounded-2xl">
+                  <span className="text-[10px] text-gray-500 uppercase font-black tracking-wider block mb-1">Total Callbacks</span>
+                  <span className="text-2xl font-black font-mono text-white">{adminLogs.length}</span>
                 </div>
-                <div className="p-4 font-mono text-xs max-h-[600px] overflow-y-auto space-y-2">
-                  {adminLogs.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">No payment callback logs available in database.</div>
-                  ) : (
-                    adminLogs.map((log: any, idx: number) => (
-                      <div key={idx} className="bg-[#181818] p-3 rounded-xl border border-gray-800 text-gray-300">
-                        <div className="flex justify-between text-[10px] text-gray-500 mb-1">
-                          <span>{log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Event Log'}</span>
-                          <span className="text-emerald-400 font-bold">{log.type || 'STK_PUSH_CALLBACK'}</span>
-                        </div>
-                        <pre className="text-[11px] text-emerald-300 overflow-x-auto whitespace-pre-wrap">{typeof log === 'string' ? log : JSON.stringify(log, null, 2)}</pre>
-                      </div>
-                    ))
-                  )}
+                <div className="bg-[#141414] border border-emerald-900/50 p-4 rounded-2xl">
+                  <span className="text-[10px] text-emerald-400 uppercase font-black tracking-wider block mb-1">Paid / Success</span>
+                  <span className="text-2xl font-black font-mono text-emerald-400">
+                    {adminLogs.filter(l => {
+                      const st = (l.status || l.paymentStatus || '').toLowerCase();
+                      return st === 'paid' || st === 'success' || st === 'completed' || l.resultCode === 0;
+                    }).length}
+                  </span>
+                </div>
+                <div className="bg-[#141414] border border-rose-900/50 p-4 rounded-2xl">
+                  <span className="text-[10px] text-rose-400 uppercase font-black tracking-wider block mb-1">Failed Payments</span>
+                  <span className="text-2xl font-black font-mono text-rose-400">
+                    {adminLogs.filter(l => {
+                      const st = (l.status || l.paymentStatus || '').toLowerCase();
+                      return st === 'failed' || st === 'error' || (l.resultCode && l.resultCode !== 0 && l.resultCode !== 1032);
+                    }).length}
+                  </span>
+                </div>
+                <div className="bg-[#141414] border border-amber-900/50 p-4 rounded-2xl">
+                  <span className="text-[10px] text-amber-400 uppercase font-black tracking-wider block mb-1">Canceled Payments</span>
+                  <span className="text-2xl font-black font-mono text-amber-400">
+                    {adminLogs.filter(l => {
+                      const st = (l.status || l.paymentStatus || '').toLowerCase();
+                      return st.includes('cancel') || l.resultCode === 1032;
+                    }).length}
+                  </span>
+                </div>
+              </div>
+
+              {/* Filter & Search Controls */}
+              <div className="flex flex-col sm:flex-row gap-3 bg-[#141414] p-4 border border-gray-800 rounded-2xl">
+                <div className="relative flex-1">
+                  <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500" />
+                  <input 
+                    type="text" 
+                    placeholder="Search logs by phone, receipt number, order ID, or message..." 
+                    value={logSearchQuery}
+                    onChange={(e) => setLogSearchQuery(e.target.value)}
+                    className="w-full bg-[#1c1c1c] text-white pl-10 pr-4 py-2.5 rounded-xl text-xs font-bold border border-gray-700 outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div className="flex items-center gap-1 bg-[#1c1c1c] p-1 rounded-xl border border-gray-700 overflow-x-auto">
+                  {(['all', 'paid', 'failed', 'canceled', 'pending'] as const).map((st) => (
+                    <button
+                      key={st}
+                      onClick={() => setLogStatusFilter(st)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition-all whitespace-nowrap ${
+                        logStatusFilter === st
+                          ? 'bg-emerald-600 text-white shadow'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      {st}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Payment Logs Table */}
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs whitespace-nowrap">
+                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="px-6 py-4">Timestamp</th>
+                        <th className="px-6 py-4">Order / Log ID</th>
+                        <th className="px-6 py-4">Phone Number</th>
+                        <th className="px-6 py-4">Amount</th>
+                        <th className="px-6 py-4">Status</th>
+                        <th className="px-6 py-4">M-Pesa / Hero Receipt</th>
+                        <th className="px-6 py-4">Callback Description / Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/60">
+                      {adminLogs.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="px-6 py-8 text-center text-gray-500 font-bold">
+                            No payment callback logs available yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        adminLogs
+                          .filter(log => {
+                            const statusStr = (log.status || log.paymentStatus || (log.resultCode === 0 ? 'paid' : log.resultCode === 1032 ? 'canceled' : 'failed')).toLowerCase();
+                            
+                            // Status Filter
+                            if (logStatusFilter === 'paid' && !(statusStr === 'paid' || statusStr === 'success' || statusStr === 'completed' || log.resultCode === 0)) return false;
+                            if (logStatusFilter === 'failed' && !(statusStr === 'failed' || statusStr === 'error' || (log.resultCode && log.resultCode !== 0 && log.resultCode !== 1032))) return false;
+                            if (logStatusFilter === 'canceled' && !(statusStr.includes('cancel') || log.resultCode === 1032)) return false;
+                            if (logStatusFilter === 'pending' && !(statusStr === 'pending')) return false;
+
+                            // Search Query Filter
+                            if (logSearchQuery) {
+                              const q = logSearchQuery.toLowerCase();
+                              const matchPhone = String(log.phoneNumber || log.phone || '').toLowerCase().includes(q);
+                              const matchReceipt = String(log.mpesaReceiptNumber || log.receipt || log.transactionId || '').toLowerCase().includes(q);
+                              const matchOrder = String(log.orderId || log.id || '').toLowerCase().includes(q);
+                              const matchDesc = String(log.resultDesc || log.message || log.details || '').toLowerCase().includes(q);
+                              return matchPhone || matchReceipt || matchOrder || matchDesc;
+                            }
+                            return true;
+                          })
+                          .map((log, idx) => {
+                            const rawStatus = (log.status || log.paymentStatus || (log.resultCode === 0 ? 'PAID' : log.resultCode === 1032 ? 'CANCELED' : 'FAILED')).toUpperCase();
+                            const isPaid = rawStatus === 'PAID' || rawStatus === 'SUCCESS' || rawStatus === 'COMPLETED' || log.resultCode === 0;
+                            const isCanceled = rawStatus.includes('CANCEL') || log.resultCode === 1032;
+                            
+                            let badgeStyle = 'bg-gray-500/20 text-gray-300 border-gray-500/40';
+                            if (isPaid) badgeStyle = 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40';
+                            else if (isCanceled) badgeStyle = 'bg-amber-500/20 text-amber-400 border-amber-500/40';
+                            else badgeStyle = 'bg-rose-500/20 text-rose-400 border-rose-500/40';
+
+                            return (
+                              <tr key={log.id || idx} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                                <td className="px-6 py-4 font-mono text-gray-400 text-[11px]">
+                                  {log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Just now'}
+                                </td>
+                                <td className="px-6 py-4 font-mono font-bold text-gray-200">
+                                  #{log.orderId || log.id || 'N/A'}
+                                </td>
+                                <td className="px-6 py-4 font-mono font-bold text-gray-300">
+                                  {log.phoneNumber || log.phone || 'N/A'}
+                                </td>
+                                <td className="px-6 py-4 font-mono font-bold text-emerald-400">
+                                  KES {(log.amount || log.grandTotal || 0).toLocaleString()}
+                                </td>
+                                <td className="px-6 py-4">
+                                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${badgeStyle}`}>
+                                    ● {isPaid ? 'PAID' : isCanceled ? 'CANCELED' : rawStatus}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 font-mono font-bold text-amber-300">
+                                  {log.mpesaReceiptNumber || log.receipt || log.transactionId || 'PENDING / NONE'}
+                                </td>
+                                <td className="px-6 py-4 text-gray-300 max-w-xs truncate" title={log.resultDesc || log.message || log.details}>
+                                  {log.resultDesc || log.message || log.details || (isPaid ? 'Transaction completed successfully' : 'No description provided')}
+                                </td>
+                              </tr>
+                            );
+                          })
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
@@ -2062,15 +2174,26 @@ export default function PremiumRiceStore() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-emerald-50/20 via-white to-emerald-50/20 text-gray-900 font-sans selection:bg-emerald-500 selection:text-white">
+    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans selection:bg-emerald-500 selection:text-white">
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl text-white font-bold text-sm flex items-center space-x-3 transition-all transform animate-bounce ${
+          toast.type === 'error' ? 'bg-rose-600 border border-rose-500' : 'bg-emerald-700 border border-emerald-600'
+        }`}>
+          {toast.type === 'error' ? <AlertCircle className="h-5 w-5" /> : <CheckCircle className="h-5 w-5" />}
+          <span>{toast.message}</span>
+        </div>
+      )}
+
       {renderNav()}
-      {renderToast()}
-      {view === 'home' && renderHome()}
-      {view === 'shop' && renderShop()}
-      {view === 'cart' && renderCart()}
-      {view === 'login' && renderAuth()}
-      {view === 'profile' && renderProfile()}
-      {view === 'admin' && renderAdmin()}
+
+      <main>
+        {view === 'home' && renderHome()}
+        {view === 'shop' && renderShop()}
+        {view === 'cart' && renderCart()}
+        {view === 'login' && renderAuth()}
+        {view === 'profile' && renderProfile()}
+        {view === 'admin' && renderAdmin()}
+      </main>
     </div>
   );
 }
