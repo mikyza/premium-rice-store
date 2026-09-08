@@ -98,7 +98,7 @@ export default function PremiumRiceStore() {
   const [products, setProducts] = useState<any[]>([]);
   const [carousel, setCarousel] = useState<any[]>([]);
   
-  // Expanded Hero Configuration with 10 distinct professional settings
+  // Expanded Hero Configuration with 10 distinct professional settings (Think Cool)
   const [heroSettings, setHeroSettings] = useState<any>({
     title: 'Direct From Mwea Paddy Fields',
     subtitle: '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.',
@@ -111,6 +111,7 @@ export default function PremiumRiceStore() {
     badgeText: '🌱 Pure Kenya Agricultural Harvest',
     overlayOpacity: '40',
     secondaryButtonText: 'Track Order Status',
+    // 10 Cool Extended Configurations
     announcementTicker: '🔥 Special 25kg Wholesale Discount Active Across All 47 Counties!',
     themeAccentColor: 'emerald',
     heroLayoutMode: 'split-banner',
@@ -148,18 +149,13 @@ export default function PremiumRiceStore() {
   const [resetStep, setResetStep] = useState<'request' | 'reset'>('request');
   const [formData, setFormData] = useState({ phoneNumber: '', email: '', password: '', fullName: '', resetToken: '', newPassword: '' });
   
-  // Added 'payments' tab to admin console
-  const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'users' | 'carousel' | 'config' | 'logs' | 'finances' | 'payments'>('inventory');
+  const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'users' | 'carousel' | 'config' | 'logs' | 'finances'>('inventory');
   const [newProduct, setNewProduct] = useState({ brandName: '', variety: '', weightKg: '', basePrice: '', costPrice: '', stockQuantity: '', imageUrl: '' });
   const [editingProduct, setEditingProduct] = useState<any | null>(null);
   const [adminOrders, setAdminOrders] = useState<any[]>([]);
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
   const [adminLogs, setAdminLogs] = useState<any[]>([]);
-  const [paymentsLog, setPaymentsLog] = useState<any[]>([]);
-  
   const [orderSearchQuery, setOrderSearchQuery] = useState('');
-  const [paymentSearchQuery, setPaymentSearchQuery] = useState('');
-  const [paymentStatusFilter, setPaymentStatusFilter] = useState('all');
   const [shopSearch, setShopSearch] = useState('');
   const [newSlide, setNewSlide] = useState({ title: '', subtitle: '', url: '' });
   const [countyOverrideForm, setCountyOverrideForm] = useState({ county: 'Nairobi', fee: '' });
@@ -289,10 +285,6 @@ export default function PremiumRiceStore() {
         setMyOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
         setAdminOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
       });
-
-      newSocket.on('paymentReceived', () => {
-        if (adminTab === 'payments') fetchPaymentsLog();
-      });
     } catch (err) {
       console.error("Real-time socket initialization failed:", err);
     }
@@ -310,7 +302,6 @@ export default function PremiumRiceStore() {
       socket.on('newOrderAlert', (data: any) => {
         showToast(`New Order Received! Order #${data.id}`, 'success');
         fetchAdminOrders();
-        fetchPaymentsLog();
       });
     }
   }, [socket, user, token]);
@@ -321,7 +312,6 @@ export default function PremiumRiceStore() {
       if (adminTab === 'orders' || adminTab === 'finances') fetchAdminOrders();
       if (adminTab === 'users') fetchAdminUsers();
       if (adminTab === 'logs') fetchAdminLogs();
-      if (adminTab === 'payments') fetchPaymentsLog();
     }
   }, [view, adminTab, token]);
 
@@ -435,47 +425,6 @@ export default function PremiumRiceStore() {
       }
     } catch (err) { 
       showToast('Network error while fetching system logs', 'error'); 
-    }
-  };
-
-  const fetchPaymentsLog = async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/admin/payments`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPaymentsLog(Array.isArray(data) ? data : (data.payments || []));
-      } else {
-        // Fallback: build payments log from admin orders if separate payments endpoint isn't populated
-        if (adminOrders.length > 0) {
-          const derivedLogs = adminOrders.map(o => ({
-            id: o.id,
-            transactionId: o.transactionId || `TXN-${o.id}`,
-            orderId: o.id,
-            phoneNumber: o.phoneNumber || o.user?.phoneNumber || 'N/A',
-            amount: o.grandTotal || o.totalAmount,
-            paymentMethod: o.paymentMethod || 'stk',
-            paymentStatus: o.paymentStatus || 'completed',
-            createdAt: o.createdAt
-          }));
-          setPaymentsLog(derivedLogs);
-        }
-      }
-    } catch (err) {
-      if (adminOrders.length > 0) {
-        const derivedLogs = adminOrders.map(o => ({
-          id: o.id,
-          transactionId: o.transactionId || `TXN-${o.id}`,
-          orderId: o.id,
-          phoneNumber: o.phoneNumber || o.user?.phoneNumber || 'N/A',
-          amount: o.grandTotal || o.totalAmount,
-          paymentMethod: o.paymentMethod || 'stk',
-          paymentStatus: o.paymentStatus || 'completed',
-          createdAt: o.createdAt
-        }));
-        setPaymentsLog(derivedLogs);
-      }
     }
   };
 
@@ -1338,6 +1287,7 @@ export default function PremiumRiceStore() {
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200 pb-3 mb-3">
                       <div>
                         <span className="font-mono font-black text-emerald-950 text-base">TXN #{o.transactionId || o.id}</span>
+                        {/* Payment status strictly from backend */}
                         <span className="text-xs text-gray-500 font-medium ml-3">Payment Status: <strong className="text-emerald-700 uppercase">{o.paymentStatus || 'Paid'}</strong></span>
                       </div>
                       <div className="flex items-center gap-3">
@@ -1430,37 +1380,12 @@ export default function PremiumRiceStore() {
     const tabsList = [
       { id: 'inventory', icon: <Package size={18}/>, label: 'Grain Catalog' },
       { id: 'orders', icon: <ShoppingBag size={18}/>, label: 'Logistics & Orders' },
-      { id: 'payments', icon: <CreditCard size={18}/>, label: 'Payments Log' },
       { id: 'finances', icon: <BarChart2 size={18}/>, label: 'Financial Dashboard' },
       { id: 'users', icon: <Users size={18}/>, label: 'User Clearance' },
       { id: 'carousel', icon: <ImageIcon size={18}/>, label: 'Hero Config' },
       { id: 'config', icon: <Settings size={18}/>, label: 'Counties & Engine' },
       { id: 'logs', icon: <Activity size={18}/>, label: 'Audit Logs' }
     ];
-
-    // Payments calculations for the payments log summary
-    const filteredPayments = paymentsLog.filter(p => {
-      const q = paymentSearchQuery.toLowerCase();
-      const matchesQuery = !q || 
-        (p.transactionId && p.transactionId.toLowerCase().includes(q)) ||
-        (p.phoneNumber && p.phoneNumber.toLowerCase().includes(q)) ||
-        (p.orderId && String(p.orderId).includes(q));
-      
-      const status = (p.paymentStatus || p.status || 'completed').toLowerCase();
-      const matchesStatus = paymentStatusFilter === 'all' || status === paymentStatusFilter;
-      
-      return matchesQuery && matchesStatus;
-    });
-
-    const totalCollected = paymentsLog.reduce((sum, p) => {
-      const st = (p.paymentStatus || p.status || 'completed').toLowerCase();
-      return st === 'completed' || st === 'paid' || st === 'success' ? sum + Number(p.amount || 0) : sum;
-    }, 0);
-
-    const successfulCount = paymentsLog.filter(p => {
-      const st = (p.paymentStatus || p.status || 'completed').toLowerCase();
-      return st === 'completed' || st === 'paid' || st === 'success';
-    }).length;
 
     return (
       <div className="flex flex-col md:flex-row min-h-[calc(100vh-80px)] bg-[#0a0a0a] text-white font-sans animate-fadeIn">
@@ -1542,54 +1467,112 @@ export default function PremiumRiceStore() {
                   <input required type="number" placeholder="Cost/Buying Price (KES)" value={newProduct.costPrice} onChange={e=>setNewProduct({...newProduct, costPrice:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
                   <input required type="number" placeholder="Selling Price (KES)" value={newProduct.basePrice} onChange={e=>setNewProduct({...newProduct, basePrice:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
                   <input required type="number" placeholder="Stock Quantity (Bags)" value={newProduct.stockQuantity} onChange={e=>setNewProduct({...newProduct, stockQuantity:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
-                  <input type="text" placeholder="Image URL (Unsplash or direct image link)" value={newProduct.imageUrl} onChange={e=>setNewProduct({...newProduct, imageUrl:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500 md:col-span-2" />
-                  <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-xl text-xs transition-all flex items-center justify-center gap-2 shadow-lg">
-                    <Plus size={16}/> Save Product
-                  </button>
+                  <input type="text" placeholder="Image URL (http://...)" value={newProduct.imageUrl} onChange={e=>setNewProduct({...newProduct, imageUrl:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 font-mono placeholder-gray-500 md:col-span-2" />
+                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3.5 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all md:col-span-3">Commit Product to Database</button>
                 </form>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wider mb-4">Active Catalog Items</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {products.map(p => (
-                    <div key={p.id} className="bg-[#1a1a1a] border border-gray-800 p-4 rounded-2xl flex flex-col justify-between">
-                      <div>
-                        <div className="flex justify-between items-start mb-2">
-                          <div>
-                            <span className="text-[10px] text-emerald-400 uppercase font-black">{p.brandName}</span>
-                            <h4 className="font-bold text-white text-base">{p.variety}</h4>
-                          </div>
-                          <span className="text-xs font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-lg font-bold">{p.weightKg}kg</span>
-                        </div>
-                        <div className="text-xs text-gray-400 space-y-1 mb-4">
-                          <p>Buying Cost: <strong className="text-gray-200">KES {p.costPrice || 0}</strong></p>
-                          <p>Selling Price: <strong className="text-emerald-400">KES {p.price}</strong></p>
-                          <p>Stock Remaining: <strong className={p.stockQuantity < 5 ? 'text-rose-400' : 'text-gray-200'}>{p.stockQuantity} bags</strong></p>
-                        </div>
-                      </div>
-                      <div className="flex gap-2 border-t border-gray-800 pt-3">
-                        <button onClick={() => setEditingProduct(p)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-xs text-gray-200 py-2 rounded-xl font-bold flex items-center justify-center gap-1">
-                          <Edit size={14}/> Edit
-                        </button>
-                        <button onClick={async () => {
-                          if (!confirm(`Delete product ${p.variety}?`)) return;
-                          try {
-                            const res = await fetch(`${API_BASE_URL}/admin/products/${p.id}`, {
-                              method: 'DELETE',
-                              headers: { 'Authorization': `Bearer ${token}` }
-                            });
-                            if (res.ok) {
-                              showToast('Product deleted from inventory', 'success');
-                              fetchProducts();
-                            }
-                          } catch (err) { showToast('Error deleting product', 'error'); }
-                        }} className="bg-rose-950/60 border border-rose-800 hover:bg-rose-900 text-rose-300 p-2 rounded-xl text-xs font-bold">
-                          <Trash2 size={16}/>
-                        </button>
-                      </div>
+              {editingProduct && (
+                <div className="bg-[#1a1a1a] border-2 border-emerald-500/50 rounded-3xl p-6 shadow-2xl animate-fadeIn">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Modifying Record #{editingProduct.id}</h3>
+                    <button onClick={() => setEditingProduct(null)} className="text-gray-400 hover:text-white"><X size={18}/></button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Brand Name</label>
+                      <input type="text" value={editingProduct.brandName} onChange={e=>setEditingProduct({...editingProduct, brandName:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
                     </div>
-                  ))}
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Variety</label>
+                      <input type="text" value={editingProduct.variety} onChange={e=>setEditingProduct({...editingProduct, variety:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Buying/Cost Price</label>
+                      <input type="number" value={editingProduct.costPrice || ''} onChange={e=>setEditingProduct({...editingProduct, costPrice:Number(e.target.value)})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Selling Price</label>
+                      <input type="number" value={editingProduct.basePrice} onChange={e=>setEditingProduct({...editingProduct, basePrice:Number(e.target.value), price:Number(e.target.value)})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Stock Inventory</label>
+                      <input type="number" value={editingProduct.stockQuantity} onChange={e=>setEditingProduct({...editingProduct, stockQuantity:Number(e.target.value)})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Image URL</label>
+                      <input type="text" placeholder="Image URL" value={editingProduct.imageUrl || ''} onChange={e=>setEditingProduct({...editingProduct, imageUrl:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
+                  </div>
+                  <button onClick={async () => {
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/admin/products/${editingProduct.id}`, {
+                        method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify(editingProduct)
+                      });
+                      if (res.ok) {
+                        showToast('Product specifications modified', 'success');
+                        setEditingProduct(null);
+                        fetchProducts();
+                      } else {
+                        showToast('Failed to modify product record', 'error');
+                      }
+                    } catch (err) {
+                      showToast('Network error while modifying product', 'error');
+                    }
+                  }} className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs hover:bg-emerald-500 mr-3">Save Changes</button>
+                </div>
+              )}
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs whitespace-nowrap">
+                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="px-6 py-4">ID</th>
+                        <th className="px-6 py-4">Brand & Variety</th>
+                        <th className="px-6 py-4">Buying Price</th>
+                        <th className="px-6 py-4">Selling Price</th>
+                        <th className="px-6 py-4">Stock Matrix</th>
+                        <th className="px-6 py-4 text-center">Controls</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/60">
+                      {products.map(p => (
+                        <tr key={p.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                          <td className="px-6 py-4 font-mono text-gray-500">#{p.id}</td>
+                          <td className="px-6 py-4 font-bold text-gray-200">{p.brandName} - <span className="text-gray-400 font-normal">{p.variety} ({p.weightKg}kg)</span></td>
+                          <td className="px-6 py-4 font-bold font-mono text-gray-400">KES {p.costPrice?.toLocaleString() || '---'}</td>
+                          <td className="px-6 py-4 font-bold font-mono text-emerald-400">KES {p.price?.toLocaleString()}</td>
+                          <td className="px-6 py-4">
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black border font-mono ${
+                              p.stockQuantity > 10 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                            }`}>
+                              {p.stockQuantity} BAGS LEFT
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <button onClick={() => setEditingProduct(p)} className="text-gray-400 hover:text-emerald-400 p-2 bg-[#1f1f1f] rounded-xl mr-2 transition-colors" title="Edit"><Edit size={14}/></button>
+                            <button onClick={async () => {
+                              if (confirm(`Permanently delete ${p.brandName} ${p.variety}?`)) {
+                                try {
+                                  const res = await fetch(`${API_BASE_URL}/admin/products/${p.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+                                  if (res.ok) {
+                                    showToast('Product wiped from database', 'success');
+                                    fetchProducts();
+                                  } else {
+                                    showToast('Failed to delete product', 'error');
+                                  }
+                                } catch (err) {
+                                  showToast('Network error deleting product', 'error');
+                                }
+                              }
+                            }} className="text-gray-400 hover:text-rose-500 p-2 bg-[#1f1f1f] rounded-xl transition-colors" title="Delete"><Trash2 size={14}/></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
@@ -1597,235 +1580,371 @@ export default function PremiumRiceStore() {
 
           {adminTab === 'orders' && (
             <div className="animate-fadeIn space-y-6">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div>
-                  <h2 className="text-2xl font-black text-white flex items-center"><ShoppingBag className="mr-3 text-emerald-500"/> Orders & Direct Logistics</h2>
-                  <p className="text-gray-400 text-xs mt-1">Manage, fulfill, and update dispatch status across 47 counties.</p>
-                </div>
-                <div className="relative w-full sm:w-64">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 h-4 w-4" />
-                  <input 
-                    type="text" 
-                    placeholder="Search by order ID or phone..." 
-                    value={orderSearchQuery}
-                    onChange={(e) => setOrderSearchQuery(e.target.value)}
-                    className="bg-[#141414] border border-gray-800 text-white pl-9 pr-4 py-2 rounded-xl text-xs font-bold w-full outline-none focus:border-emerald-500" 
-                  />
-                </div>
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><ShoppingBag className="mr-3 text-emerald-500"/> Logistics & Order Management</h2>
+                <p className="text-gray-400 text-xs mt-1">Review active orders, update delivery statuses, or monitor regional dispatch.</p>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-4 flex items-center gap-3">
+                <Search size={18} className="text-gray-500 ml-2" />
+                <input 
+                  type="text" 
+                  placeholder="Filter orders by ID, Customer Name, or Phone..."
+                  value={orderSearchQuery}
+                  onChange={(e) => setOrderSearchQuery(e.target.value)}
+                  className="bg-transparent text-white font-bold text-xs w-full outline-none placeholder-gray-600"
+                />
               </div>
 
               <div className="space-y-4">
-                {adminOrders.filter(o => !orderSearchQuery || String(o.id).includes(orderSearchQuery) || o.phoneNumber?.includes(orderSearchQuery)).map(order => (
-                  <div key={order.id} className="bg-[#141414] border border-gray-800 rounded-3xl p-5 space-y-4">
-                    <div className="flex flex-col sm:flex-row justify-between sm:items-center border-b border-gray-800 pb-3 gap-2">
-                      <div>
-                        <div className="flex items-center gap-3">
-                          <span className="font-mono font-black text-emerald-400 text-base">ORDER #{order.id}</span>
-                          <span className="text-xs text-gray-400">TXN ID: <strong className="text-gray-200">{order.transactionId || 'N/A'}</strong></span>
+                {adminOrders
+                  .filter(o => {
+                    if (!orderSearchQuery) return true;
+                    const q = orderSearchQuery.toLowerCase();
+                    return String(o.id).includes(q) || o.user?.fullName?.toLowerCase().includes(q) || o.user?.phoneNumber?.includes(q) || o.county?.toLowerCase().includes(q);
+                  })
+                  .map(o => (
+                    <div key={o.id} className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-gray-800/80 pb-4 mb-4">
+                        <div>
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono font-black text-emerald-400 text-base">ORDER #{o.id}</span>
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                              o.status === 'delivered' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                            }`}>
+                              {o.status}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1">Customer: <strong className="text-white">{o.user?.fullName || 'Guest'}</strong> ({o.user?.phoneNumber || 'No Phone'}) • {new Date(o.createdAt).toLocaleString()}</p>
                         </div>
-                        <p className="text-xs text-gray-400 mt-0.5">Customer: <strong className="text-white">{order.user?.fullName || 'Guest'}</strong> ({order.phoneNumber})</p>
+                        <div className="flex items-center gap-3">
+                           {/* Payment status strictly from backend and NOT alterable by admin panel */}
+                           <div className="bg-[#1f1f1f] border border-gray-800 px-3 py-1.5 rounded-xl">
+                             <span className="text-[10px] text-gray-400 block uppercase font-bold">Payment Status (Backend)</span>
+                             <span className="text-xs font-black text-emerald-400 uppercase">{o.paymentStatus || 'Paid'}</span>
+                           </div>
+
+                           <span className="text-xs text-gray-400 font-bold">Shipping Status:</span>
+                           <select 
+                             value={o.status}
+                             onChange={async (e) => {
+                               const newStatus = e.target.value;
+                               try {
+                                 const res = await fetch(`${API_BASE_URL}/admin/orders/${o.id}/status`, {
+                                   method: 'PUT',
+                                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                   body: JSON.stringify({ status: newStatus })
+                                 });
+                                 if (res.ok) {
+                                   showToast(`Order #${o.id} shipping status updated to ${newStatus}`, 'success');
+                                   fetchAdminOrders();
+                                 } else {
+                                   showToast('Failed to update order status', 'error');
+                                 }
+                               } catch (err) {
+                                 showToast('Network error updating status', 'error');
+                               }
+                             }}
+                             className="bg-[#1f1f1f] text-emerald-400 font-black text-xs border border-gray-700 rounded-xl px-3 py-2 outline-none cursor-pointer"
+                           >
+                             <option value="pending">Pending</option>
+                             <option value="processing">Processing</option>
+                             <option value="dispatched">Dispatched</option>
+                             <option value="delivered">Delivered</option>
+                             <option value="failed">Failed</option>
+                           </select>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs font-mono font-black text-emerald-400 bg-emerald-950 px-3 py-1 rounded-full border border-emerald-800">
-                          KES {order.grandTotal?.toLocaleString()}
-                        </span>
-                        <select 
-                          value={order.status}
-                          onChange={async (e) => {
-                            const newStatus = e.target.value;
-                            try {
-                              const res = await fetch(`${API_BASE_URL}/admin/orders/${order.id}/status`, {
-                                method: 'PATCH',
-                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                body: JSON.stringify({ status: newStatus })
-                              });
-                              if (res.ok) {
-                                showToast(`Order #${order.id} status updated to ${newStatus}`);
-                                fetchAdminOrders();
-                              }
-                            } catch (err) { showToast('Failed to update status', 'error'); }
-                          }}
-                          className="bg-[#1f1f1f] border border-gray-700 text-xs text-white font-bold px-3 py-1.5 rounded-xl outline-none"
-                        >
-                          <option value="pending">Pending</option>
-                          <option value="processing">Processing</option>
-                          <option value="in_transit">In Transit</option>
-                          <option value="delivered">Delivered</option>
-                          <option value="cancelled">Cancelled</option>
-                        </select>
-                      </div>
-                    </div>
 
-                    <div className="text-xs text-gray-300 bg-[#181818] p-3 rounded-2xl border border-gray-800/80">
-                      <strong>Logistics Route:</strong> {order.county} County • {order.town} • {order.location} ({formatShippingAddress(order.shippingAddress)})
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* ========================================== */}
-          {/* NEW: PAYMENTS LOG TAB                      */}
-          {/* ========================================== */}
-          {adminTab === 'payments' && (
-            <div className="animate-fadeIn space-y-6">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div>
-                  <h2 className="text-2xl font-black text-white flex items-center">
-                    <CreditCard className="mr-3 text-emerald-500"/> Payments Audit Log
-                  </h2>
-                  <p className="text-gray-400 text-xs mt-1">Real-time M-Pesa STK Push, Till, and Paybill transaction records.</p>
-                </div>
-                <button 
-                  onClick={fetchPaymentsLog} 
-                  className="bg-[#1a1a1a] hover:bg-[#252525] border border-gray-800 text-emerald-400 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2"
-                >
-                  <RefreshCw size={14}/> Sync Payments
-                </button>
-              </div>
-
-              {/* Top Payment Metrics */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-[#141414] border border-gray-800 p-5 rounded-3xl flex items-center justify-between">
-                  <div>
-                    <span className="text-[10px] text-gray-500 font-black uppercase tracking-wider block">Total Received</span>
-                    <span className="text-2xl font-black text-emerald-400 font-mono mt-1 block">KES {totalCollected.toLocaleString()}</span>
-                  </div>
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-950 border border-emerald-800 flex items-center justify-center text-emerald-400">
-                    <DollarSign size={24}/>
-                  </div>
-                </div>
-
-                <div className="bg-[#141414] border border-gray-800 p-5 rounded-3xl flex items-center justify-between">
-                  <div>
-                    <span className="text-[10px] text-gray-500 font-black uppercase tracking-wider block">Successful Payments</span>
-                    <span className="text-2xl font-black text-white font-mono mt-1 block">{successfulCount} Logs</span>
-                  </div>
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-950 border border-emerald-800 flex items-center justify-center text-emerald-400">
-                    <CheckCircle size={24}/>
-                  </div>
-                </div>
-
-                <div className="bg-[#141414] border border-gray-800 p-5 rounded-3xl flex items-center justify-between">
-                  <div>
-                    <span className="text-[10px] text-gray-500 font-black uppercase tracking-wider block">Total Logged Entries</span>
-                    <span className="text-2xl font-black text-gray-300 font-mono mt-1 block">{paymentsLog.length}</span>
-                  </div>
-                  <div className="w-12 h-12 rounded-2xl bg-gray-900 border border-gray-800 flex items-center justify-center text-gray-400">
-                    <FileText size={24}/>
-                  </div>
-                </div>
-              </div>
-
-              {/* Filters & Search */}
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-4 flex flex-col sm:flex-row gap-4 items-center justify-between">
-                <div className="relative w-full sm:w-80">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 h-4 w-4" />
-                  <input 
-                    type="text" 
-                    placeholder="Search TXN ID, Phone, Order..." 
-                    value={paymentSearchQuery}
-                    onChange={(e) => setPaymentSearchQuery(e.target.value)}
-                    className="bg-[#1a1a1a] border border-gray-800 text-white pl-9 pr-4 py-2.5 rounded-xl text-xs font-bold w-full outline-none focus:border-emerald-500" 
-                  />
-                </div>
-
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <Filter size={16} className="text-gray-500"/>
-                  <select 
-                    value={paymentStatusFilter}
-                    onChange={(e) => setPaymentStatusFilter(e.target.value)}
-                    className="bg-[#1a1a1a] border border-gray-800 text-white px-3 py-2.5 rounded-xl text-xs font-bold outline-none focus:border-emerald-500"
-                  >
-                    <option value="all">All Payment Statuses</option>
-                    <option value="completed">Completed / Paid</option>
-                    <option value="pending">Pending PIN</option>
-                    <option value="failed">Failed / Cancelled</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Payments Table / Log list */}
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden">
-                {filteredPayments.length === 0 ? (
-                  <div className="p-12 text-center text-gray-500 text-xs font-medium">No payment transaction records match your query.</div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-[#181818] border-b border-gray-800 text-gray-400 uppercase text-[10px] tracking-wider font-black">
-                        <tr>
-                          <th className="p-4">TXN / Receipt</th>
-                          <th className="p-4">Order ID</th>
-                          <th className="p-4">Phone Number</th>
-                          <th className="p-4">Method</th>
-                          <th className="p-4">Amount</th>
-                          <th className="p-4">Status</th>
-                          <th className="p-4">Timestamp</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-800/60 font-medium">
-                        {filteredPayments.map((p, idx) => {
-                          const status = (p.paymentStatus || p.status || 'completed').toLowerCase();
-                          const isSuccess = status === 'completed' || status === 'paid' || status === 'success';
-                          const isPending = status === 'pending';
-
-                          return (
-                            <tr key={p.id || idx} className="hover:bg-[#1a1a1a] transition-colors">
-                              <td className="p-4 font-mono font-bold text-emerald-400">{p.transactionId || `TXN-${p.id}`}</td>
-                              <td className="p-4 font-mono text-gray-300">#{p.orderId || p.id}</td>
-                              <td className="p-4 text-gray-200 font-bold">{p.phoneNumber || 'N/A'}</td>
-                              <td className="p-4 uppercase text-[10px] font-black tracking-wider text-gray-400">
-                                {p.paymentMethod === 'stk' ? '🟢 M-Pesa STK' : (p.paymentMethod || 'STK Push')}
-                              </td>
-                              <td className="p-4 font-mono font-black text-white">KES {Number(p.amount || 0).toLocaleString()}</td>
-                              <td className="p-4">
-                                <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
-                                  isSuccess ? 'bg-emerald-950 text-emerald-300 border-emerald-800' :
-                                  isPending ? 'bg-amber-950 text-amber-300 border-amber-800' :
-                                  'bg-rose-950 text-rose-300 border-rose-800'
-                                }`}>
-                                  ● {status}
-                                </span>
-                              </td>
-                              <td className="p-4 text-gray-500 font-mono text-[11px]">
-                                {p.createdAt ? new Date(p.createdAt).toLocaleString('en-KE') : 'Just now'}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {adminTab === 'finances' && (
-            <div className="animate-fadeIn space-y-6">
-              <h2 className="text-2xl font-black text-white flex items-center"><BarChart2 className="mr-3 text-emerald-500"/> Financial Profit & Loss Dashboard</h2>
-              <p className="text-gray-400 text-xs">Gross revenues vs stock buying costs calculations.</p>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                <p className="text-sm text-gray-300 font-bold">Revenue metrics loaded from live completed orders.</p>
-              </div>
-            </div>
-          )}
-
-          {adminTab === 'users' && (
-            <div className="animate-fadeIn space-y-6">
-              <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Clearance Registry</h2>
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                <div className="space-y-3">
-                  {adminUsers.map(u => (
-                    <div key={u.id} className="bg-[#181818] border border-gray-800 p-4 rounded-2xl flex justify-between items-center">
-                      <div>
-                        <p className="font-bold text-white text-sm">{u.fullName}</p>
-                        <p className="text-xs text-gray-400">{u.phoneNumber} • Role: <span className="uppercase text-emerald-400 font-bold">{u.role}</span></p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80">
+                          <p className="font-bold text-gray-300 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-500"/> Delivery Logistics:</p>
+                          <ul className="space-y-1 text-gray-400">
+                            <li>County: <strong className="text-white">{o.county}</strong></li>
+                            <li>Town: <strong className="text-white">{o.town}</strong></li>
+                            <li>Location: <strong className="text-white">{o.location}</strong></li>
+                            <li>Street: <strong className="text-white">{formatShippingAddress(o.shippingAddress)}</strong></li>
+                          </ul>
+                        </div>
+                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80 flex flex-col justify-between">
+                          <div>
+                            <p className="font-bold text-gray-300 mb-2">Order Items ({o.items?.length || 0}):</p>
+                            <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
+                              {o.items?.map((item: any, idx: number) => (
+                                <div key={idx} className="flex justify-between text-gray-400">
+                                  <span>{item.quantity}x {item.name || item.product?.variety}</span>
+                                  <span className="font-bold text-white">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="flex justify-between font-black text-sm text-emerald-400 border-t border-gray-800 pt-2 mt-2">
+                            <span>Grand Total</span>
+                            <span>KES {o.grandTotal?.toLocaleString()}</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ))}
+              </div>
+            </div>
+          )}
+
+          {adminTab === 'finances' && (() => {
+            const currentYear = new Date().getFullYear();
+            const monthlyRevenue = Array(12).fill(0);
+            const monthlyProfit = Array(12).fill(0);
+            let totalYearlyRevenue = 0;
+            let totalYearlyProfit = 0;
+
+            const categorySales: { [key: string]: { quantity: number, revenue: number, profit: number, sellingPrice: number, costPrice: number } } = {};
+
+            adminOrders.forEach(order => {
+               if (order.status !== 'failed' && order.paymentStatus !== 'failed') {
+                   const d = new Date(order.createdAt);
+                   if (d.getFullYear() === financeYear) {
+                       totalYearlyRevenue += (order.grandTotal || 0);
+                       
+                       order.items?.forEach((item: any) => {
+                          const catName = item.name || item.product?.variety || 'Standard Rice';
+                          const selling = item.priceAtPurchase || 0;
+                          const cost = item.product?.costPrice || item.costPrice || (selling * 0.75);
+                          const profit = (selling - cost) * item.quantity;
+                          const rev = selling * item.quantity;
+
+                          if (!categorySales[catName]) {
+                             categorySales[catName] = { quantity: 0, revenue: 0, profit: 0, sellingPrice: selling, costPrice: cost };
+                          }
+                          categorySales[catName].quantity += item.quantity;
+                          categorySales[catName].revenue += rev;
+                          categorySales[catName].profit += profit;
+                       });
+
+                       const orderProfit = order.items?.reduce((sum: number, item: any) => {
+                           const cost = item.product?.costPrice || item.costPrice || (item.priceAtPurchase * 0.75);
+                           return sum + ((item.priceAtPurchase - cost) * item.quantity);
+                       }, 0) || 0;
+                       
+                       totalYearlyProfit += orderProfit;
+                       monthlyRevenue[d.getMonth()] += (order.grandTotal || 0);
+                       monthlyProfit[d.getMonth()] += orderProfit;
+                   }
+               }
+            });
+
+            const maxMonthValue = Math.max(...monthlyRevenue, 1);
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+            return (
+              <div className="animate-fadeIn space-y-6">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <div>
+                    <h2 className="text-2xl font-black text-white flex items-center"><BarChart2 className="mr-3 text-emerald-500"/> Financial & Sales Analytics Dashboard</h2>
+                    <p className="text-gray-400 text-xs mt-1">Real-time monthly sales graph based on transaction timestamps (preserving yearly history).</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-gray-400 font-bold">Select Year:</span>
+                    <select 
+                      value={financeYear}
+                      onChange={(e) => setFinanceYear(Number(e.target.value))}
+                      className="bg-[#1f1f1f] text-emerald-400 font-black text-xs border border-gray-700 rounded-xl px-4 py-2.5 outline-none cursor-pointer"
+                    >
+                      {[currentYear, currentYear - 1, currentYear - 2, currentYear - 3].map(yr => (
+                        <option key={yr} value={yr}>{yr}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                    <span className="text-[10px] text-gray-500 font-black uppercase tracking-wider block mb-1">Total Yearly Revenue ({financeYear})</span>
+                    <div className="text-3xl font-black text-white font-mono">KES {totalYearlyRevenue.toLocaleString()}</div>
+                    <span className="text-xs text-emerald-400 font-bold mt-2 block flex items-center"><TrendingUp size={14} className="mr-1"/> Verified Backend Logins</span>
+                  </div>
+                  <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                    <span className="text-[10px] text-gray-500 font-black uppercase tracking-wider block mb-1">Total Profit ({financeYear})</span>
+                    <div className="text-3xl font-black text-emerald-400 font-mono">KES {totalYearlyProfit.toLocaleString()}</div>
+                    <span className="text-xs text-gray-400 font-medium mt-2 block">Total profit computed from all money (excluding raw payment logs)</span>
+                  </div>
+                  <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl sm:col-span-2 lg:col-span-1">
+                    <span className="text-[10px] text-gray-500 font-black uppercase tracking-wider block mb-1">Completed Transactions</span>
+                    <div className="text-3xl font-black text-white font-mono">{adminOrders.filter(o => o.status !== 'failed' && new Date(o.createdAt).getFullYear() === financeYear).length} Orders</div>
+                    <span className="text-xs text-emerald-400 font-bold mt-2 block">Active Logistics Dispatched</span>
+                  </div>
+                </div>
+
+                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 sm:p-8 shadow-xl">
+                  <h3 className="text-base font-black text-white mb-6 flex items-center justify-between">
+                    <span>Monthly Sales Breakdown ({financeYear})</span>
+                    <span className="text-xs font-mono text-emerald-400 bg-emerald-950/50 px-3 py-1 rounded-full border border-emerald-800">Timestamp Driven</span>
+                  </h3>
+                  
+                  <div className="h-64 flex items-end gap-2 sm:gap-4 pt-8 pb-2 border-b border-gray-800">
+                    {monthlyRevenue.map((rev, idx) => {
+                      const heightPercent = Math.max((rev / maxMonthValue) * 100, 6);
+                      return (
+                        <div key={idx} className="flex-1 flex flex-col items-center h-full justify-end group relative">
+                          <div className="absolute -top-10 opacity-0 group-hover:opacity-100 transition-opacity bg-black text-white text-[10px] font-mono px-2 py-1 rounded border border-gray-800 whitespace-nowrap z-20">
+                            {months[idx]}: KES {rev.toLocaleString()}
+                          </div>
+                          <div 
+                            style={{ height: `${heightPercent}%` }} 
+                            className="w-full bg-gradient-to-t from-emerald-700 to-emerald-400 rounded-t-lg group-hover:from-emerald-600 group-hover:to-emerald-300 transition-all duration-300"
+                          ></div>
+                          <span className="text-[10px] text-gray-400 font-bold mt-3 block">{months[idx]}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 sm:p-8 shadow-xl">
+                  <h3 className="text-base font-black text-white mb-6">Product Category Sales & Margin Performance</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs whitespace-nowrap">
+                      <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
+                        <tr>
+                          <th className="px-6 py-4">Category / Variety</th>
+                          <th className="px-6 py-4">Total Bags Sold</th>
+                          <th className="px-6 py-4">Gross Revenue</th>
+                          <th className="px-6 py-4">Net Profit</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-800/60">
+                        {Object.keys(categorySales).length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="text-center py-8 text-gray-500">No sales recorded for {financeYear}.</td>
+                          </tr>
+                        ) : (
+                          Object.entries(categorySales).map(([cat, data], i) => (
+                            <tr key={i} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                              <td className="px-6 py-4 font-bold text-white">{cat}</td>
+                              <td className="px-6 py-4 font-mono font-bold text-gray-300">{data.quantity} bags</td>
+                              <td className="px-6 py-4 font-mono font-bold text-emerald-400">KES {data.revenue.toLocaleString()}</td>
+                              <td className="px-6 py-4 font-mono font-bold text-emerald-300">KES {data.profit.toLocaleString()}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {adminTab === 'users' && (
+            <div className="animate-fadeIn space-y-6">
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Clearance & Account Management</h2>
+                <p className="text-gray-400 text-xs mt-1">Manage user clearance levels, edit account details, or suspend user accounts.</p>
+              </div>
+
+              {editingUser && (
+                <div className="bg-[#1a1a1a] border-2 border-emerald-500/50 rounded-3xl p-6 shadow-2xl animate-fadeIn">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Modifying User Account #{editingUser.id || editingUser.phoneNumber}</h3>
+                    <button onClick={() => setEditingUser(null)} className="text-gray-400 hover:text-white"><X size={18}/></button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Full Name</label>
+                      <input type="text" value={editingUser.fullName || ''} onChange={e=>setEditingUser({...editingUser, fullName:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Phone Number</label>
+                      <input type="tel" value={editingUser.phoneNumber || ''} onChange={e=>setEditingUser({...editingUser, phoneNumber:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Role / Clearance</label>
+                      <select value={editingUser.role || 'customer'} onChange={e=>setEditingUser({...editingUser, role:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs">
+                        <option value="customer">Customer</option>
+                        <option value="admin">Administrator</option>
+                        <option value="moderator">Moderator</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button onClick={async () => {
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/admin/users/${editingUser.id || editingUser.phoneNumber}`, {
+                        method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify(editingUser)
+                      });
+                      if (res.ok) {
+                        showToast('User account details updated successfully', 'success');
+                        setEditingUser(null);
+                        fetchAdminUsers();
+                      } else {
+                        showToast('Failed to update user account', 'error');
+                      }
+                    } catch (err) {
+                      showToast('Network error updating user', 'error');
+                    }
+                  }} className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs hover:bg-emerald-500 mr-3">Save User Changes</button>
+                </div>
+              )}
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs whitespace-nowrap">
+                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="px-6 py-4">User ID / Phone</th>
+                        <th className="px-6 py-4">Full Name</th>
+                        <th className="px-6 py-4">Role Clearance</th>
+                        <th className="px-6 py-4">Account Status</th>
+                        <th className="px-6 py-4 text-center">Controls & Suspension</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/60">
+                      {adminUsers.map(u => (
+                        <tr key={u.id || u.phoneNumber} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                          <td className="px-6 py-4 font-mono text-gray-400">{u.phoneNumber}</td>
+                          <td className="px-6 py-4 font-bold text-white">{u.fullName || 'N/A'}</td>
+                          <td className="px-6 py-4">
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${
+                              u.role === 'admin' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                            }`}>
+                              {u.role || 'customer'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${
+                              u.isSuspended ? 'bg-rose-950 text-rose-400' : 'bg-emerald-950 text-emerald-400'
+                            }`}>
+                              {u.isSuspended ? 'Suspended' : 'Active'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-center space-x-2">
+                            <button onClick={() => setEditingUser(u)} className="text-gray-400 hover:text-emerald-400 p-2 bg-[#1f1f1f] rounded-xl transition-colors" title="Edit User"><Edit size={14}/></button>
+                            <button onClick={async () => {
+                              const nextSuspendedState = !u.isSuspended;
+                              try {
+                                const res = await fetch(`${API_BASE_URL}/admin/users/${u.id || u.phoneNumber}/suspend`, {
+                                  method: 'PUT',
+                                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                  body: JSON.stringify({ isSuspended: nextSuspendedState })
+                                });
+                                if (res.ok) {
+                                  showToast(`User account ${nextSuspendedState ? 'suspended' : 'reactivated'}`, 'success');
+                                  fetchAdminUsers();
+                                } else {
+                                  showToast('Failed to change user suspension status', 'error');
+                                }
+                              } catch (err) {
+                                showToast('Network error', 'error');
+                              }
+                            }} className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all ${
+                              u.isSuspended ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-rose-600 hover:bg-rose-500 text-white'
+                            }`}>
+                              {u.isSuspended ? 'Reactivate' : 'Suspend User'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
@@ -1833,52 +1952,182 @@ export default function PremiumRiceStore() {
 
           {adminTab === 'carousel' && (
             <div className="animate-fadeIn space-y-6">
-              <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Extended Hero Config</h2>
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
-                <label className="block text-xs font-bold text-gray-400 uppercase">Announcement Ticker Text</label>
-                <input 
-                  type="text" 
-                  value={heroSettings?.announcementTicker || ''} 
-                  onChange={(e) => setHeroSettings({...heroSettings, announcementTicker: e.target.value})}
-                  className="w-full bg-[#181818] border border-gray-700 text-white px-4 py-3 rounded-xl text-xs font-bold" 
-                />
-                <button 
-                  onClick={async () => {
-                    try {
-                      const res = await fetch(`${API_BASE_URL}/admin/hero`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify(heroSettings)
-                      });
-                      if (res.ok) showToast('Hero settings saved globally!');
-                    } catch (e) { showToast('Error updating hero', 'error'); }
-                  }}
-                  className="bg-emerald-600 hover:bg-emerald-500 font-bold px-6 py-3 rounded-xl text-xs text-white"
-                >
-                  Save Hero Configuration
-                </button>
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><Sliders className="mr-3 text-emerald-500"/> Expanded Hero & Carousel Configuration</h2>
+                <p className="text-gray-400 text-xs mt-1">Configure all 10 system parameters, hero banner texts, background video URLs, and badge settings.</p>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Hero Configuration (10 Cool Settings)</h3>
+                
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    const res = await fetch(`${API_BASE_URL}/admin/config/hero`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                      body: JSON.stringify(heroSettings)
+                    });
+                    if (res.ok) {
+                      showToast('All 10 Hero configurations updated successfully!', 'success');
+                    } else {
+                      showToast('Failed to update hero configurations', 'error');
+                    }
+                  } catch (err) {
+                    showToast('Network error updating hero config', 'error');
+                  }
+                }} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">1. Hero Title</label>
+                    <input type="text" value={heroSettings.title || ''} onChange={e=>setHeroSettings({...heroSettings, title:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">2. Hero Subtitle</label>
+                    <input type="text" value={heroSettings.subtitle || ''} onChange={e=>setHeroSettings({...heroSettings, subtitle:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">3. Background Video URL (YouTube Embed)</label>
+                    <input type="text" value={heroSettings.video1 || ''} onChange={e=>setHeroSettings({...heroSettings, video1:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">4. Fallback Image URL</label>
+                    <input type="text" value={heroSettings.img1 || ''} onChange={e=>setHeroSettings({...heroSettings, img1:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">5. CTA Button Text</label>
+                    <input type="text" value={heroSettings.ctaButtonText || ''} onChange={e=>setHeroSettings({...heroSettings, ctaButtonText:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">6. Badge Text Label</label>
+                    <input type="text" value={heroSettings.badgeText || ''} onChange={e=>setHeroSettings({...heroSettings, badgeText:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">7. Announcement Ticker Text</label>
+                    <input type="text" value={heroSettings.announcementTicker || ''} onChange={e=>setHeroSettings({...heroSettings, announcementTicker:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">8. Customer Trust Badge Text</label>
+                    <input type="text" value={heroSettings.customerTrustBadgeText || ''} onChange={e=>setHeroSettings({...heroSettings, customerTrustBadgeText:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">9. Support Hotline Display</label>
+                    <input type="text" value={heroSettings.supportHotlineDisplay || ''} onChange={e=>setHeroSettings({...heroSettings, supportHotlineDisplay:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">10. Express Logistics Note</label>
+                    <input type="text" value={heroSettings.expressLogisticsNote || ''} onChange={e=>setHeroSettings({...heroSettings, expressLogisticsNote:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+
+                  <div className="md:col-span-2 pt-4">
+                    <button type="submit" className="bg-emerald-600 text-white px-8 py-3.5 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all">Save All 10 Hero Configurations</button>
+                  </div>
+                </form>
               </div>
             </div>
           )}
 
           {adminTab === 'config' && (
             <div className="animate-fadeIn space-y-6">
-              <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> County Transport Engine</h2>
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                <p className="text-xs text-gray-400">Configure logistics fees per county.</p>
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> County Logistics & Base Engine Settings</h2>
+                <p className="text-gray-400 text-xs mt-1">Configure county transport fees and regional delivery rules across all 47 counties.</p>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Configure County Transport Fees</h3>
+                
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const updated = { ...countyOverrides, [countyOverrideForm.county]: Number(countyOverrideForm.fee) };
+                  try {
+                    const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                      body: JSON.stringify(updated)
+                    });
+                    if (res.ok) {
+                      showToast(`Transport fee for ${countyOverrideForm.county} updated!`, 'success');
+                      setCountyOverrides(updated);
+                      setCountyOverrideForm({ county: 'Nairobi', fee: '' });
+                    } else {
+                      showToast('Failed to update county fee', 'error');
+                    }
+                  } catch (err) {
+                    showToast('Network error', 'error');
+                  }
+                }} className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <select 
+                    value={countyOverrideForm.county} 
+                    onChange={e => setCountyOverrideForm({...countyOverrideForm, county: e.target.value})} 
+                    className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none"
+                  >
+                    {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <input 
+                    required 
+                    type="number" 
+                    placeholder="Transport Fee (KES)" 
+                    value={countyOverrideForm.fee} 
+                    onChange={e => setCountyOverrideForm({...countyOverrideForm, fee: e.target.value})} 
+                    className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none font-mono"
+                  />
+                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all">Set County Fee</button>
+                </form>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-h-60 overflow-y-auto pr-2">
+                  {ALL_47_COUNTIES.map(c => (
+                    <div key={c} className="bg-[#1a1a1a] p-3 rounded-xl border border-gray-800 flex justify-between items-center text-xs">
+                      <span className="text-gray-300 font-bold truncate">{c}</span>
+                      <span className="font-mono text-emerald-400 font-black">KES {countyOverrides[c] !== undefined ? countyOverrides[c] : baseTransportFee}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}
 
           {adminTab === 'logs' && (
             <div className="animate-fadeIn space-y-6">
-              <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> Database Audit Logs</h2>
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 font-mono text-xs text-gray-300">
-                {adminLogs.map((log, i) => (
-                  <div key={i} className="py-2 border-b border-gray-800/50">
-                    [{new Date(log.createdAt || Date.now()).toLocaleTimeString()}] {log.action || JSON.stringify(log)}
-                  </div>
-                ))}
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> System Audit & Database Logs</h2>
+                <p className="text-gray-400 text-xs mt-1">Review live backend activities, authentication attempts, and order dispatches.</p>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
+                <div className="p-6 border-b border-gray-800 flex justify-between items-center">
+                  <h3 className="font-bold text-sm text-white">Recent System Audit Entries</h3>
+                  <button onClick={fetchAdminLogs} className="flex items-center text-xs text-emerald-400 hover:text-emerald-300 font-bold bg-[#1f1f1f] px-3 py-1.5 rounded-xl">
+                    <RefreshCw size={14} className="mr-1.5"/> Refresh Logs
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs whitespace-nowrap font-mono">
+                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="px-6 py-4">Timestamp</th>
+                        <th className="px-6 py-4">Action / Event</th>
+                        <th className="px-6 py-4">Actor / User</th>
+                        <th className="px-6 py-4">Details</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/60">
+                      {adminLogs.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="text-center py-8 text-gray-500 font-sans">No audit log entries recorded yet.</td>
+                        </tr>
+                      ) : (
+                        adminLogs.map((log, idx) => (
+                          <tr key={idx} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                            <td className="px-6 py-4 text-gray-400">{new Date(log.timestamp || log.createdAt).toLocaleString()}</td>
+                            <td className="px-6 py-4 font-bold text-emerald-400">{log.action || log.event}</td>
+                            <td className="px-6 py-4 text-gray-300">{log.user || log.actor || 'System'}</td>
+                            <td className="px-6 py-4 text-gray-400">{log.details || JSON.stringify(log.meta || {})}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
@@ -1888,15 +2137,17 @@ export default function PremiumRiceStore() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
-      {renderNav()}
-      
+    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans flex flex-col selection:bg-emerald-500 selection:text-white">
       {toast && (
-        <div className={`fixed bottom-5 right-5 z-50 px-6 py-3 rounded-2xl shadow-2xl font-bold text-sm flex items-center gap-2 animate-bounce ${toast.type === 'error' ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'}`}>
-          {toast.type === 'error' ? <AlertCircle className="h-5 w-5"/> : <CheckCircle className="h-5 w-5"/>}
-          {toast.message}
+        <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl font-bold text-sm text-white flex items-center gap-3 animate-bounce ${
+          toast.type === 'error' ? 'bg-rose-600' : 'bg-emerald-600'
+        }`}>
+          {toast.type === 'error' ? <AlertCircle size={20}/> : <CheckCircle size={20}/>}
+          <span>{toast.message}</span>
         </div>
       )}
+
+      {renderNav()}
 
       <main className="flex-1">
         {view === 'home' && renderHome()}
@@ -1907,15 +2158,47 @@ export default function PremiumRiceStore() {
         {view === 'admin' && renderAdmin()}
       </main>
 
-      <footer className="bg-emerald-950 text-emerald-200 border-t border-emerald-900 py-12 px-4 mt-auto">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6 text-center md:text-left">
+      <footer className="bg-emerald-950 text-emerald-300 border-t border-emerald-900 py-12 px-4 mt-auto">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
           <div>
-            <span className="font-black text-xl text-white block">MWEA HUB LOGISTICS</span>
-            <span className="text-xs text-emerald-400 font-medium">Direct Mwea Pishori & Grain Milling Supply Chain</span>
+            <div className="flex items-center mb-4">
+              <Leaf className="h-7 w-7 text-emerald-400 mr-2" />
+              <span className="font-black text-xl text-white tracking-tight">MWEA HUB</span>
+            </div>
+            <p className="text-xs text-emerald-400/80 leading-relaxed font-medium">
+              Direct agricultural logistics platform supplying authentic Mwea Pishori and Basmati rice across all 47 counties in Kenya.
+            </p>
           </div>
-          <div className="text-xs text-emerald-400 font-medium">
-            © {new Date().getFullYear()} Mwea Direct Rice Logistics. All 47 Counties Supported.
+          <div>
+            <h4 className="font-bold text-white text-sm uppercase tracking-wider mb-4">Quick Links</h4>
+            <ul className="space-y-2 text-xs font-medium">
+              <li><button onClick={() => setView('home')} className="hover:text-white transition-colors">Home Storefront</button></li>
+              <li><button onClick={() => setView('shop')} className="hover:text-white transition-colors">Grain Catalog</button></li>
+              <li><button onClick={() => setView('cart')} className="hover:text-white transition-colors">Shopping Bag</button></li>
+              <li><button onClick={() => setView('profile')} className="hover:text-white transition-colors">Order Tracking</button></li>
+            </ul>
           </div>
+          <div>
+            <h4 className="font-bold text-white text-sm uppercase tracking-wider mb-4">Logistics & Support</h4>
+            <ul className="space-y-2 text-xs font-medium text-emerald-400/80">
+              <li>Mwea Milling Station, Kirinyaga</li>
+              <li>Nairobi Regional Hub, Industrial Area</li>
+              <li>Support Hotline: +254 700 000000</li>
+              <li>Email: orders@mweahub.co.ke</li>
+            </ul>
+          </div>
+          <div>
+            <h4 className="font-bold text-white text-sm uppercase tracking-wider mb-4">M-Pesa Integration</h4>
+            <p className="text-xs text-emerald-400/80 leading-relaxed font-medium mb-3">
+              Automated STK Push Express and Paybill 889900 integration for instant transaction clearance.
+            </p>
+            <div className="bg-emerald-900/50 p-3 rounded-xl border border-emerald-800 text-[11px] font-mono text-white">
+              STATUS: SECURE 256-BIT ENCRYPTION
+            </div>
+          </div>
+        </div>
+        <div className="max-w-7xl mx-auto pt-8 border-t border-emerald-900 text-center text-xs text-emerald-500 font-semibold">
+          &copy; {new Date().getFullYear()} Mwea Hub Direct Logistics. All rights reserved. Built for uncompromising quality.
         </div>
       </footer>
     </div>
