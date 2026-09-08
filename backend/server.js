@@ -1,2204 +1,1768 @@
-import dns from 'dns';
-dns.setDefaultResultOrder('ipv4first');
+"use client";
 
-import express from 'express';
-import { createServer } from 'http';
-import { Server as SocketIOServer } from 'socket.io';
-import { Sequelize, DataTypes, Op } from 'sequelize';
-import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import multer from 'multer';
-import fs from 'fs';
-import path, { dirname } from 'path';
-import { fileURLToPath } from 'url';
-import axios from 'axios';
-import { Resend } from 'resend';
-
-dotenv.config();
-
-// ==========================================
-// 0. SYSTEM INITIALIZATION & PATHS
-// ==========================================
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const dev = process.env.NODE_ENV !== 'production';
-const hostname = process.env.HOSTNAME || 'localhost';
-const port = parseInt(process.env.PORT || '5000', 10);
-const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
-
-// Resend Email Client Initialization
-const resend = new Resend(process.env.RESEND_API_KEY || 're_dR7G9AZb_MQdHKVHqAj44JSQF6gxZmEab');
-
-// Pay Hero Credentials Configuration
-const getPayHeroAuthHeader = () => {
-  if (process.env.PAYHERO_BASIC_AUTH) {
-    const cleanAuth = process.env.PAYHERO_BASIC_AUTH.replace(/[\r\n]+/g, '').trim();
-    return cleanAuth.startsWith('Basic ') ? cleanAuth : `Basic ${cleanAuth.replace(/^Basic/i, '').trim()}`;
-  }
-  if (process.env.PAYHERO_API_KEY && process.env.PAYHERO_API_SECRET) {
-    const creds = `${process.env.PAYHERO_API_KEY.trim()}:${process.env.PAYHERO_API_SECRET.trim()}`;
-    return `Basic ${Buffer.from(creds).toString('base64')}`;
-  }
-  const fallbackRaw = 'Basic cnBqZHU3YWJyWG03SWdqcDBI\\nBF:NHFvR\\nV32XR99cDq\\nGf3igKB3R0A5vRtgTMJ7Jpfm'
-    .replace(/\\[rn]/g, '')
-    .replace(/[\r\n]+/g, '')
-    .trim();
-  return fallbackRaw.startsWith('Basic ') ? fallbackRaw : `Basic ${fallbackRaw.replace(/^Basic/i, '').trim()}`;
-};
-
-const PAYHERO_CHANNEL_ID = Number(process.env.PAYHERO_CHANNEL_ID || 11668);
-
-console.log('🚀 Initializing Premium Rice & Grain E-Commerce Backend...');
-console.log('DEBUG: Booting unified agricultural & hardware architecture with Pay Hero Integration...');
-
-// ==========================================
-// 1. UPLOAD DIRECTORY CONFIGURATION (MULTER)
-// ==========================================
-const uploadDir = path.join(__dirname, 'public', 'uploads');
-const imagesDir = path.join(__dirname, 'public', 'images');
-
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-  console.log('DEBUG: Created missing upload directory at', uploadDir);
-}
-
-if (!fs.existsSync(imagesDir)) {
-  fs.mkdirSync(imagesDir, { recursive: true });
-  console.log('DEBUG: Created missing images directory at', imagesDir);
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname.replace(/\s+/g, '-'))
-});
-const upload = multer({ storage });
-
-// ==========================================
-// 2. DATABASE SCHEMAS & MODELS
-// ==========================================
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  User, 
-  RiceProduct, 
-  Order, 
-  Review, 
-  AdminLog, 
-  SystemConfig, 
-  sequelize 
-} from './lib/db.js';
+  ShoppingCart, User as UserIcon, LogIn, Menu, X, Plus, 
+  Trash2, Shield, Clock, Search, Edit, Package, Activity, 
+  CheckCircle, AlertCircle, Settings, Leaf, ChevronRight,
+  ShoppingBag, Users, Image as ImageIcon, Video, Download,
+  MapPin, Eye, RefreshCw, LogOut, Check, AlertTriangle, Smartphone, CreditCard,
+  BarChart2, DollarSign, Award, Calendar, Lock, Unlock, TrendingUp, Filter, FileText, Percent, Layers, Globe, Sliders, Bell
+} from 'lucide-react';
+import { io, Socket } from 'socket.io-client';
 
-// User Cart Database Model Definition
-const Cart = sequelize.models.Cart || sequelize.define('Cart', {
-  id: {
-    type: DataTypes.INTEGER,
-    primaryKey: true,
-    autoIncrement: true
+// ==========================================
+// 1. SYSTEM CONFIGURATION & CONSTANTS
+// ==========================================
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL 
+  ? `${process.env.NEXT_PUBLIC_API_URL}/api` 
+  : 'https://premium-rice-store-7.onrender.com/api';
+
+const SOCKET_URL = process.env.NEXT_PUBLIC_API_URL 
+  || 'https://premium-rice-store-7.onrender.com';
+
+const ALL_47_COUNTIES = [
+  "Mombasa", "Kwale", "Kilifi", "Tana River", "Lamu", "Taita-Taveta", "Garissa", "Wajir", "Mandera", "Marsabit", 
+  "Isiolo", "Meru", "Tharaka-Nithi", "Embu", "Kitui", "Machakos", "Makueni", "Nyandarua", "Nyeri", "Kirinyaga", 
+  "Murang'a", "Kiambu", "Turkana", "West Pokot", "Samburu", "Trans-Nzoia", "Uasin Gishu", "Elgeyo-Marakwet", "Nandi", "Baringo", 
+  "Laikipia", "Nakuru", "Narok", "Kajiado", "Kericho", "Bomet", "Kakamega", "Vihiga", "Bungoma", "Busia", 
+  "Siaya", "Kisumu", "Homa Bay", "Migori", "Kisii", "Nyamira", "Nairobi"
+];
+
+const REGIONAL_LOGISTICS_DATA: { [key: string]: { towns: string[], locations: string[], sublocations: string[], streets: string[] } } = {
+  "Nairobi": {
+    towns: ["Westlands", "Kasarani", "Lang'ata", "Starehe", "Dagoretti", "Embakasi", "Makadara", "Kamukunji", "Roysambu", "Mathare"],
+    locations: ["Kilimani", "Kasarani Central", "Karen", "CBD", "Upper Hill", "Industrial Area", "Eastleigh", "Buruburu", "South C", "Runda"],
+    sublocations: ["Mwiki", "Roysambu Sub", "Lavington", "Hurlingham", "South B", "Imara Daima", "Kileleshwa", "Parklands", "Donholm", "Pipeline"],
+    streets: ["Moi Avenue", "Kenyatta Avenue", "Waiyaki Way", "Thika Road Landmark", "Ngong Road", "Enterprise Road", "Argwings Kodhek", "Jogoo Road", "Mombasa Road"]
   },
-  userId: {
-    type: DataTypes.INTEGER,
-    allowNull: false
+  "Kirinyaga": {
+    towns: ["Mwea East", "Mwea West", "Kerugoya", "Sagana", "Wanguru", "Gichugu", "Ndia"],
+    locations: ["Tebere", "Nyumpa", "Thiba", "Murinduko", "Mutithi", "Kagio", "Kutus"],
+    sublocations: ["Kimbimbi", "Nice Digital City", "Ngurubani", "Makutano", "Kagio Center", "Difatha", "Wamumu"],
+    streets: ["Wanguru Main Street", "Rice Mills Road", "Sagana Highway", "Kimbimbi Stage", "Hospital Road", "Kutus Main Highway", "Embu-Nairobi Road"]
   },
-  productId: {
-    type: DataTypes.INTEGER,
-    allowNull: false
+  "Kiambu": {
+    towns: ["Thika", "Ruiru", "Githunguri", "Kikuyu", "Limuru", "Kiambu Town", "Juja", "Kabete"],
+    locations: ["Juja Central", "Kahawa Wendani", "Kahawa Sukari", "Ndumberi", "Banana", "Ruaka", "Kiambaa"],
+    sublocations: ["Witeithie", "Membley", "Zimmerman Border", "Muchatha", "Tigoni", "Gachie", "Anmer"],
+    streets: ["Superhighway Frontage", "Biashara Street", "Garissa Road", "Northern Bypass", "Kamiti Road", "Limuru Road", "Thika Main Street"]
   },
-  quantity: {
-    type: DataTypes.INTEGER,
-    defaultValue: 1,
-    allowNull: false
+  "Mombasa": {
+    towns: ["Nyali", "Mvita", "Kisauni", "Likoni", "Changamwe", "Jomvu"],
+    locations: ["Bamburi", "Tudor", "Ganjoni", "Port Reitz", "Kongowea", "Shanzu", "Buxton"],
+    sublocations: ["Mkomani", "Tononoka", "Mikindani", "Bamburi Mtambo", "Nyali Beach", "Magaoni", "Chaani"],
+    streets: ["Moi Avenue Mombasa", "Nkrumah Road", "Links Road", "Malindi Road", "Mama Ngina Drive", "Digo Road", "Nyerere Avenue"]
+  },
+  "Nakuru": {
+    towns: ["Nakuru East", "Nakuru West", "Naivasha", "Gilgil", "Molo", "Njoro", "Subukia"],
+    locations: ["Lanet", "Milimani", "Section 58", "Kiamunyi", "Mai Mahiu", "Kenyatta West"],
+    sublocations: ["Free Area", "Shabab", "White House", "Barnabas", "Pipeline Nakuru", "Karatunga"],
+    streets: ["Kenyatta Avenue Nakuru", "Oginga Odinga Road", "Government Road", "Kanu Street", "Nairobi-Nakuru Highway"]
+  },
+  "Kisumu": {
+    towns: ["Kisumu Central", "Kisumu East", "Kisumu West", "Nyando", "Muhoroni", "Seme"],
+    locations: ["Milimani Kisumu", "Mamboleo", "Kenyatta", "Nyamasaria", "Otonglo", "Kondele"],
+    sublocations: ["Manyatta", "Nyawita", "Migosi", "Polyview", "Tom Mboya", "Riat"],
+    streets: ["Oginga Odinga Street", "Jomo Kenyatta Highway", "Accra Street", "Nyerere Road", "Kakamega Road"]
   }
-});
-
-// Setup Model Associations
-if (Cart && RiceProduct && !Cart.associations.RiceProduct) {
-  Cart.belongsTo(RiceProduct, { foreignKey: 'productId', as: 'product' });
-}
-if (Cart && User && !Cart.associations.User) {
-  Cart.belongsTo(User, { foreignKey: 'userId', as: 'user' });
-}
-
-// ==========================================
-// 3. LIVE FLASH HARVEST SALE ENGINE UTILS
-// ==========================================
-let flashSaleState = {
-  active: false,
-  endTime: null,
-  countdownIntervalId: null
 };
 
-function initializeFlashSaleEngine(io) {
-  SystemConfig.findOne({ where: { key: 'black_friday' } }).then((config) => {
-    if (config && config.value && config.value.active) {
-      const remainingTime = new Date(config.value.endTime).getTime() - Date.now();
-      if (remainingTime > 0) {
-        flashSaleState.active = true;
-        flashSaleState.endTime = config.value.endTime;
-        startFlashSaleCountdown(io);
-        console.log(`🔥 Flash Harvest Sale Engine Restored! Active until: ${flashSaleState.endTime}`);
-      } else {
-        config.value = { ...config.value, active: false };
-        config.changed('value', true);
-        config.save();
-      }
-    }
-  }).catch(err => console.error('❌ Failed to boot Flash Sale Engine state:', err));
-}
+const DEFAULT_REGIONAL_LOGISTICS = {
+  towns: ["Central District / Town", "North District", "South District", "East District", "West District", "Municipal Center"],
+  locations: ["Central Location", "Market Center", "Highway Junction", "Administrative Center", "Commercial Zone"],
+  sublocations: ["Town Center Sub-location", "North Ward", "South Ward", "East Ward", "West Ward"],
+  streets: ["Main Street / Highway", "Market Road", "Hospital Road", "School Lane", "Opposite Chief's Camp", "Supermarket Landmark"]
+};
 
-function startFlashSaleCountdown(io) {
-  if (flashSaleState.countdownIntervalId) clearInterval(flashSaleState.countdownIntervalId);
-  
-  flashSaleState.countdownIntervalId = setInterval(() => {
-    const totalRemaining = new Date(flashSaleState.endTime).getTime() - Date.now();
-    if (totalRemaining <= 0) {
-      clearInterval(flashSaleState.countdownIntervalId);
-      flashSaleState.active = false;
-      flashSaleState.endTime = null;
-      io.emit('blackFridayEnded', { active: false });
-      
-      SystemConfig.findOne({ where: { key: 'black_friday' } }).then(config => {
-        if (config) {
-          config.value = { ...config.value, active: false };
-          config.changed('value', true);
-          config.save();
-        }
-      });
-      console.log('🏁 Flash Harvest Sale structural window has closed.');
-    } else {
-      io.emit('blackFridayTick', {
-        active: true,
-        endTime: flashSaleState.endTime,
-        msRemaining: totalRemaining
-      });
-    }
-  }, 1000);
-}
+// Helper utility to safely format shipping address objects to strings to prevent React Error #31
+const formatShippingAddress = (addr: any) => {
+  if (!addr) return 'Standard Delivery';
+  if (typeof addr === 'string') return addr;
+  if (typeof addr === 'object') {
+    return addr.streetAddress || addr.details || addr.location || [addr.town, addr.county].filter(Boolean).join(', ') || JSON.stringify(addr);
+  }
+  return String(addr);
+};
 
 // ==========================================
-// 4. MIDDLEWARES
+// 2. MAIN APPLICATION COMPONENT
 // ==========================================
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'] || req.headers['Authorization'];
-  let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : authHeader;
-  if (!token && req.query && req.query.token) {
-    token = req.query.token;
-  }
+export default function PremiumRiceStore() {
+  const [view, setView] = useState<'home' | 'shop' | 'cart' | 'login' | 'admin' | 'profile'>('home');
+  const [user, setUser] = useState<any>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
+
+  const [products, setProducts] = useState<any[]>([]);
+  const [carousel, setCarousel] = useState<any[]>([]);
   
-  if (token) {
-    token = token.trim().replace(/^["']|["']$/g, '');
-  }
-
-  if (!token || token === 'null' || token === 'undefined' || token === '') {
-    console.log('DEBUG: Auth failed - Missing token');
-    return res.status(401).json({ error: 'Access token missing' });
-  }
-
-  jwt.verify(token, JWT_SECRET, (err, decodedUser) => {
-    if (err) {
-      console.log(`DEBUG: Auth failed - Invalid token (${err.message})`);
-      return res.status(403).json({ error: 'Token invalid or expired' });
-    }
-    req.user = decodedUser;
-    next();
+  // Expanded Hero Configuration with 10 distinct professional settings
+  const [heroSettings, setHeroSettings] = useState<any>({
+    title: 'Direct From Mwea Paddy Fields',
+    subtitle: '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.',
+    video1: 'https://www.youtube.com/embed/gjZAThNHGwI?start=6&autoplay=1&mute=1&loop=1&playlist=gjZAThNHGwI',
+    video2: '',
+    img1: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=1600&q=80',
+    img2: '',
+    img3: '',
+    ctaButtonText: 'Explore Grain Catalog',
+    badgeText: '🌱 Pure Kenya Agricultural Harvest',
+    overlayOpacity: '40',
+    secondaryButtonText: 'Track Order Status',
+    announcementTicker: '🔥 Special 25kg Wholesale Discount Active Across All 47 Counties!',
+    themeAccentColor: 'emerald',
+    heroLayoutMode: 'split-banner',
+    enableLiveTicker: true,
+    promoBadgeColor: 'rose',
+    bannerHeight: '70vh',
+    featuredTagLabel: 'Certified Organic',
+    customerTrustBadgeText: 'Verified Mwea Milling Standards',
+    supportHotlineDisplay: '+254 700 000000',
+    expressLogisticsNote: 'Same-day dispatch available for Nairobi & Kiambu regions'
   });
-};
+  
+  const [activeHeroIndex, setActiveHeroIndex] = useState(0);
+  const [cart, setCart] = useState<any[]>([]);
+  const [myOrders, setMyOrders] = useState<any[]>([]);
+  
+  const [flashSale, setFlashSale] = useState({ active: false, endTime: null as string | null, msRemaining: 0 });
+  const [baseTransportFee, setBaseTransportFee] = useState(250);
+  const [countyOverrides, setCountyOverrides] = useState<{ [key: string]: number }>({});
+  const [socket, setSocket] = useState<Socket | null>(null);
 
-const requireAdmin = async (req, res, next) => {
-  try {
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ error: 'Authentication details missing' });
-    }
-    const userInstance = await User.findByPk(req.user.id);
-    if (!userInstance || userInstance.role !== 'admin') {
-      console.log(`DEBUG: Admin clearance rejected for user ID: ${req.user.id}`);
-      return res.status(403).json({ error: 'Access denied. Administrator privileges required.' });
-    }
-    if (!userInstance.isActive) return res.status(403).json({ error: 'Admin account disabled' });
-    req.adminUser = userInstance;
-    next();
-  } catch (error) {
-    console.error('DEBUG: Role evaluation crash:', error);
-    res.status(500).json({ error: 'Internal role evaluation crash' });
-  }
-};
+  const [checkoutData, setCheckoutData] = useState({
+    county: 'Nairobi',
+    town: 'Westlands',
+    location: 'CBD',
+    sublocation: 'Mwiki',
+    shippingAddress: 'Moi Avenue',
+    paymentMethod: 'stk',
+    stkPhoneNumber: ''
+  });
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
+  
+  const [isLogin, setIsLogin] = useState(true);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [resetStep, setResetStep] = useState<'request' | 'reset'>('request');
+  const [formData, setFormData] = useState({ phoneNumber: '', email: '', password: '', fullName: '', resetToken: '', newPassword: '' });
+  
+  const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'users' | 'carousel' | 'config' | 'logs' | 'finances'>('inventory');
+  const [newProduct, setNewProduct] = useState({ brandName: '', variety: '', weightKg: '', basePrice: '', costPrice: '', stockQuantity: '', imageUrl: '' });
+  const [editingProduct, setEditingProduct] = useState<any | null>(null);
+  const [adminOrders, setAdminOrders] = useState<any[]>([]);
+  const [adminUsers, setAdminUsers] = useState<any[]>([]);
+  const [adminLogs, setAdminLogs] = useState<any[]>([]);
+  const [orderSearchQuery, setOrderSearchQuery] = useState('');
+  const [shopSearch, setShopSearch] = useState('');
+  const [newSlide, setNewSlide] = useState({ title: '', subtitle: '', url: '' });
+  const [countyOverrideForm, setCountyOverrideForm] = useState({ county: 'Nairobi', fee: '' });
+  
+  const [financeYear, setFinanceYear] = useState<number>(new Date().getFullYear());
+  const [monthlyBuyingPrices, setMonthlyBuyingPrices] = useState<{ [key: string]: number }>({});
+  const [editingUser, setEditingUser] = useState<any | null>(null);
 
-// ==========================================
-// 5. SERVER INITIALIZATION & DATABASE BOOTSTRAP
-// ==========================================
-async function startServer() {
-  try {
-    await sequelize.authenticate();
-    
-    // Auto migration checks for dynamic reward points & product buying prices
+  const getAccountCartKey = (u: any) => {
+    return u ? `mwea_hub_cart_${u.id || u.phoneNumber}` : 'mwea_hub_cart_guest';
+  };
+
+  useEffect(() => {
     try {
-      const queryInterface = sequelize.getQueryInterface();
-      const userTable = await queryInterface.describeTable('Users');
-      if (!userTable.rewardPoints) {
-        await queryInterface.addColumn('Users', 'rewardPoints', {
-          type: DataTypes.FLOAT,
-          defaultValue: 0,
-          allowNull: false
-        });
+      const storageKey = getAccountCartKey(user);
+      const savedCart = localStorage.getItem(storageKey);
+      if (savedCart) {
+        setCart(JSON.parse(savedCart));
+      } else {
+        setCart([]);
       }
-      const productTable = await queryInterface.describeTable('RiceProducts');
-      if (!productTable.buyingPrice) {
-        await queryInterface.addColumn('RiceProducts', 'buyingPrice', {
-          type: DataTypes.FLOAT,
-          defaultValue: 0,
-          allowNull: true
-        });
+    } catch (err) {
+      console.error("Failed to parse account cart from storage:", err);
+      setCart([]);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    try {
+      const storageKey = getAccountCartKey(user);
+      localStorage.setItem(storageKey, JSON.stringify(cart));
+    } catch (err) {
+      console.error("Failed to save account cart to storage:", err);
+    }
+  }, [cart, user]);
+
+  const clearCart = () => {
+    setCart([]);
+    showToast('Cart cleared successfully.', 'success');
+  };
+
+  useEffect(() => {
+    const mediaArray = [
+      { type: 'video', url: heroSettings?.video1 },
+      { type: 'video', url: heroSettings?.video2 },
+      { type: 'image', url: heroSettings?.img1 },
+      { type: 'image', url: heroSettings?.img2 },
+      { type: 'image', url: heroSettings?.img3 }
+    ].filter(item => item.url && item.url.trim() !== '');
+
+    const currentMedia = mediaArray.length > 0 ? mediaArray[activeHeroIndex % mediaArray.length] : null;
+    const delay = currentMedia?.type === 'video' ? 5000 : 3500;
+
+    const timeoutId = setTimeout(() => {
+      setActiveHeroIndex(prev => prev + 1);
+    }, delay);
+
+    return () => clearTimeout(timeoutId);
+  }, [activeHeroIndex, heroSettings]);
+
+  useEffect(() => {
+    const currentData = REGIONAL_LOGISTICS_DATA[checkoutData.county] || DEFAULT_REGIONAL_LOGISTICS;
+    setCheckoutData(prev => ({
+      ...prev,
+      town: currentData.towns[0],
+      location: currentData.locations[0],
+      sublocation: currentData.sublocations[0],
+      shippingAddress: currentData.streets[0]
+    }));
+  }, [checkoutData.county]);
+
+  useEffect(() => {
+    if (user && !checkoutData.stkPhoneNumber) {
+      setCheckoutData(prev => ({ ...prev, stkPhoneNumber: user.phoneNumber }));
+    }
+  }, [user]);
+
+  useEffect(() => {
+    try {
+      const savedToken = localStorage.getItem('token');
+      const savedUser = localStorage.getItem('user');
+      if (savedToken && savedUser) {
+        setToken(savedToken);
+        setUser(JSON.parse(savedUser));
       }
-    } catch (colErr) {
-      console.log('DEBUG: Table column sync verified.');
+    } catch (err) {
+      console.error("Error reading saved authentication state:", err);
     }
 
-    await sequelize.sync();
-    
-    const currentMode = process.env.DB_MODE === 'cloud' ? '☁️ AIVEN CLOUD' : '🏠 LOCAL';
-    console.log(`🍃 Database Connected Successfully! Mode: [ ${currentMode} ]`);
+    fetchProducts();
+    fetchCarousel();
+    fetchHero();
+    fetchCountiesConfig();
 
-    const expressApp = express();
-    expressApp.set('trust proxy', true);
+    let newSocket: Socket | null = null;
+    try {
+      newSocket = io(SOCKET_URL);
+      setSocket(newSocket);
 
-    const server = createServer(expressApp);
-
-    const corsOptions = {
-      origin: (origin, callback) => {
-        if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1') || origin.endsWith('.onrender.com')) {
-          callback(null, true);
-        } else {
-          callback(null, true);
-        }
-      },
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
-      credentials: true
-    };
-    
-    expressApp.use(cors(corsOptions));
-    expressApp.use(express.json({ limit: '50mb' }));
-    expressApp.use(express.urlencoded({ limit: '50mb', extended: true }));
-
-    expressApp.use(express.static(path.join(__dirname, 'public')));
-    expressApp.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
-    expressApp.use('/images', express.static(path.join(__dirname, 'public', 'images')));
-
-    await SystemConfig.findOrCreate({ where: { key: 'transport_fee' }, defaults: { value: 250 } });
-    await SystemConfig.findOrCreate({ where: { key: 'black_friday' }, defaults: { value: { active: false, endTime: null } } });
-    
-    await SystemConfig.findOrCreate({
-      where: { key: 'mpesa_config' },
-      defaults: {
-        value: {
-          paybillNumber: '522522',
-          paybillAccount: 'MWEARICE',
-          tillNumber: '889900',
-          stkEnabled: true
-        }
-      }
-    });
-
-    const all47Counties = {
-      "Mombasa": 500, "Kwale": 550, "Kilifi": 550, "Tana River": 600, "Lamu": 650, 
-      "Taita-Taveta": 550, "Garissa": 600, "Wajir": 700, "Mandera": 800, "Marsabit": 700, 
-      "Isiolo": 500, "Meru": 350, "Tharaka-Nithi": 350, "Embu": 300, "Kitui": 400, 
-      "Machakos": 300, "Makueni": 350, "Nyandarua": 300, "Nyeri": 300, "Kirinyaga": 200, 
-      "Murang'a": 250, "Kiambu": 250, "Turkana": 800, "West Pokot": 600, "Samburu": 600, 
-      "Trans-Nzoia": 500, "Uasin Gishu": 450, "Elgeyo-Marakwet": 500, "Nandi": 450, "Baringo": 500, 
-      "Laikipia": 400, "Nakuru": 350, "Narok": 450, "Kajiado": 300, "Kericho": 450, 
-      "Bomet": 450, "Kakamega": 500, "Vihiga": 500, "Bungoma": 500, "Busia": 550, 
-      "Siaya": 500, "Kisumu": 450, "Homa Bay": 500, "Migori": 550, "Kisii": 450, 
-      "Nyamira": 450, "Nairobi": 200
-    };
-    await SystemConfig.findOrCreate({ where: { key: 'county_overrides' }, defaults: { value: all47Counties } });
-
-    const kenyaLogisticsHierarchy = {
-      "Kirinyaga": {
-        "Mwea": {
-          "Wamumu": ["Wamumu Primary Area", "Paddy Field Block A", "Rice Mill Zone"],
-          "Mutithi": ["Mutithi Center", "Kandongu Market", "Kiura Junction"]
-        },
-        "Kerugoya": {
-          "Central": ["Hospital Road", "Town Plaza", "Stadium Area"],
-          "Kaguyu": ["Kaguyu Market", "Upper Hill"]
-        }
-      },
-      "Nairobi": {
-        "Nairobi Central": {
-          "CBD": ["Kenyatta Avenue", "Moi Avenue", "Haile Selassie Ave"],
-          "Ngara": ["Ngara Market", "Chambers Road"]
-        },
-        "Westlands": {
-          "Parklands": ["1st Parklands", "Limuru Road", "City Park"],
-          "Kitisuru": ["Getathuru", "Nyari Estate"]
-        },
-        "Kasarani": {
-          "Roysambu": ["TRM Drive", "Zimmerman", "Lumumba Drive"],
-          "Ruaraka": ["Baba Dogo", "Utalii Area"]
-        }
-      },
-      "Kiambu": {
-        "Thika": {
-          "Township": ["Commercial Street", "Section 9", "Gatuanyaga"],
-          "Juja": ["JKUAT Gate A", "Highpoint", "Kalimoni"]
-        },
-        "Kiambu Town": {
-          "Town Center": ["Indian Bazaar", "Kambui"],
-          "Ndumberi": ["Ndumberi Market", "Kirigiti"]
-        }
-      },
-      "Mombasa": {
-        "Nyali": {
-          "Mswambweni": ["Links Road", "Beach Way Drive"],
-          "Kongowea": ["Kongowea Market Area", "Karama Road"]
-        },
-        "Mvita": {
-          "CBD": ["Nkrumah Road", "Digo Road", "Treasury Square"]
-        }
-      },
-      "Nakuru": {
-        "Nakuru Town East": {
-          "Freehold": ["Freehold Market", "Kenyatta Lane"],
-          "Section 58": ["Hyrax Hill Area", "Phase 2"]
-        }
-      }
-    };
-    await SystemConfig.findOrCreate({ where: { key: 'logistics_hierarchy' }, defaults: { value: kenyaLogisticsHierarchy } });
-
-    // --- EXPANDED 10-FIELD HERO CONFIGURATION DEFAULT ---
-    await SystemConfig.findOrCreate({
-      where: { key: 'hero_settings' },
-      defaults: {
-        value: {
-          type: 'video',
-          url: 'https://www.youtube.com/embed/gjZAThNHGwI?start=6&autoplay=1&mute=1&loop=1&playlist=gjZAThNHGwI',
-          title: 'Direct From Mwea Paddy Fields',
-          subtitle: '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.',
-          badgeText: '🌾 100% Authentic Mwea Harvest',
-          buttonText: 'Shop Fresh Harvest Now',
-          buttonLink: '/catalog',
-          secondaryButtonText: 'View Flash Deals',
-          secondaryButtonLink: '#flash-sales',
-          overlayOpacity: 0.4,
-          alignment: 'center',
-          autoPlay: true,
-          videoDuration: 5,
-          imageDuration: 4
-        }
-      }
-    });
-
-    await SystemConfig.findOrCreate({
-      where: { key: 'homepage_carousel' },
-      defaults: {
-        value: [
-          { 
-            id: "1", 
-            type: 'video', 
-            url: 'https://www.youtube.com/embed/gjZAThNHGwI?start=6&autoplay=1&mute=1&loop=1&playlist=gjZAThNHGwI', 
-            title: 'Mwea Paddy Harvest Live', 
-            subtitle: 'Direct from rich Kenyan soil into your kitchen.',
-            duration: 5
-          },
-          { 
-            id: "2", 
-            type: 'image', 
-            url: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=1200&q=80', 
-            title: 'Pure Mwea Pishori Grade 1', 
-            subtitle: 'Unmatched aroma and long-grain perfection.',
-            duration: 4
-          },
-          { 
-            id: "3", 
-            type: 'image', 
-            url: 'https://images.unsplash.com/photo-1536304929831-ee1ca9d44906?auto=format&fit=crop&w=1200&q=80', 
-            title: 'Wholesale & Bulk Sack Delivery', 
-            subtitle: 'Available in 5kg, 10kg, 25kg, and 50kg sacks with discounted transport.',
-            duration: 3
-          },
-          { 
-            id: "4", 
-            type: 'image', 
-            url: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=1200&q=80', 
-            title: 'Premium Imported Basmati', 
-            subtitle: 'Aged to perfection for fluffy, non-sticky ceremonial cooking.',
-            duration: 4
-          }
-        ]
-      }
-    });
-
-    const existingFeaturedCount = await RiceProduct.count();
-    if (existingFeaturedCount === 0) {
-      await RiceProduct.bulkCreate([
-        {
-          brandName: 'Pure Mwea Pishori Grade 1',
-          variety: 'Aromatic Pishori',
-          weightKg: 5,
-          basePrice: 1250,
-          buyingPrice: 950,
-          flashSalePrice: 1100,
-          stockQuantity: 150,
-          imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=800&q=80',
-          isAvailable: true
-        },
-        {
-          brandName: 'Super Aromatic Basmati',
-          variety: 'Long Grain Basmati',
-          weightKg: 10,
-          basePrice: 2400,
-          buyingPrice: 1800,
-          flashSalePrice: 2150,
-          stockQuantity: 80,
-          imageUrl: 'https://images.unsplash.com/photo-1536304929831-ee1ca9d44906?auto=format&fit=crop&w=800&q=80',
-          isAvailable: true
-        },
-        {
-          brandName: 'Biryani Special Feast Grain',
-          variety: 'Kaisari Long Grain',
-          weightKg: 25,
-          basePrice: 5200,
-          buyingPrice: 4000,
-          flashSalePrice: 4800,
-          stockQuantity: 40,
-          imageUrl: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=800&q=80',
-          isAvailable: true
-        },
-        {
-          brandName: 'Whole Grain Brown Pishori',
-          variety: 'Brown Nutritious Rice',
-          weightKg: 5,
-          basePrice: 1400,
-          buyingPrice: 1050,
-          flashSalePrice: 1250,
-          stockQuantity: 60,
-          imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=800&q=80',
-          isAvailable: true
-        }
-      ]);
-      console.log('🌾 Seeded default 4 Featured Grain selection products into catalog.');
-    }
-
-    expressApp.post('/api/sync/google', async (req, res) => {
-      const { googleId, fullName, email } = req.body || {};
-      
-      if (!googleId) {
-        console.error("DEBUG: google-sync received an empty payload");
-        return res.status(400).json({ error: "Missing identity credentials" });
-      }
-
-      try {
-        let user = await User.findOne({ where: { googleId } });
-        if (!user) {
-          user = await User.create({ 
-            googleId, 
-            fullName: fullName || 'Google User', 
-            email, 
-            role: 'user',
-            isActive: true
-          });
-          console.log(`✨ Created fresh database profile for Google user: ${fullName}`);
-        } else {
-          console.log(`🔐 Verified existing database profile for Google user: ${fullName}`);
-        }
-        res.status(200).json({ message: "User synced", user });
-      } catch (error) {
-        console.error("Database Sync Error:", error);
-        res.status(500).json({ error: "DB Sync Failed" });
-      }
-    });
-
-    const io = new SocketIOServer(server, { 
-      cors: corsOptions
-    });
-
-    initializeFlashSaleEngine(io);
-
-    io.on('connection', (socket) => {
-      if (flashSaleState.active) socket.emit('blackFridayTick', { active: true, endTime: flashSaleState.endTime });
-      
-      socket.on('joinAdminChannel', (token) => {
-        jwt.verify(token, JWT_SECRET, async (err, decoded) => {
-          if (!err && decoded && decoded.role === 'admin') {
-            socket.join('admin-dashboard-room');
-            console.log(`DEBUG: Admin joined real-time channel. Node ID: ${decoded.id}`);
-          }
-        });
+      newSocket.on('blackFridayTick', (data: any) => {
+        setFlashSale({ active: data.active, endTime: data.endTime, msRemaining: data.msRemaining });
       });
-    });
+      
+      newSocket.on('blackFridayEnded', () => {
+        setFlashSale({ active: false, endTime: null, msRemaining: 0 });
+        fetchProducts();
+      });
 
-    // ==========================================
-    // 6. PUBLIC REST API CONTROLLERS & PAYMENTS
-    // ==========================================
+      newSocket.on('blackFridayStarted', (data: any) => {
+        setFlashSale({ active: data.active, endTime: data.endTime, msRemaining: 0 });
+        fetchProducts();
+      });
 
-    expressApp.post('/api/user/signup', async (req, res) => {
-      try {
-        const { phoneNumber, email, password, fullName } = req.body || {};
-        
-        if (!password || !fullName || (!phoneNumber && !email)) {
-          return res.status(400).json({ error: 'Full name, password, and at least a phone number or email are required' });
+      newSocket.on('stockUpdated', (data: any) => {
+        setProducts(prev => prev.map(p => p.id === data.productId ? { ...p, stockQuantity: data.newStockQuantity } : p));
+      });
+
+      newSocket.on('heroUpdated', (newHero: any) => {
+        setHeroSettings(newHero);
+      });
+
+      newSocket.on('carouselUpdated', (newSlides: any[]) => {
+        setCarousel(newSlides);
+      });
+
+      newSocket.on('orderStatusUpdated', (updatedOrder: any) => {
+        setMyOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+        setAdminOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+      });
+
+      // Listen for Payment Gateway Events (Pay Hero Callbacks)
+      newSocket.on('paymentFailed', (data: any) => {
+        showToast(`⚠️ Payment Failed: ${data.ResultDesc || 'Request Cancelled by user'}`, 'error');
+        fetchMyOrders();
+        if (user?.role === 'admin') fetchAdminLogs();
+      });
+
+      newSocket.on('paymentSuccess', (data: any) => {
+        showToast(`✅ Payment Successful for Order #${data.ExternalReference || data.orderId || ''}`, 'success');
+        fetchMyOrders();
+        if (user?.role === 'admin') fetchAdminLogs();
+      });
+
+      newSocket.on('payHeroCallback', (log: any) => {
+        if (user?.role === 'admin') {
+           setAdminLogs((prev) => [log, ...prev]);
+           if (log.Status === 'Failed' || log.status === 'failed') {
+             showToast(`Callback Alert: Payment Failed (${log.ResultDesc || log.message})`, 'error');
+           }
         }
-        
-        const searchCondition = [];
-        if (phoneNumber) searchCondition.push({ phoneNumber });
-        if (email) searchCondition.push({ email });
+      });
+    } catch (err) {
+      console.error("Real-time socket initialization failed:", err);
+    }
 
-        const existingUser = await User.findOne({ where: { [Op.or]: searchCondition } });
-        if (existingUser) {
-          return res.status(409).json({ error: 'User registration payload matches an active account' });
-        }
+    return () => { if (newSocket) newSocket.disconnect(); };
+  }, [user]);
 
-        const hashedPassword = await bcrypt.hash(password, 12);
-        const newUser = await User.create({ phoneNumber, email, password: hashedPassword, fullName });
-        
-        const token = jwt.sign({ id: newUser.id, role: newUser.role }, JWT_SECRET, { expiresIn: '7d' });
-        res.status(201).json({ token, user: { id: newUser.id, fullName: newUser.fullName, role: newUser.role, rewardPoints: newUser.rewardPoints || 0 } });
-      } catch (err) { 
-        console.error("Signup Error:", err);
-        res.status(500).json({ error: err.message || 'Internal server signup failure' }); 
+  useEffect(() => {
+    if (socket && user?.role === 'admin' && token) {
+      socket.emit('joinAdminChannel', token);
+      
+      socket.on('lowStockAlert', (data: any) => {
+        showToast(`Low Stock Warning: ${data.name} has only ${data.remainingStock} bags left!`, 'error');
+      });
+      socket.on('newOrderAlert', (data: any) => {
+        showToast(`New Order Received! Order #${data.id}`, 'success');
+        fetchAdminOrders();
+      });
+    }
+  }, [socket, user, token]);
+
+  useEffect(() => {
+    if (view === 'profile' && token) fetchMyOrders();
+    if (view === 'admin' && token) {
+      if (adminTab === 'orders' || adminTab === 'finances') fetchAdminOrders();
+      if (adminTab === 'users') fetchAdminUsers();
+      if (adminTab === 'logs') fetchAdminLogs();
+    }
+  }, [view, adminTab, token]);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const fetchProducts = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/products/catalog`);
+      if (res.ok) {
+        setProducts(await res.json());
+      } else {
+        showToast('Unable to load current grain catalog', 'error');
       }
-    });
+    } catch (err) {
+      console.error("Failed to fetch catalog", err);
+      showToast('Network error while loading grain catalog', 'error');
+    }
+  };
 
-    expressApp.post('/api/user/login', async (req, res) => {
-      try {
-        const { phoneNumber, email, identifier, password } = req.body || {};
-        const loginIdentifier = phoneNumber || email || identifier;
-        
-        if (!loginIdentifier || !password) {
-          return res.status(400).json({ error: 'Phone number or email and password are required' });
-        }
+  const fetchCarousel = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/config/carousel`);
+      if (res.ok) {
+        setCarousel(await res.json());
+      }
+    } catch (err) { 
+      console.error("Failed to fetch carousel", err); 
+    }
+  };
 
-        const user = await User.findOne({ 
-          where: { 
-            [Op.or]: [
-              { phoneNumber: loginIdentifier },
-              { email: loginIdentifier }
-            ]
-          } 
+  const fetchHero = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/config/hero`);
+      if (res.ok) {
+        setHeroSettings(await res.json());
+      }
+    } catch (err) { 
+      console.error("Failed to fetch hero settings", err); 
+    }
+  };
+
+  const fetchCountiesConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/config/counties`);
+      if (res.ok) {
+        setCountyOverrides(await res.json());
+      }
+    } catch (err) { 
+      console.error("Failed to fetch county overrides", err); 
+    }
+  };
+
+  const fetchMyOrders = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/orders/my-orders`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setMyOrders(await res.json());
+      } else {
+        showToast('Failed to fetch your order history', 'error');
+      }
+    } catch (err) {
+      console.error("Failed to fetch user orders", err);
+      showToast('Network error fetching your order history', 'error');
+    }
+  };
+
+  const fetchAdminOrders = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/admin/orders`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setAdminOrders(await res.json());
+      } else {
+        showToast('Error fetching administrator orders', 'error');
+      }
+    } catch (err) { 
+      showToast('Network connection error while fetching orders', 'error'); 
+    }
+  };
+
+  const fetchAdminUsers = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/admin/users`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setAdminUsers(await res.json());
+      } else {
+        showToast('Error fetching user accounts registry', 'error');
+      }
+    } catch (err) { 
+      showToast('Network error while fetching registered users', 'error'); 
+    }
+  };
+
+  const fetchAdminLogs = async () => {
+    try {
+      // Unified payment and system audit logs endpoint communicating with backend / hero logs
+      const res = await fetch(`${API_BASE_URL}/admin/logs`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAdminLogs(Array.isArray(data) ? data : (data.logs || []));
+      } else {
+        // Fallback to fetch from a specific hero-logs API endpoint if standard logs fail
+        const heroRes = await fetch(`${API_BASE_URL}/payments/hero-logs`, {
+           headers: { 'Authorization': `Bearer ${token}` }
         });
-
-        if (!user || !user.isActive) {
-          return res.status(401).json({ error: 'Invalid credentials or account disabled/suspended' });
-        }
-
-        if (!user.password) {
-          return res.status(401).json({ error: 'Account uses Google Sign-In. Please sign in with Google.' });
-        }
-
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-          return res.status(401).json({ error: 'Invalid credentials or account disabled' });
-        }
-
-        const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-        res.json({ token, user: { id: user.id, fullName: user.fullName, role: user.role, phoneNumber: user.phoneNumber, email: user.email, rewardPoints: user.rewardPoints || 0 } });
-      } catch (err) { 
-        console.error("Login Error:", err);
-        res.status(500).json({ error: err.message || 'Internal server authentication failure' }); 
-      }
-    });
-
-    // --- USER PROFILE SELF-MANAGEMENT & EDIT USER DETAILS ---
-    expressApp.get('/api/user/profile', authenticateToken, async (req, res) => {
-      try {
-        const user = await User.findByPk(req.user.id, { attributes: { exclude: ['password', 'resetToken', 'resetTokenExpires'] } });
-        if (!user) return res.status(404).json({ error: 'User profile not found' });
-        res.json(user);
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.put('/api/user/profile', authenticateToken, async (req, res) => {
-      try {
-        const { fullName, email, phoneNumber, currentPassword, newPassword } = req.body || {};
-        const user = await User.findByPk(req.user.id);
-        if (!user) return res.status(404).json({ error: 'User not found' });
-
-        if (fullName !== undefined) user.fullName = fullName;
-        if (email !== undefined) user.email = email;
-        if (phoneNumber !== undefined) user.phoneNumber = phoneNumber;
-
-        if (newPassword && newPassword.trim() !== '') {
-          if (user.password) {
-            if (!currentPassword) {
-              return res.status(400).json({ error: 'Current password is required to set a new password' });
-            }
-            const match = await bcrypt.compare(currentPassword, user.password);
-            if (!match) {
-              return res.status(400).json({ error: 'Current password is incorrect' });
-            }
-          }
-          user.password = await bcrypt.hash(newPassword, 12);
-        }
-
-        await user.save();
-        res.json({ 
-          message: 'Profile details updated successfully', 
-          user: { 
-            id: user.id, 
-            fullName: user.fullName, 
-            email: user.email, 
-            phoneNumber: user.phoneNumber, 
-            role: user.role, 
-            rewardPoints: user.rewardPoints || 0 
-          } 
-        });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    // --- USER SELF ACCOUNT SUSPENSION ---
-    expressApp.post('/api/user/suspend', authenticateToken, async (req, res) => {
-      try {
-        const user = await User.findByPk(req.user.id);
-        if (!user) return res.status(404).json({ error: 'User not found' });
-
-        user.isActive = false;
-        await user.save();
-
-        res.json({ message: 'Account suspended successfully. Contact support if you need to reactivate.' });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    // --- FORGOT PASSWORD (OTP GENERATION & EMAIL VIA RESEND) ---
-    expressApp.post('/api/user/forgot-password', async (req, res) => {
-      try {
-        const { email } = req.body || {};
-        if (!email) {
-          return res.status(400).json({ error: 'Email address is required' });
-        }
-
-        const user = await User.findOne({ where: { email } });
-        
-        if (!user) {
-          return res.status(200).json({ 
-            message: 'If an account with that email exists, a password reset OTP has been sent.' 
-          });
-        }
-
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const tokenExpiration = Date.now() + 10 * 60 * 1000;
-
-        user.resetToken = otpCode;
-        user.resetTokenExpires = tokenExpiration;
-        await user.save();
-
-        await resend.emails.send({
-          from: 'Mwea Rice Hub <onboarding@resend.dev>',
-          to: user.email,
-          subject: 'Your Password Reset OTP Code',
-          html: `
-            <div style="font-family: Arial, sans-serif; padding: 24px; color: #333; max-width: 600px; margin: auto; background: #f9f9f9; border-radius: 8px;">
-              <h2 style="color: #2e7d32;">Password Reset OTP</h2>
-              <p>Hello ${user.fullName || 'Valued Customer'},</p>
-              <p>You requested a password reset for your Mwea Rice Hub account. Use the 6-digit OTP code below to proceed:</p>
-              <div style="background: #e8f5e9; color: #2e7d32; font-size: 32px; font-weight: bold; text-align: center; padding: 16px; border-radius: 6px; letter-spacing: 6px; margin: 20px 0;">
-                ${otpCode}
-              </div>
-              <p style="font-size: 13px; color: #666;">This code is valid for 10 minutes. If you did not request this, please ignore this email.</p>
-            </div>
-          `
-        });
-
-        console.log(`📧 Password reset OTP sent to ${user.email}`);
-        res.status(200).json({ message: 'If an account with that email exists, a password reset OTP has been sent.' });
-      } catch (err) {
-        console.error('❌ Forgot Password OTP Error:', err);
-        res.status(500).json({ error: 'Failed to dispatch password reset OTP email' });
-      }
-    });
-
-    // --- RESET PASSWORD WITH OTP ---
-    expressApp.post('/api/user/reset-password', async (req, res) => {
-      try {
-        const { email, otp, token, newPassword } = req.body || {};
-        const verificationCode = otp || token;
-
-        if (!email || !verificationCode || !newPassword) {
-          return res.status(400).json({ error: 'Email, OTP code, and new password are required' });
-        }
-
-        if (newPassword.length < 6) {
-          return res.status(400).json({ error: 'Password must be at least 6 characters long' });
-        }
-
-        const user = await User.findOne({ 
-          where: { 
-            email, 
-            resetToken: String(verificationCode).trim(),
-            resetTokenExpires: { [Op.gt]: Date.now() } 
-          } 
-        });
-
-        if (!user) {
-          return res.status(400).json({ error: 'Invalid or expired OTP code' });
-        }
-
-        const hashedPassword = await bcrypt.hash(newPassword, 12);
-
-        user.password = hashedPassword;
-        user.resetToken = null;
-        user.resetTokenExpires = null;
-        await user.save();
-
-        res.status(200).json({ message: 'Password has been reset successfully. You can now login with your new password.' });
-      } catch (err) {
-        console.error('❌ Reset Password OTP Error:', err);
-        res.status(500).json({ error: 'Internal server error while resetting password' });
-      }
-    });
-
-    // --- USER REWARD POINTS TRACKING ---
-    expressApp.get('/api/user/points', authenticateToken, async (req, res) => {
-      try {
-        const user = await User.findByPk(req.user.id, { attributes: ['id', 'fullName', 'rewardPoints'] });
-        res.json({
-          rewardPoints: user ? user.rewardPoints || 0 : 0,
-          ratePerKg: 0.2
-        });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    // ==========================================
-    // USER PERSISTENT CART MANAGEMENT APIs
-    // ==========================================
-    expressApp.get('/api/cart', authenticateToken, async (req, res) => {
-      try {
-        const items = await Cart.findAll({
-          where: { userId: req.user.id },
-          include: [{ model: RiceProduct, as: 'product' }]
-        });
-        
-        let totalKg = 0;
-        const formattedItems = items.map(item => {
-          const p = item.product ? item.product.toJSON() : {};
-          const weight = p.weightKg || 0;
-          const qty = item.quantity || 1;
-          totalKg += weight * qty;
-          let effectivePrice = p.basePrice || p.price || 0;
-          if (flashSaleState && flashSaleState.active && p.flashSalePrice) {
-            effectivePrice = p.flashSalePrice;
-          }
-          return {
-            id: item.id,
-            productId: item.productId,
-            quantity: item.quantity,
-            product: {
-              ...p,
-              price: effectivePrice
-            }
-          };
-        });
-
-        const expectedPoints = Number((totalKg * 0.2).toFixed(2));
-        res.json({ items: formattedItems, totalKg, expectedPoints });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.post('/api/cart/add', authenticateToken, async (req, res) => {
-      try {
-        const { productId, quantity } = req.body || {};
-        const qty = Number(quantity || 1);
-        
-        let cartItem = await Cart.findOne({ where: { userId: req.user.id, productId } });
-        if (cartItem) {
-          cartItem.quantity += qty;
-          await cartItem.save();
+        if (heroRes.ok) {
+           const heroData = await heroRes.json();
+           setAdminLogs(Array.isArray(heroData) ? heroData : (heroData.logs || []));
         } else {
-          cartItem = await Cart.create({ userId: req.user.id, productId, quantity: qty });
+           showToast('Error fetching payment logs from backend server', 'error');
         }
-        
-        res.status(201).json({ message: 'Item added to user cart', cartItem });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
       }
-    });
+    } catch (err) { 
+      showToast('Network error while fetching backend payment logs', 'error'); 
+    }
+  };
 
-    expressApp.put('/api/cart/item/:id', authenticateToken, async (req, res) => {
-      try {
-        const { quantity } = req.body || {};
-        const cartItem = await Cart.findOne({ where: { id: req.params.id, userId: req.user.id } });
-        if (!cartItem) return res.status(404).json({ error: 'Cart item not found' });
-        
-        if (Number(quantity) <= 0) {
-          await cartItem.destroy();
-          return res.json({ message: 'Cart item removed' });
-        }
-        
-        cartItem.quantity = Number(quantity);
-        await cartItem.save();
-        res.json({ message: 'Cart item quantity updated', cartItem });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
+  const handleLogout = () => {
+    try {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+    } catch (e) {
+      console.error("Error clearing local storage:", e);
+    }
+    setToken(null);
+    setUser(null);
+    setCart([]);
+    setView('home');
+    showToast('Logged out successfully');
+  };
 
-    expressApp.delete('/api/cart/item/:id', authenticateToken, async (req, res) => {
-      try {
-        const deleted = await Cart.destroy({ where: { id: req.params.id, userId: req.user.id } });
-        if (!deleted) return res.status(404).json({ error: 'Cart item not found' });
-        res.json({ message: 'Item deleted from cart' });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
+  const activeTransportFee = React.useMemo(() => {
+    if (checkoutData.county && countyOverrides[checkoutData.county] !== undefined) {
+      return Number(countyOverrides[checkoutData.county]);
+    }
+    return baseTransportFee;
+  }, [checkoutData.county, countyOverrides, baseTransportFee]);
 
-    expressApp.delete('/api/cart', authenticateToken, async (req, res) => {
-      try {
-        await Cart.destroy({ where: { userId: req.user.id } });
-        res.json({ message: 'User cart cleared successfully' });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.get('/api/products/catalog', async (req, res) => {
-      try {
-        const { variety, minWeight, maxWeight, maxPrice, search } = req.query;
-        let whereCondition = { isAvailable: true };
-
-        if (variety) whereCondition.variety = variety;
-        if (minWeight || maxWeight) {
-          whereCondition.weightKg = {};
-          if (minWeight) whereCondition.weightKg[Op.gte] = Number(minWeight);
-          if (maxWeight) whereCondition.weightKg[Op.lte] = Number(maxWeight);
-        }
-        if (search) {
-          whereCondition[Op.or] = [
-            { brandName: { [Op.like]: `%${search}%` } },
-            { variety: { [Op.like]: `%${search}%` } }
-          ];
-        }
-
-        const products = await RiceProduct.findAll({ where: whereCondition });
-        
-        const optimizedCatalog = products.map(product => {
-          const productObj = product.toJSON();
-          let currentEffectivePrice = productObj.basePrice || productObj.price || 0;
-          if (flashSaleState && flashSaleState.active && productObj.flashSalePrice !== null && productObj.flashSalePrice !== undefined) {
-            currentEffectivePrice = productObj.flashSalePrice;
-          }
-          return {
-            ...productObj,
-            price: currentEffectivePrice,
-            imageUrl: productObj.imageUrl || productObj.image || productObj.url || null,
-            isBlackFridayApplied: (flashSaleState && flashSaleState.active && productObj.flashSalePrice !== null && productObj.flashSalePrice !== undefined)
-          };
-        }).filter(item => !maxPrice || item.price <= Number(maxPrice));
-
-        res.json(optimizedCatalog);
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    });
-
-    expressApp.get('/api/products/featured', async (req, res) => {
-      try {
-        const featuredProducts = await RiceProduct.findAll({
-          where: { isAvailable: true },
-          limit: 4,
-          order: [['id', 'ASC']]
-        });
-
-        const formatted = featuredProducts.map(p => {
-          const pObj = p.toJSON();
-          let currentPrice = pObj.basePrice || pObj.price || 0;
-          if (flashSaleState && flashSaleState.active && pObj.flashSalePrice) {
-            currentPrice = pObj.flashSalePrice;
-          }
-          return {
-            ...pObj,
-            price: currentPrice,
-            imageUrl: pObj.imageUrl || pObj.image || null
-          };
-        });
-
-        res.json(formatted);
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.get('/api/config/carousel', async (req, res) => {
-      try {
-        const config = await SystemConfig.findOne({ where: { key: 'homepage_carousel' } });
-        res.json(config ? config.value : []);
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.get('/api/config/hero', async (req, res) => {
-      try {
-        const config = await SystemConfig.findOne({ where: { key: 'hero_settings' } });
-        res.json(config ? config.value : {});
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.get('/api/config/counties', async (req, res) => {
-      try {
-        const config = await SystemConfig.findOne({ where: { key: 'county_overrides' } });
-        res.json(config ? config.value : {});
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.get('/api/config/locations', async (req, res) => {
-      try {
-        const config = await SystemConfig.findOne({ where: { key: 'logistics_hierarchy' } });
-        res.json(config ? config.value : {});
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.get('/api/config/payment-methods', async (req, res) => {
-      try {
-        const config = await SystemConfig.findOne({ where: { key: 'mpesa_config' } });
-        res.json(config ? config.value : {
-          paybillNumber: '522522',
-          paybillAccount: 'MWEARICE',
-          tillNumber: '889900',
-          stkEnabled: true
-        });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.get('/api/orders/my-orders', authenticateToken, async (req, res) => {
-      try {
-        const orders = await Order.findAll({
-          where: { userId: req.user.id },
-          order: [['createdAt', 'DESC']]
-        });
-        res.json(orders);
-      } catch (err) { 
-        res.status(500).json({ error: err.message }); 
-      }
-    });
-
-    // --- GET SINGLE ORDER BY ID (WITH FULL USER & PAYMENT DETAILS) ---
-    expressApp.get('/api/orders/:id', authenticateToken, async (req, res) => {
-      try {
-        const order = await Order.findByPk(req.params.id, {
-          include: [{ model: User, attributes: ['id', 'fullName', 'phoneNumber', 'email'] }]
-        });
-        if (!order) return res.status(404).json({ error: 'Order not found' });
-
-        if (order.userId !== req.user.id && req.user.role !== 'admin') {
-          return res.status(403).json({ error: 'Access denied' });
-        }
-
-        res.json(order);
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    // --- DIRECT M-PESA STK PUSH ROUTE ---
-    const handleStkPushRequest = async (req, res) => {
-      try {
-        const { phoneNumber, phone, amount, orderId, external_reference } = req.body || {};
-        const targetPhone = phoneNumber || phone;
-        const targetAmount = amount || 10;
-        const ref = external_reference || (orderId ? `ORD-${orderId}` : `STK-${Date.now()}`);
-
-        if (!targetPhone) {
-          return res.status(400).json({ error: 'Phone number parameter is required for STK push' });
-        }
-
-        const hostUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
-        const callbackEndpoint = `${hostUrl}/api/payments/payhero/callback`;
-
-        console.log(`📱 Direct Pay Hero STK Push triggered for ${targetPhone}, Amount: KES ${targetAmount}, Ref: ${ref}`);
-
-        const payheroResponse = await axios.post(
-          'https://backend.payhero.co.ke/api/v2/payments',
-          {
-            amount: Number(targetAmount),
-            phone_number: targetPhone,
-            channel_id: PAYHERO_CHANNEL_ID,
-            provider: 'm-pesa',
-            external_reference: ref,
-            callback_url: callbackEndpoint
-          },
-          {
-            headers: {
-              'Authorization': getPayHeroAuthHeader(),
-              'Content-Type': 'application/json'
-            }
-          }
-        );
-
-        res.status(200).json({
-          success: true,
-          message: 'STK push prompt dispatched successfully',
-          data: payheroResponse.data
-        });
-      } catch (stkError) {
-        console.error('❌ Direct STK Push Processing Failure:', stkError.response ? stkError.response.data : stkError.message);
-        res.status(500).json({
-          success: false,
-          error: stkError.response?.data?.message || stkError.message || 'Failed to dispatch M-Pesa STK Push'
-        });
-      }
-    };
-
-    expressApp.post('/api/payments/stkpush', handleStkPushRequest);
-    expressApp.post('/api/payments/stk-push', handleStkPushRequest);
-    expressApp.post('/api/payment/stkpush', handleStkPushRequest);
-
-    // --- CREATE ORDER, CALCULATE WEIGHT/POINTS & TRIGGER STK PUSH ---
-    expressApp.post('/api/orders/create', authenticateToken, async (req, res) => {
-      try {
-        const { 
-          cartItems, 
-          paymentMethod, 
-          mpesaPhoneNumber,
-          county, 
-          town, 
-          location, 
-          sublocation, 
-          streetAddress,
-          shippingAddress, 
-          shippingFee, 
-          grandTotal 
-        } = req.body || {};
-        
-        if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
-          return res.status(400).json({ error: 'Cart items payload cannot be empty' });
-        }
-
-        let calculatedSubtotal = 0;
-        let totalWeightKg = 0;
-        const builtOrderLineItems = [];
-
-        for (const item of cartItems) {
-          const targetId = item.productId || item.laptopId || item.id;
-          const product = await RiceProduct.findByPk(targetId);
-          
-          if (!product || product.stockQuantity < item.quantity) {
-            return res.status(422).json({ error: `Inventory failure for product ID: ${targetId}. Insufficient stock.` });
-          }
-
-          let purchasePrice = product.basePrice || product.price || 0;
-          if (flashSaleState.active && product.flashSalePrice !== null && product.flashSalePrice !== undefined) {
-            purchasePrice = product.flashSalePrice;
-          }
-
-          const itemKg = (product.weightKg || 0) * item.quantity;
-          totalWeightKg += itemKg;
-
-          calculatedSubtotal += (purchasePrice * item.quantity);
-          product.stockQuantity -= item.quantity; 
-          await product.save();
-
-          builtOrderLineItems.push({ 
-            productId: product.id, 
-            name: `${product.brandName} ${product.variety || ''} (${product.weightKg || 0}kg)`,
-            variety: product.variety || 'Aromatic Rice',
-            brandName: product.brandName,
-            weightKg: product.weightKg || 0,
-            quantity: item.quantity, 
-            priceAtPurchase: purchasePrice,
-            buyingPrice: product.buyingPrice || (purchasePrice * 0.75),
-            imageUrl: product.imageUrl || product.image || null
-          });
-          
-          io.emit('stockUpdated', { productId: product.id, newStockQuantity: product.stockQuantity });
-          
-          if (product.stockQuantity <= 10) {
-            io.to('admin-dashboard-room').emit('lowStockAlert', {
-              productId: product.id,
-              name: product.brandName,
-              remainingStock: product.stockQuantity
-            });
-          }
-        }
-
-        let activeTransportCharge = shippingFee !== undefined ? Number(shippingFee) : 250;
-        if (county) {
-          const countyConfig = await SystemConfig.findOne({ where: { key: 'county_overrides' } });
-          if (countyConfig && countyConfig.value && countyConfig.value[county] !== undefined) {
-            activeTransportCharge = Number(countyConfig.value[county]);
-          }
-        }
-
-        const fullDeliveryAddress = {
-          county: county || 'Not Specified',
-          town: town || 'Not Specified',
-          location: location || 'Not Specified',
-          sublocation: sublocation || 'Not Specified',
-          streetAddress: streetAddress || 'Not Specified',
-          details: shippingAddress || `${streetAddress || ''}, ${sublocation || ''}, ${location || ''}, ${town || ''}, ${county || ''}`
-        };
-
-        const finalOrderTotal = Number(grandTotal || (calculatedSubtotal + activeTransportCharge));
-        const earnedPoints = Number((totalWeightKg * 0.2).toFixed(2));
-
-        const generatedOrder = await Order.create({
-          userId: req.user.id,
-          items: builtOrderLineItems,
-          transportFee: activeTransportCharge,
-          subTotal: calculatedSubtotal,
-          grandTotal: finalOrderTotal,
-          totalWeightKg: totalWeightKg,
-          pointsEarned: earnedPoints,
-          paymentDetails: { 
-            method: paymentMethod || 'mpesa_stk', 
-            isPaid: false,
-            paidTag: 'PENDING',
-            mpesaNumber: mpesaPhoneNumber || null,
-            amount: finalOrderTotal,
-            paidAt: null,
-            mpesaReceipt: null,
-            failureReason: null
-          },
-          county: county || 'Not Specified', 
-          town: town || '',
-          location: location || '',
-          sublocation: sublocation || '',
-          shippingAddress: fullDeliveryAddress,
-          status: 'pending' 
-        });
-
-        // Automatically clear user cart in DB after placing order
-        await Cart.destroy({ where: { userId: req.user.id } });
-
-        let stkInitiated = false;
-        let stkMessage = '';
-
-        if (paymentMethod === 'mpesa_stk') {
-          const targetPhone = mpesaPhoneNumber || req.user.phoneNumber;
-          const hostUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
-          const callbackEndpoint = `${hostUrl}/api/payments/payhero/callback`;
-
-          try {
-            console.log(`📱 Triggering Pay Hero STK Push for Order #${generatedOrder.id} to ${targetPhone}...`);
-            
-            const payheroResponse = await axios.post(
-              'https://backend.payhero.co.ke/api/v2/payments',
-              {
-                amount: finalOrderTotal,
-                phone_number: targetPhone,
-                channel_id: PAYHERO_CHANNEL_ID,
-                provider: 'm-pesa',
-                external_reference: `ORD-${generatedOrder.id}`,
-                callback_url: callbackEndpoint
-              },
-              {
-                headers: {
-                  'Authorization': getPayHeroAuthHeader(),
-                  'Content-Type': 'application/json'
-                }
-              }
-            );
-
-            stkInitiated = true;
-            stkMessage = 'STK Push prompt sent to handset successfully.';
-            console.log(`✅ Pay Hero Response for Order #${generatedOrder.id}:`, payheroResponse.data);
-          } catch (stkError) {
-            stkMessage = 'Failed to trigger M-Pesa prompt automatically.';
-            console.error(`❌ Pay Hero STK Push Error for Order #${generatedOrder.id}:`, stkError.response ? stkError.response.data : stkError.message);
-          }
-        }
-
-        io.to('admin-dashboard-room').emit('newOrderAlert', generatedOrder);
-        res.status(201).json({
-          ...generatedOrder.toJSON(),
-          stkPromptSent: stkInitiated,
-          stkStatusMessage: stkMessage
-        });
-
-      } catch (err) { 
-        console.error("Order Creation Error:", err);
-        res.status(500).json({ error: err.message }); 
-      }
-    });
-
-    // --- PAY HERO REAL-TIME PAYMENT CHECKING & LIVE TRACKING API ---
-    const handlePayHeroStatusCheck = async (req, res) => {
-      try {
-        const order = await Order.findByPk(req.params.orderId);
-        if (!order) return res.status(404).json({ error: 'Order not found' });
-
-        const ref = `ORD-${order.id}`;
-        let heroStatusData = null;
-        let failureReason = null;
-        let isSuccess = false;
-
-        try {
-          const response = await axios.get(
-            `https://backend.payhero.co.ke/api/v2/payments?external_reference=${ref}`,
-            { headers: { 'Authorization': getPayHeroAuthHeader() } }
-          );
-          heroStatusData = response.data;
-          
-          const paymentObj = Array.isArray(heroStatusData) ? heroStatusData[0] : (heroStatusData.response || heroStatusData);
-          if (paymentObj) {
-            const rawStatus = String(paymentObj.status || paymentObj.Status || '').toUpperCase();
-            if (rawStatus === 'SUCCESS' || rawStatus === 'PAID') {
-              isSuccess = true;
-            } else if (rawStatus === 'FAILED' || rawStatus === 'CANCELLED' || rawStatus === 'REJECTED') {
-              failureReason = paymentObj.failure_reason || paymentObj.message || paymentObj.ResultDesc || 'Payment failed or cancelled (insufficient balance or wrong PIN)';
-            }
-          }
-        } catch (apiErr) {
-          console.warn(`Pay Hero live status poll warning for Order #${order.id}:`, apiErr.message);
-        }
-
-        if (isSuccess && !order.paymentDetails?.isPaid) {
-          order.paymentDetails = {
-            ...order.paymentDetails,
-            isPaid: true,
-            paidTag: 'PAID',
-            paidAt: new Date()
-          };
-          if (order.status === 'payment_failed') order.status = 'pending';
-          
-          const totalKg = order.totalWeightKg || 0;
-          const points = Number((totalKg * 0.2).toFixed(2));
-          const user = await User.findByPk(order.userId);
-          if (user && points > 0) {
-            user.rewardPoints = Number(((user.rewardPoints || 0) + points).toFixed(2));
-            await user.save();
-          }
-          await order.save();
-          io.emit('orderStatusUpdated', order);
-        } else if (failureReason) {
-          order.paymentDetails = {
-            ...order.paymentDetails,
-            isPaid: false,
-            paidTag: 'FAILED',
-            failureReason: failureReason
-          };
-          order.status = 'payment_failed';
-          await order.save();
-          io.emit('orderStatusUpdated', order);
-        }
-
-        res.json({
-          orderId: order.id,
-          status: order.status,
-          paymentStatus: order.paymentDetails?.paidTag || (order.paymentDetails?.isPaid ? 'PAID' : 'PENDING'),
-          paymentDetails: order.paymentDetails,
-          totalWeightKg: order.totalWeightKg || 0,
-          pointsEarned: order.pointsEarned || 0,
-          heroData: heroStatusData
-        });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    };
-
-    expressApp.get('/api/payments/payhero/status/:orderId', authenticateToken, handlePayHeroStatusCheck);
-    expressApp.get('/api/payment-status/:orderId', authenticateToken, handlePayHeroStatusCheck);
-
-    // --- PAY HERO REAL-TIME PAYMENT CALLBACK / WEBHOOK ---
-    expressApp.post('/api/payments/payhero/callback', async (req, res) => {
-      try {
-        console.log('🔔 Pay Hero Callback Notification Received:', JSON.stringify(req.body, null, 2));
-
-        const body = req.body || {};
-        const responseObj = body.response || body;
-
-        const externalRef = responseObj.external_reference || responseObj.ExternalReference || body.external_reference || body.ExternalReference;
-        const statusStr = responseObj.status || responseObj.Status || body.status || body.Status;
-        const mpesaReceipt = responseObj.mpesa_code || responseObj.MpesaReceiptNumber || body.mpesa_code || body.MpesaReceiptNumber || null;
-
-        if (externalRef && String(externalRef).startsWith('ORD-')) {
-          const orderId = String(externalRef).replace('ORD-', '');
-          const order = await Order.findByPk(orderId);
-
-          if (order) {
-            const isPaymentSuccessful = String(statusStr).toUpperCase() === 'SUCCESS' || body.success === true;
-
-            const existingPaymentDetails = order.paymentDetails || {};
-            
-            if (isPaymentSuccessful) {
-              if (order.status === 'payment_failed' || order.status === 'pending') {
-                order.status = 'pending'; 
-              }
-              order.paymentDetails = {
-                ...existingPaymentDetails,
-                isPaid: true,
-                paidTag: 'PAID',
-                mpesaReceipt: mpesaReceipt,
-                paidAt: new Date(),
-                rawCallback: body
-              };
-
-              // Credit 0.2 points per kg bought to user
-              const totalKg = order.totalWeightKg || 0;
-              const points = Number((totalKg * 0.2).toFixed(2));
-              const user = await User.findByPk(order.userId);
-              if (user && points > 0) {
-                user.rewardPoints = Number(((user.rewardPoints || 0) + points).toFixed(2));
-                await user.save();
-              }
-
-              console.log(`🎉 Payment VERIFIED for Order #${order.id}. Tag: PAID. Waiting for admin shipping update. M-Pesa Receipt: ${mpesaReceipt}`);
-            } else {
-              const reason = responseObj.message || responseObj.failure_reason || responseObj.ResultDesc || 'Insufficient balance or user cancelled transaction';
-              order.status = 'payment_failed';
-              order.paymentDetails = {
-                ...existingPaymentDetails,
-                isPaid: false,
-                paidTag: 'FAILED',
-                failureReason: reason,
-                rawCallback: body
-              };
-              console.log(`⚠️ Payment FAILED/CANCELLED for Order #${order.id}. Reason: ${reason}`);
-            }
-
-            await order.save();
-
-            io.to('admin-dashboard-room').emit('paymentReceived', {
-              orderId: order.id,
-              status: order.status,
-              isPaid: isPaymentSuccessful,
-              mpesaReceipt: mpesaReceipt,
-              paymentDetails: order.paymentDetails
-            });
-
-            io.emit('orderStatusUpdated', order);
-          } else {
-            console.warn(`⚠️ Received callback for non-existent Order ID: ${orderId}`);
-          }
-        }
-
-        res.status(200).json({ status: 'SUCCESS', message: 'Callback received and processed successfully' });
-      } catch (err) {
-        console.error('❌ Error processing Pay Hero Callback:', err);
-        res.status(200).json({ status: 'ERROR', message: err.message });
-      }
-    });
-
-    // ==========================================
-    // 7. SECURE ADMINISTRATIVE ENGINE & ANALYTICS
-    // ==========================================
+  const addToCart = (product: any) => {
+    if (product.stockQuantity <= 0) return showToast('This product is out of stock', 'error');
     
-    // --- ADMIN FINANCIAL DASHBOARD ROUTE (ONLY RECEIVED MONEY & CATEGORY PROFIT CALCULATIONS) ---
-    expressApp.get('/api/admin/analytics/finances', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const selectedYear = Number(req.query.year || new Date().getFullYear());
-        
-        const allOrders = await Order.findAll({
-          include: [{ model: User, attributes: ['id', 'fullName', 'phoneNumber', 'email'] }],
-          order: [['createdAt', 'DESC']]
-        });
+    setCart(prev => {
+      const existing = prev.find(item => item.productId === product.id);
+      if (existing) {
+        if (existing.quantity >= product.stockQuantity) {
+          showToast('Cannot add more than available stock', 'error');
+          return prev;
+        }
+        showToast('Cart updated for your account');
+        return prev.map(item => item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item);
+      }
+      showToast('Added to bag for your account');
+      return [...prev, { productId: product.id, product, quantity: 1, price: product.price }];
+    });
+  };
 
-        const products = await RiceProduct.findAll();
-        const productMap = {};
-        products.forEach(p => {
-          productMap[p.id] = p;
-        });
+  const updateCartQuantity = (productId: number, delta: number) => {
+    setCart(prev => prev.map(item => {
+      if (item.productId === productId) {
+        const newQ = item.quantity + delta;
+        if (newQ > item.product.stockQuantity) {
+          showToast('Max stock reached', 'error');
+          return item;
+        }
+        return newQ > 0 ? { ...item, quantity: newQ } : item;
+      }
+      return item;
+    }).filter(item => item.quantity > 0));
+  };
 
-        let totalReceivedMoney = 0;
-        let totalBuyingCost = 0;
-        let totalNetProfit = 0;
-        let totalKgSold = 0;
-        let totalPointsAwarded = 0;
+  const cartSubtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const cartTotal = cartSubtotal + (cart.length > 0 ? activeTransportFee : 0);
 
-        const yearsSet = new Set([new Date().getFullYear()]);
+  const totalKgBought = useMemo(() => {
+    return myOrders.reduce((acc, order) => {
+      if (order.status === 'failed' || order.paymentStatus === 'failed') return acc;
+      const orderKg = order.items?.reduce((sum: number, item: any) => {
+         return sum + ((item.weightKg || item.product?.weightKg || 25) * item.quantity);
+      }, 0) || 0;
+      return acc + orderKg;
+    }, 0);
+  }, [myOrders]);
+  const loyaltyPoints = (totalKgBought * 0.2).toFixed(1);
 
-        // Category & Rice Variety Sales Map
-        const categorySalesMap = {};
-
-        const monthlyStats = Array.from({ length: 12 }, (_, i) => ({
-          monthIndex: i,
-          month: new Date(2000, i, 1).toLocaleString('en-US', { month: 'short' }),
-          totalReceivedSales: 0,
-          totalBuyingCost: 0,
-          totalProfit: 0,
-          paidOrderCount: 0
-        }));
-
-        allOrders.forEach(order => {
-          const createdAt = new Date(order.createdAt);
-          const orderYear = createdAt.getFullYear();
-          yearsSet.add(orderYear);
-
-          // RECEIVED MONEY CONDITION: ONLY SUCCEEDED/PAID TRANSACTIONS
-          const isPaid = order.paymentDetails && (order.paymentDetails.isPaid === true || order.paymentDetails.paidTag === 'PAID' || order.status === 'paid' || order.status === 'completed' || order.status === 'delivered');
-
-          if (isPaid) {
-            const orderMoneyReceived = Number(order.grandTotal || 0);
-            totalReceivedMoney += orderMoneyReceived;
-
-            let orderCost = 0;
-            let orderRevenueFromItems = 0;
-            let orderKg = order.totalWeightKg || 0;
-
-            if (Array.isArray(order.items)) {
-              order.items.forEach(item => {
-                const prod = productMap[item.productId];
-                const qty = item.quantity || 1;
-                const sellPrice = item.priceAtPurchase || (prod ? prod.basePrice : 0);
-                const buyPrice = (prod && prod.buyingPrice !== undefined && prod.buyingPrice !== null) 
-                  ? prod.buyingPrice 
-                  : (item.buyingPrice || (sellPrice * 0.75));
-                
-                const itemRevenue = sellPrice * qty;
-                const itemCost = buyPrice * qty;
-                const itemProfit = itemRevenue - itemCost;
-
-                orderRevenueFromItems += itemRevenue;
-                orderCost += itemCost;
-
-                // Category aggregation
-                const catName = (prod && prod.variety) ? prod.variety : (item.variety || prod?.brandName || 'Standard Rice');
-                if (!categorySalesMap[catName]) {
-                  categorySalesMap[catName] = {
-                    category: catName,
-                    brandName: prod?.brandName || item.name || catName,
-                    quantitySold: 0,
-                    totalRevenue: 0,
-                    totalBuyingCost: 0,
-                    totalProfit: 0,
-                    buyingPricePerUnit: buyPrice,
-                    sellingPricePerUnit: sellPrice
-                  };
-                }
-
-                categorySalesMap[catName].quantitySold += qty;
-                categorySalesMap[catName].totalRevenue += itemRevenue;
-                categorySalesMap[catName].totalBuyingCost += itemCost;
-                categorySalesMap[catName].totalProfit += itemProfit;
-
-                if (!order.totalWeightKg && prod) {
-                  orderKg += (prod.weightKg || 0) * qty;
-                }
-              });
-            }
-
-            const orderProfit = orderMoneyReceived - orderCost;
-            totalBuyingCost += orderCost;
-            totalNetProfit += orderProfit;
-            totalKgSold += orderKg;
+  const renderNav = () => (
+    <nav className="bg-emerald-900 text-emerald-50 sticky top-0 z-50 shadow-xl border-b border-emerald-800">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between h-20 items-center">
+          <div className="flex items-center cursor-pointer group" onClick={() => setView('home')}>
+            <Leaf className="h-9 w-9 text-emerald-400 mr-2.5 transform group-hover:scale-110 transition-transform duration-300" />
+            <div>
+              <span className="font-black text-2xl tracking-tight text-white block leading-none">MWEA HUB</span>
+              <span className="text-[10px] text-emerald-300 font-bold uppercase tracking-widest block mt-1">Direct Rice Logistics</span>
+            </div>
+          </div>
+          
+          <div className="hidden md:flex space-x-8 items-center font-medium">
+            <button onClick={() => setView('home')} className={`hover:text-emerald-300 transition-colors ${view === 'home' ? 'text-emerald-300 font-bold border-b-2 border-emerald-300 pb-1' : ''}`}>Home</button>
+            <button onClick={() => setView('shop')} className={`hover:text-emerald-300 transition-colors ${view === 'shop' ? 'text-emerald-300 font-bold border-b-2 border-emerald-300 pb-1' : ''}`}>Grain Catalog</button>
             
-            const orderPoints = Number((orderKg * 0.2).toFixed(2));
-            totalPointsAwarded += orderPoints;
+            {user?.role === 'admin' && (
+              <button onClick={() => setView('admin')} className="flex items-center text-rose-400 hover:text-rose-300 transition bg-emerald-950/60 border border-rose-500/30 px-3.5 py-1.5 rounded-full text-xs font-bold shadow-inner">
+                <Shield className="h-4 w-4 mr-1.5 animate-pulse" /> Admin Console
+              </button>
+            )}
+            
+            <button onClick={() => setView('cart')} className="relative p-2.5 bg-emerald-800/80 hover:bg-emerald-800 rounded-full transition-colors group">
+              <ShoppingCart className="h-5 w-5 transform group-hover:scale-110 transition-transform text-emerald-200" />
+              {cart.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[11px] font-black rounded-full h-5 w-5 flex items-center justify-center animate-bounce shadow">
+                  {cart.length}
+                </span>
+              )}
+            </button>
 
-            if (orderYear === selectedYear) {
-              const monthIdx = createdAt.getMonth();
-              monthlyStats[monthIdx].totalReceivedSales += orderMoneyReceived;
-              monthlyStats[monthIdx].totalBuyingCost += orderCost;
-              monthlyStats[monthIdx].totalProfit += orderProfit;
-              monthlyStats[monthIdx].paidOrderCount += 1;
-            }
-          }
-        });
+            {user ? (
+              <div className="flex items-center space-x-4 pl-4 border-l border-emerald-800">
+                <button onClick={() => setView('profile')} className="flex items-center text-sm font-bold bg-emerald-800/50 hover:bg-emerald-800 px-4 py-2 rounded-xl transition-all">
+                  <UserIcon className="h-4 w-4 mr-2 text-emerald-400" /> {user.fullName ? user.fullName.split(' ')[0] : 'Account'}
+                </button>
+                <button onClick={handleLogout} className="p-2 text-emerald-300 hover:text-rose-400 hover:bg-emerald-950 rounded-lg transition-colors" title="Sign Out">
+                  <LogOut className="h-5 w-5" />
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => setView('login')} className="flex items-center bg-emerald-500 px-6 py-2.5 rounded-full font-bold text-white hover:bg-emerald-400 transition-all shadow-lg hover:shadow-emerald-500/30 transform hover:-translate-y-0.5">
+                <LogIn className="h-4 w-4 mr-2" /> Sign In
+              </button>
+            )}
+          </div>
 
-        const riceCategoryBreakdown = Object.values(categorySalesMap).map(cat => ({
-          ...cat,
-          totalRevenue: Number(cat.totalRevenue.toFixed(2)),
-          totalBuyingCost: Number(cat.totalBuyingCost.toFixed(2)),
-          totalProfit: Number(cat.totalProfit.toFixed(2))
-        }));
+          <div className="md:hidden flex items-center space-x-3">
+             <button onClick={() => setView('cart')} className="relative p-2 hover:bg-emerald-800 rounded-lg">
+               <ShoppingCart className="h-6 w-6 text-emerald-200" />
+               {cart.length > 0 && <span className="absolute top-0 right-0 bg-rose-500 text-white text-[10px] font-bold rounded-full h-4 w-4 flex items-center justify-center">{cart.length}</span>}
+             </button>
+             <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="p-2 hover:bg-emerald-800 rounded-lg text-emerald-200">
+               {mobileMenuOpen ? <X className="h-7 w-7" /> : <Menu className="h-7 w-7" />}
+             </button>
+          </div>
+        </div>
+      </div>
+      
+      {mobileMenuOpen && (
+        <div className="md:hidden bg-emerald-950 px-4 pt-3 pb-5 space-y-2 border-t border-emerald-800 shadow-2xl">
+          <button onClick={() => { setView('home'); setMobileMenuOpen(false); }} className="block px-3 py-3 rounded-xl w-full text-left font-bold hover:bg-emerald-900 text-white">Home</button>
+          <button onClick={() => { setView('shop'); setMobileMenuOpen(false); }} className="block px-3 py-3 rounded-xl w-full text-left font-bold hover:bg-emerald-900 text-white">Grain Catalog</button>
+          <button onClick={() => { setView('cart'); setMobileMenuOpen(false); }} className="block px-3 py-3 rounded-xl w-full text-left font-bold hover:bg-emerald-900 text-white">Your Cart ({cart.length})</button>
+          {user?.role === 'admin' && (
+            <button onClick={() => { setView('admin'); setMobileMenuOpen(false); }} className="block px-3 py-3 rounded-xl w-full text-left font-bold text-rose-400 bg-rose-950/40">Admin Console</button>
+          )}
+          {user ? (
+             <>
+               <button onClick={() => { setView('profile'); setMobileMenuOpen(false); }} className="block px-3 py-3 rounded-xl w-full text-left font-bold text-emerald-300 hover:bg-emerald-900">My Profile & Orders</button>
+               <button onClick={handleLogout} className="block px-3 py-3 rounded-xl w-full text-left font-bold text-rose-400 hover:bg-emerald-900">Logout</button>
+             </>
+          ) : (
+             <button onClick={() => { setView('login'); setMobileMenuOpen(false); }} className="block px-3 py-3 rounded-xl w-full text-center font-bold bg-emerald-600 mt-2 text-white shadow-md">Sign In</button>
+          )}
+        </div>
+      )}
+    </nav>
+  );
 
-        res.json({
-          selectedYear,
-          availableYears: Array.from(yearsSet).sort((a, b) => b - a),
-          summary: {
-            totalMoneyReceived: Number(totalReceivedMoney.toFixed(2)),
-            totalBuyingCost: Number(totalBuyingCost.toFixed(2)),
-            totalNetProfit: Number(totalNetProfit.toFixed(2)),
-            totalKgSold: Number(totalKgSold.toFixed(2)),
-            totalPointsAwarded: Number(totalPointsAwarded.toFixed(2))
-          },
-          riceCategories: riceCategoryBreakdown,
-          monthlySalesGrowth: monthlyStats
-        });
-      } catch (err) {
-        console.error('DEBUG: Financial Analytics Error:', err);
-        res.status(500).json({ error: err.message });
+  const renderHome = () => {
+    const mediaArray = [
+      { type: 'video', url: heroSettings?.video1 },
+      { type: 'video', url: heroSettings?.video2 },
+      { type: 'image', url: heroSettings?.img1 },
+      { type: 'image', url: heroSettings?.img2 },
+      { type: 'image', url: heroSettings?.img3 }
+    ].filter(item => item.url && item.url.trim() !== '');
+
+    const currentMedia = mediaArray.length > 0 ? mediaArray[activeHeroIndex % mediaArray.length] : null;
+    const opacityClass = heroSettings?.overlayOpacity === '60' ? 'opacity-60' : heroSettings?.overlayOpacity === '80' ? 'opacity-80' : 'opacity-40';
+
+    return (
+      <div className="animate-fadeIn">
+        {heroSettings?.announcementTicker && (
+          <div className="bg-gradient-to-r from-emerald-800 via-emerald-700 to-emerald-800 text-emerald-100 py-2 px-4 text-center text-xs font-bold tracking-wide border-b border-emerald-900 flex items-center justify-center gap-2 shadow-inner">
+            <Bell size={14} className="text-emerald-300 animate-bounce" />
+            <span>{heroSettings.announcementTicker}</span>
+          </div>
+        )}
+
+        {flashSale.active && (
+          <div className="bg-gradient-to-r from-rose-600 via-rose-500 to-rose-600 text-white py-3 px-4 text-center font-black flex flex-col sm:flex-row justify-center items-center shadow-lg border-b border-rose-700 text-sm tracking-wide">
+            <div className="flex items-center mb-1 sm:mb-0">
+              <Clock className="h-5 w-5 mr-2 animate-spin" />
+              🔥 FRESH HARVEST FLASH SALE ACTIVE!
+            </div>
+            <span className="sm:ml-4 font-mono text-base bg-black/30 px-3.5 py-1 rounded-full border border-white/20">
+              {Math.floor(flashSale.msRemaining / (1000 * 60 * 60))}h : {Math.floor((flashSale.msRemaining % (1000 * 60 * 60)) / (1000 * 60))}m : {Math.floor((flashSale.msRemaining % (1000 * 60)) / 1000)}s LEFT
+            </span>
+          </div>
+        )}
+
+        <div className="relative bg-emerald-950 h-[70vh] flex items-center justify-center overflow-hidden transition-all duration-1000">
+          {currentMedia?.type === 'video' ? (
+            <div className="absolute inset-0 w-full h-full pointer-events-none overflow-hidden opacity-50 mix-blend-screen transition-opacity duration-1000">
+              <iframe
+                src={currentMedia.url}
+                className="w-full h-full object-cover scale-125"
+                allow="autoplay; encrypted-media"
+                title="Hero Background Video"
+              />
+            </div>
+          ) : currentMedia?.type === 'image' ? (
+            <img 
+              src={currentMedia.url} 
+              alt="Hero Backdrop" 
+              className={`absolute inset-0 w-full h-full object-cover ${opacityClass} transition-opacity duration-1000`} 
+            />
+          ) : (
+            <img 
+              src="https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=1600&q=80" 
+              alt="Default Backdrop" 
+              className={`absolute inset-0 w-full h-full object-cover ${opacityClass} transition-opacity duration-1000`} 
+            />
+          )}
+          
+          <div className="absolute inset-0 bg-gradient-to-t from-emerald-950 via-emerald-950/40 to-transparent flex flex-col justify-center items-center text-center p-6 z-10">
+            <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest mb-6 animate-pulse">
+              {heroSettings?.badgeText || '🌱 Pure Kenya Agricultural Harvest'}
+            </span>
+            <h1 className="text-4xl sm:text-6xl md:text-7xl font-black text-white mb-6 drop-shadow-2xl tracking-tight max-w-4xl leading-none">
+              {heroSettings?.title || 'Direct From Mwea Paddy Fields'}
+            </h1>
+            <p className="text-lg sm:text-xl md:text-2xl text-emerald-100 mb-10 max-w-2xl font-medium drop-shadow leading-relaxed">
+              {heroSettings?.subtitle || '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.'}
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4">
+              <button onClick={() => setView('shop')} className="bg-emerald-500 text-white px-8 py-4 rounded-full font-black text-lg hover:bg-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.4)] transition-all transform hover:scale-105 flex items-center justify-center">
+                {heroSettings?.ctaButtonText || 'Explore Grain Catalog'} <ChevronRight className="ml-2 h-5 w-5" />
+              </button>
+              <button onClick={() => setView('profile')} className="bg-emerald-900/80 border border-emerald-700 text-white px-8 py-4 rounded-full font-bold text-lg hover:bg-emerald-800 transition-all">
+                {heroSettings?.secondaryButtonText || 'Track Order Status'}
+              </button>
+            </div>
+            
+            <div className="mt-8 text-xs text-emerald-300 font-semibold flex items-center gap-4 bg-emerald-950/80 px-6 py-2 rounded-full border border-emerald-800">
+              <span>🛡️ {heroSettings?.customerTrustBadgeText || 'Verified Mwea Milling Standards'}</span>
+              <span>•</span>
+              <span>📞 {heroSettings?.supportHotlineDisplay || '+254 700 000000'}</span>
+            </div>
+          </div>
+        </div>
+
+        {carousel && carousel.length > 0 && (
+          <div className="max-w-7xl mx-auto py-16 px-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {carousel.map((slide, idx) => (
+                <div key={idx} className="relative rounded-3xl overflow-hidden shadow-lg group h-64 bg-emerald-900 border border-emerald-800/60">
+                  <img src={slide.url} alt={slide.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 opacity-60" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-emerald-950 via-emerald-950/30 to-transparent p-6 flex flex-col justify-end">
+                    <h3 className="text-xl font-black text-white mb-1">{slide.title}</h3>
+                    <p className="text-xs text-emerald-200 font-medium line-clamp-2">{slide.subtitle}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="max-w-7xl mx-auto pb-20 px-4">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl sm:text-4xl font-black text-emerald-950 mb-3">Featured Grain Selections</h2>
+            <p className="text-gray-600 max-w-xl mx-auto text-base">Cultivated in rich soils, aged to perfection, and sorted for unmatched aroma and grain length.</p>
+          </div>
+          
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
+            {products.slice(0, 4).map(p => (
+              <div key={p.id} className="bg-white rounded-2xl sm:rounded-3xl shadow-md overflow-hidden border border-emerald-100 hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 flex flex-col group">
+                <div className="h-32 sm:h-56 bg-emerald-50 flex items-center justify-center relative overflow-hidden border-b border-emerald-100">
+                  {p.imageUrl ? (
+                    <img src={p.imageUrl} alt={p.variety} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                  ) : (
+                    <Package className="h-12 w-12 sm:h-20 sm:w-20 text-emerald-300 group-hover:scale-110 transition-transform duration-500" />
+                  )}
+                  {p.isBlackFridayApplied && <span className="absolute top-2 right-2 sm:top-4 sm:right-4 bg-rose-500 text-white text-[10px] sm:text-xs font-black px-2 py-1 sm:px-3 sm:py-1.5 rounded-full shadow-lg">SALE</span>}
+                </div>
+                <div className="p-3 sm:p-6 flex-1 flex flex-col">
+                  <div className="text-[10px] sm:text-xs font-black text-emerald-600 uppercase tracking-widest mb-1">{p.brandName}</div>
+                  <h3 className="font-black text-sm sm:text-xl mb-1 sm:mb-2 text-gray-900 group-hover:text-emerald-700 transition-colors leading-tight">{p.variety}</h3>
+                  <p className="text-gray-500 text-[10px] sm:text-xs mb-3 sm:mb-6 flex items-center font-medium">
+                    <MapPin size={12} className="mr-1 text-emerald-500 hidden sm:block" /> Net Weight: <span className="font-bold text-gray-700 ml-1">{p.weightKg}kg Bag</span>
+                  </p>
+                  <div className="flex justify-between items-end mt-auto pt-2 sm:pt-4 border-t border-gray-100">
+                    <div>
+                      {p.isBlackFridayApplied && <span className="text-[10px] sm:text-xs text-rose-500 font-bold line-through block mb-0.5">KES {p.basePrice?.toLocaleString()}</span>}
+                      <span className="text-sm sm:text-xl font-black text-emerald-900">KES {p.price?.toLocaleString()}</span>
+                    </div>
+                    <button onClick={() => addToCart(p)} className="bg-emerald-600 text-white p-2 sm:p-3 rounded-xl sm:rounded-2xl hover:bg-emerald-500 transition-all shadow-md hover:shadow-emerald-500/30 font-bold flex items-center text-xs sm:text-sm">
+                      <Plus className="h-4 w-4 sm:mr-1" /> <span className="hidden sm:inline">Add</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderShop = () => {
+    const filteredProducts = products.filter(p => {
+      if (!shopSearch) return true;
+      const q = shopSearch.toLowerCase();
+      return p.brandName?.toLowerCase().includes(q) || p.variety?.toLowerCase().includes(q);
+    });
+
+    return (
+      <div className="max-w-7xl mx-auto py-12 px-4 animate-fadeIn">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4 border-b border-gray-200 pb-8">
+          <div>
+            <h1 className="text-4xl font-black text-emerald-950">Complete Grain Catalog</h1>
+            <p className="text-gray-500 mt-1 font-medium">Browse wholesale sacks, aromatic grades, and household bags.</p>
+          </div>
+          <div className="relative w-full md:w-80">
+            <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+            <input 
+              type="text" 
+              placeholder="Search rice brand or variety..." 
+              value={shopSearch}
+              onChange={(e) => setShopSearch(e.target.value)}
+              className="text-black bg-white pl-12 pr-4 py-3 border-2 border-emerald-100 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-50 w-full font-bold text-sm shadow-sm transition-all" 
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">
+          {filteredProducts.map(p => (
+            <div key={p.id} className={`bg-white rounded-2xl sm:rounded-3xl shadow-sm hover:shadow-xl transition-all duration-300 border ${p.stockQuantity <= 0 ? 'opacity-70 grayscale' : 'border-emerald-100'} flex flex-col group overflow-hidden`}>
+               <div className="h-32 sm:h-48 bg-emerald-50/50 flex flex-col justify-center items-center relative overflow-hidden border-b border-emerald-50">
+                 {p.imageUrl ? (
+                   <img src={p.imageUrl} alt={p.variety} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                 ) : (
+                   <Package className="h-10 w-10 sm:h-16 sm:w-16 text-emerald-300 group-hover:scale-110 transition-transform duration-300" />
+                 )}
+                 {p.isBlackFridayApplied && <span className="absolute top-2 right-2 bg-rose-500 text-white text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-full shadow z-10">SALE</span>}
+                 {p.stockQuantity <= 0 && <span className="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center text-white font-black text-xs sm:text-sm uppercase tracking-widest z-10 text-center">Out of Stock</span>}
+               </div>
+               
+               <div className="p-3 sm:p-5 flex-1 flex flex-col">
+                 <div className="text-[9px] sm:text-[11px] font-black text-emerald-600 uppercase tracking-widest mb-1">{p.brandName}</div>
+                 <h3 className="font-bold text-sm sm:text-lg text-gray-900 mb-2 leading-tight">{p.variety}</h3>
+                 <div className="text-[10px] sm:text-xs text-gray-500 mb-3 sm:mb-6 space-y-1 bg-gray-50 p-2 rounded-lg sm:rounded-xl border border-gray-100">
+                   <div className="flex justify-between"><span>Weight:</span><span className="font-bold text-gray-800">{p.weightKg} kg</span></div>
+                   <div className="flex justify-between"><span>Inventory:</span><span className={`font-bold ${p.stockQuantity > 10 ? 'text-emerald-600' : 'text-rose-500'}`}>{p.stockQuantity} bags</span></div>
+                 </div>
+                 
+                 <div className="mt-auto flex flex-col sm:flex-row justify-between sm:items-center pt-2 gap-2">
+                   <div>
+                      {p.isBlackFridayApplied && <span className="text-[10px] sm:text-[11px] text-rose-500 font-bold line-through block">KES {p.basePrice?.toLocaleString()}</span>}
+                      <div className="font-black text-base sm:text-xl text-emerald-950">KES {p.price?.toLocaleString()}</div>
+                   </div>
+                   <button 
+                     onClick={() => addToCart(p)}
+                     disabled={p.stockQuantity <= 0}
+                     className={`px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl text-[10px] sm:text-xs font-black transition-all shadow-sm ${p.stockQuantity <= 0 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-500 hover:shadow-md transform hover:-translate-y-0.5'}`}
+                   >
+                     Add to Bag
+                   </button>
+                 </div>
+               </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderCart = () => {
+    const handleCheckout = async () => {
+      if (!user) return showToast('Please sign in to place your order', 'error');
+      if (!checkoutData.county) return showToast('Please select your delivery county', 'error');
+      if (!checkoutData.town || !checkoutData.location) {
+        return showToast('Please select Town/District and Location from the logistics dropdowns', 'error');
       }
-    });
-
-    // --- ADMIN UPDATE MONTHLY BUYING PRICE PER PRODUCT ---
-    expressApp.put('/api/admin/products/:id/buying-price', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { buyingPrice } = req.body || {};
-        if (buyingPrice === undefined || isNaN(Number(buyingPrice))) {
-          return res.status(400).json({ error: 'Valid numerical buyingPrice parameter is required' });
-        }
-
-        const product = await RiceProduct.findByPk(req.params.id);
-        if (!product) return res.status(404).json({ error: 'Rice product not found' });
-
-        const oldBuyingPrice = product.buyingPrice;
-        product.buyingPrice = Number(buyingPrice);
-        await product.save();
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'UPDATE_PRODUCT_BUYING_PRICE',
-          targetType: 'product',
-          targetId: product.id,
-          changes: { oldBuyingPrice, newBuyingPrice: product.buyingPrice },
-          ipAddress: req.ip
-        });
-
-        res.json({
-          message: `Buying price for ${product.brandName} updated successfully`,
-          productId: product.id,
-          buyingPrice: product.buyingPrice
-        });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
+      
+      const targetPhone = checkoutData.paymentMethod === 'stk' ? (checkoutData.stkPhoneNumber || user?.phoneNumber) : user?.phoneNumber;
+      
+      if (checkoutData.paymentMethod === 'stk' && !targetPhone) {
+        return showToast('Please provide a valid M-Pesa phone number for STK Push', 'error');
       }
-    });
 
-    // --- BATCH UPDATE BUYING PRICES FOR ALL PRODUCTS ---
-    expressApp.post('/api/admin/products/buying-prices/batch', authenticateToken, requireAdmin, async (req, res) => {
+      setIsCheckingOut(true);
       try {
-        const { updates } = req.body || {}; // Array of { id, buyingPrice }
-        if (!Array.isArray(updates)) {
-          return res.status(400).json({ error: 'Updates must be an array of objects containing id and buyingPrice' });
-        }
-
-        const updatedRecords = [];
-        for (const item of updates) {
-          if (item.id && item.buyingPrice !== undefined) {
-            const product = await RiceProduct.findByPk(item.id);
-            if (product) {
-              product.buyingPrice = Number(item.buyingPrice);
-              await product.save();
-              updatedRecords.push({ id: product.id, brandName: product.brandName, buyingPrice: product.buyingPrice });
-            }
-          }
-        }
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'BATCH_UPDATE_BUYING_PRICES',
-          targetType: 'product',
-          changes: updates,
-          ipAddress: req.ip
-        });
-
-        res.json({ message: 'Batch buying prices updated successfully', updatedRecords });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.post('/api/admin/upload', authenticateToken, requireAdmin, upload.single('image'), (req, res) => {
-      try {
-        if (!req.file) return res.status(400).json({ error: 'No file buffered to stream' });
-        const fileUrl = `/uploads/${req.file.filename}`;
-        res.json({ url: fileUrl, imageUrl: fileUrl });
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    });
-
-    const addProductHandler = async (req, res) => {
-      try {
-        console.log("DEBUG: Raw Product Payload:", req.body); 
         const payload = {
-          ...req.body,
-          brandName: req.body.brandName || req.body.brand || 'Premium Rice',
-          variety: req.body.variety || 'Aromatic Pishori',
-          weightKg: Number(req.body.weightKg || req.body.weight || 0),
-          basePrice: Number(req.body.basePrice || req.body.price || 0),
-          buyingPrice: req.body.buyingPrice !== undefined && req.body.buyingPrice !== null && req.body.buyingPrice !== '' ? Number(req.body.buyingPrice) : (Number(req.body.basePrice || req.body.price || 0) * 0.75),
-          flashSalePrice: req.body.flashSalePrice !== undefined && req.body.flashSalePrice !== null && req.body.flashSalePrice !== '' ? Number(req.body.flashSalePrice) : null,
-          stockQuantity: Number(req.body.stockQuantity || req.body.stock || 0),
-          imageUrl: req.body.imageUrl || req.body.image || req.body.url || null,
-          isAvailable: req.body.isAvailable !== undefined ? Boolean(req.body.isAvailable) : true
+          cartItems: cart.map(item => ({ productId: item.productId, quantity: item.quantity })),
+          paymentMethod: checkoutData.paymentMethod,
+          phoneNumber: targetPhone,
+          county: checkoutData.county,
+          town: checkoutData.town,
+          location: checkoutData.location,
+          sublocation: checkoutData.sublocation,
+          shippingAddress: checkoutData.shippingAddress,
+          shippingFee: activeTransportFee,
+          grandTotal: cartTotal
         };
 
-        const createdRecord = await RiceProduct.create(payload);
-        
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'CREATE_PRODUCT',
-          targetType: 'product',
-          targetId: createdRecord.id,
-          changes: { brand: createdRecord.brandName, variety: createdRecord.variety },
-          ipAddress: req.ip
-        });
-        
-        res.status(201).json(createdRecord);
-      } catch (err) {
-        if (err.name === 'SequelizeValidationError') {
-          console.error("DEBUG: VALIDATION ERROR:", err.errors.map(e => e.message));
-          return res.status(400).json({ error: 'Validation Failed', details: err.errors.map(e => e.message) });
-        }
-        console.error("DEBUG: SERVER ERROR:", err);
-        res.status(500).json({ error: err.message }); 
-      }
-    };
-
-    expressApp.post('/api/admin/products', authenticateToken, requireAdmin, addProductHandler);
-    expressApp.post('/api/admin/products/add', authenticateToken, requireAdmin, addProductHandler);
-    expressApp.post('/api/admin/laptops/add', authenticateToken, requireAdmin, addProductHandler);
-
-    const editProductHandler = async (req, res) => {
-      try {
-        const updatePayload = {
-          ...req.body
-        };
-        if (req.body.price !== undefined && req.body.basePrice === undefined) {
-          updatePayload.basePrice = Number(req.body.price);
-        }
-        if (req.body.image !== undefined && req.body.imageUrl === undefined) {
-          updatePayload.imageUrl = req.body.image;
-        }
-
-        await RiceProduct.update(updatePayload, { where: { id: req.params.id } });
-        const updatedProduct = await RiceProduct.findByPk(req.params.id);
-        
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'EDIT_PRODUCT_SPEC_OR_PRICE',
-          targetType: 'product',
-          targetId: updatedProduct ? updatedProduct.id : req.params.id,
-          changes: req.body,
-          ipAddress: req.ip
-        });
-        res.json(updatedProduct);
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    };
-
-    expressApp.put('/api/admin/products/:id', authenticateToken, requireAdmin, editProductHandler);
-    expressApp.put('/api/admin/products/:id/edit', authenticateToken, requireAdmin, editProductHandler);
-    expressApp.put('/api/admin/laptops/:id/edit', authenticateToken, requireAdmin, editProductHandler);
-
-    const deleteProductHandler = async (req, res) => {
-      try {
-        await RiceProduct.destroy({ where: { id: req.params.id } });
-        
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'DELETE_PRODUCT',
-          targetType: 'product',
-          targetId: req.params.id,
-          ipAddress: req.ip
+        const res = await fetch(`${API_BASE_URL}/orders/create`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify(payload)
         });
 
-        res.json({ message: 'Catalog item wiped permanently.' });
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    };
-
-    expressApp.delete('/api/admin/products/:id', authenticateToken, requireAdmin, deleteProductHandler);
-    expressApp.delete('/api/admin/products/:id/destroy', authenticateToken, requireAdmin, deleteProductHandler);
-    expressApp.delete('/api/admin/laptops/:id/destroy', authenticateToken, requireAdmin, deleteProductHandler);
-
-    // --- GET ADMIN ORDERS WITH FULL USER DETAILS, SHIPPING DETAILS & CATEGORY FILTERING ---
-    expressApp.get('/api/admin/orders', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { search, category } = req.query;
-        const include = [{
-          model: User,
-          attributes: ['id', 'fullName', 'phoneNumber', 'email', 'role', 'isActive', 'rewardPoints']
-        }];
-
-        let whereCondition = {};
-        
-        if (search && search.trim() !== '') {
-          const searchStr = `%${search.trim()}%`;
-          whereCondition[Op.or] = [
-            { id: { [Op.like]: searchStr } },
-            { county: { [Op.like]: searchStr } },
-            { town: { [Op.like]: searchStr } },
-            { location: { [Op.like]: searchStr } },
-            { '$User.fullName$': { [Op.like]: searchStr } },
-            { '$User.phoneNumber$': { [Op.like]: searchStr } },
-            { '$User.email$': { [Op.like]: searchStr } }
-          ];
-        }
-
-        const orders = await Order.findAll({
-          where: whereCondition,
-          include: include,
-          order: [['createdAt', 'DESC']]
-        });
-
-        // Dynamic Filtering for Pending Transactions vs Completed Transactions
-        const formattedOrders = orders.map(order => {
-          const o = order.toJSON();
-          const isPaid = o.paymentDetails && (o.paymentDetails.isPaid === true || o.paymentDetails.paidTag === 'PAID' || o.status === 'paid');
-          const isDelivered = o.status === 'delivered';
+        if (res.ok) {
+          const data = await res.json();
           
-          return {
-            ...o,
-            isPaid,
-            isDelivered,
-            // Tag category: "pending_shipping" (paid, awaiting delivery) vs "delivered" (completed)
-            transactionCategory: isPaid ? (isDelivered ? 'completed' : 'pending_shipping') : 'unpaid',
-            userName: o.User ? o.User.fullName : 'Guest/N/A',
-            userPhone: o.User ? o.User.phoneNumber : 'N/A',
-            userEmail: o.User ? o.User.email : 'N/A'
-          };
-        });
+          if (checkoutData.paymentMethod === 'stk') {
+            showToast(`📲 STK Push successfully initiated to ${targetPhone}! Please enter your M-Pesa PIN when prompted.`, 'success');
+            try {
+               await fetch(`${API_BASE_URL}/payments/stkpush`, {
+                 method: 'POST',
+                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                 body: JSON.stringify({ orderId: data.id || data.order?.id, amount: cartTotal, phoneNumber: targetPhone })
+               });
+            } catch (err) {
+               console.error("STK trigger request error:", err);
+            }
+          } else {
+            showToast('🌾 Order placed successfully! Direct logistics dispatched.', 'success');
+          }
 
-        if (category === 'pending_shipping' || category === 'pending') {
-          return res.json(formattedOrders.filter(o => o.transactionCategory === 'pending_shipping'));
-        } else if (category === 'completed' || category === 'delivered') {
-          return res.json(formattedOrders.filter(o => o.transactionCategory === 'completed'));
+          setCart([]);
+          setView('profile');
+        } else {
+          const err = await res.json();
+          showToast(err.error || 'Checkout processing failed', 'error');
         }
-
-        res.json(formattedOrders);
       } catch (err) {
-        console.error("DEBUG: Order Fetch Error:", err);
-        res.status(500).json({ error: err.message });
+        showToast('Network communication error during checkout', 'error');
       }
-    });
+      setIsCheckingOut(false);
+    };
 
-    // --- SPECIALIZED ENDPOINT: ALL PENDING SHIPPING TRANSACTIONS ---
-    expressApp.get('/api/admin/orders/pending-transactions', authenticateToken, requireAdmin, async (req, res) => {
+    const currentRegionalData = REGIONAL_LOGISTICS_DATA[checkoutData.county] || DEFAULT_REGIONAL_LOGISTICS;
+
+    return (
+      <div className="max-w-7xl mx-auto py-12 px-4 animate-fadeIn">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
+          <h1 className="text-3xl sm:text-4xl font-black text-emerald-950 flex items-center">
+            <ShoppingBag className="mr-3 h-9 w-9 text-emerald-600" /> Shopping Bag
+          </h1>
+          {cart.length > 0 && (
+            <button onClick={clearCart} className="text-rose-500 hover:text-white bg-rose-50 hover:bg-rose-500 border border-rose-100 font-bold flex items-center text-sm px-4 py-2 rounded-xl transition-all shadow-sm">
+              <Trash2 className="h-4 w-4 mr-1.5"/> Clear Entire Cart
+            </button>
+          )}
+        </div>
+        
+        {cart.length === 0 ? (
+          <div className="text-center py-24 bg-white rounded-3xl shadow-sm border border-emerald-100 max-w-2xl mx-auto">
+            <div className="bg-emerald-50 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6">
+              <ShoppingCart className="h-12 w-12 text-emerald-400" />
+            </div>
+            <h2 className="text-2xl font-black text-gray-900 mb-2">Your grain sack is currently empty</h2>
+            <p className="text-gray-500 mb-8 font-medium">Browse our freshly harvested Pishori and Basmati grades to begin.</p>
+            <button onClick={() => setView('shop')} className="bg-emerald-600 text-white px-8 py-3.5 rounded-full font-bold shadow-lg hover:bg-emerald-500 transition-all">Go to Grain Catalog</button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+            <div className="lg:col-span-7 space-y-4">
+              <h2 className="font-bold text-lg text-gray-800 mb-2">Selected Products ({cart.length})</h2>
+              {cart.map(item => (
+                <div key={item.productId} className="flex flex-col sm:flex-row items-center justify-between bg-white p-5 rounded-3xl shadow-sm border border-gray-100 gap-4">
+                  <div className="flex items-center gap-4 w-full sm:w-auto">
+                    <div className="w-20 h-20 bg-emerald-50 rounded-2xl flex items-center justify-center border border-emerald-100 shrink-0 overflow-hidden">
+                      {item.product.imageUrl ? (
+                        <img src={item.product.imageUrl} alt={item.product.variety} className="w-full h-full object-cover" />
+                      ) : (
+                        <Package className="text-emerald-400 h-10 w-10" />
+                      )}
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest block">{item.product.brandName}</span>
+                      <h3 className="font-bold text-lg text-gray-900 leading-snug">{item.product.variety}</h3>
+                      <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded-md mt-1 inline-block">{item.product.weightKg}kg Sack</span>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-6 border-t sm:border-t-0 pt-4 sm:pt-0 border-gray-100">
+                    <div className="flex items-center bg-gray-100 rounded-xl p-1 border border-gray-200">
+                      <button onClick={() => updateCartQuantity(item.productId, -1)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-white text-gray-700 hover:text-emerald-600 shadow-xs font-black">-</button>
+                      <span className="w-10 text-center font-bold text-sm text-gray-900">{item.quantity}</span>
+                      <button onClick={() => updateCartQuantity(item.productId, 1)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-white text-gray-700 hover:text-emerald-600 shadow-xs font-black">+</button>
+                    </div>
+                    <div className="font-black text-lg text-emerald-950 w-28 text-right">KES {(item.price * item.quantity).toLocaleString()}</div>
+                    <button onClick={() => updateCartQuantity(item.productId, -item.quantity)} className="text-gray-400 hover:text-rose-500 p-2 hover:bg-rose-50 rounded-xl transition-colors">
+                      <Trash2 className="h-5 w-5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="lg:col-span-5 bg-white p-6 sm:p-8 rounded-3xl shadow-xl border border-emerald-100 h-fit sticky top-28">
+              <h2 className="text-xl font-black text-gray-900 mb-6 border-b border-gray-100 pb-4 flex items-center">
+                <MapPin className="mr-2 text-emerald-600 h-5 w-5" /> Delivery & Logistics Details
+              </h2>
+              
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Select County (47 Counties Supported)</label>
+                  <select 
+                    value={checkoutData.county} 
+                    onChange={(e) => setCheckoutData({...checkoutData, county: e.target.value})} 
+                    className="w-full text-black border-2 border-gray-200 rounded-xl px-4 py-3 bg-white focus:border-emerald-500 outline-none transition-all text-sm font-bold"
+                  >
+                    {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c} County</option>)}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Town / District *</label>
+                    <select 
+                      value={checkoutData.town} 
+                      onChange={(e) => setCheckoutData({...checkoutData, town: e.target.value})} 
+                      className="w-full text-black border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-emerald-500 outline-none"
+                    >
+                      {currentRegionalData.towns.map((t, idx) => <option key={idx} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Location *</label>
+                    <select 
+                      value={checkoutData.location} 
+                      onChange={(e) => setCheckoutData({...checkoutData, location: e.target.value})} 
+                      className="w-full text-black border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-emerald-500 outline-none"
+                    >
+                      {currentRegionalData.locations.map((loc, idx) => <option key={idx} value={loc}>{loc}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Sub-Location</label>
+                    <select 
+                      value={checkoutData.sublocation} 
+                      onChange={(e) => setCheckoutData({...checkoutData, sublocation: e.target.value})} 
+                      className="w-full text-black border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-emerald-500 outline-none"
+                    >
+                      {currentRegionalData.sublocations.map((sub, idx) => <option key={idx} value={sub}>{sub}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Street Address</label>
+                    <select 
+                      value={checkoutData.shippingAddress} 
+                      onChange={(e) => setCheckoutData({...checkoutData, shippingAddress: e.target.value})} 
+                      className="w-full text-black border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-emerald-500 outline-none"
+                    >
+                      {currentRegionalData.streets.map((str, idx) => <option key={idx} value={str}>{str}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Payment Method</label>
+                  <select 
+                    value={checkoutData.paymentMethod} 
+                    onChange={(e) => setCheckoutData({...checkoutData, paymentMethod: e.target.value})} 
+                    className="w-full text-black border-2 border-gray-200 rounded-xl px-4 py-3 bg-white focus:border-emerald-500 outline-none font-bold text-sm"
+                  >
+                    <option value="stk">🟢 M-Pesa STK Push Express</option>
+                    <option value="till">🏪 M-Pesa Paybill / Till Number</option>
+                  </select>
+                </div>
+
+                {checkoutData.paymentMethod === 'till' && (
+                  <div className="bg-emerald-950 text-white p-4 rounded-2xl border border-emerald-800 text-center animate-fadeIn shadow-inner mt-2">
+                    <span className="text-[10px] text-emerald-400 uppercase font-black tracking-widest block mb-1">MWEA HUB MERCHANDISE PAYBILL</span>
+                    <div className="text-2xl font-mono font-black tracking-wider text-emerald-300">PAYBILL: 889900</div>
+                    <span className="text-xs text-gray-300 font-medium block mt-1">Account Number: <strong className="text-white">MWEA-DIRECT</strong></span>
+                  </div>
+                )}
+
+                {checkoutData.paymentMethod === 'stk' && (
+                  <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200 flex flex-col gap-3 text-emerald-900 text-xs font-bold animate-fadeIn mt-2">
+                    <div className="flex items-start gap-3">
+                      <Smartphone className="h-6 w-6 text-emerald-600 shrink-0" />
+                      <span className="leading-relaxed">An STK Push prompt will instantly pop up on the mobile number below. Please enter your M-Pesa PIN when prompted.</span>
+                    </div>
+                    <div className="mt-1">
+                      <label className="block text-[10px] font-black uppercase text-emerald-800 mb-1">M-Pesa Mobile Number</label>
+                      <input 
+                        type="tel"
+                        value={checkoutData.stkPhoneNumber}
+                        onChange={(e) => setCheckoutData({...checkoutData, stkPhoneNumber: e.target.value})}
+                        placeholder="e.g. 254712345678"
+                        className="w-full bg-white text-black border border-emerald-300 rounded-xl px-4 py-2.5 text-sm font-bold focus:border-emerald-500 outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-100 mb-6 text-sm">
+                <h3 className="font-black text-emerald-900 mb-3 border-b border-emerald-200 pb-2 flex items-center">
+                  <MapPin className="h-4 w-4 mr-1.5 text-emerald-600" /> Confirmed Delivery Logistics
+                </h3>
+                <ul className="space-y-1.5 text-gray-700 font-medium">
+                  <li className="flex justify-between"><span className="text-gray-500">County:</span> <strong className="text-right">{checkoutData.county}</strong></li>
+                  <li className="flex justify-between"><span className="text-gray-500">Town/District:</span> <strong className="text-right">{checkoutData.town}</strong></li>
+                  <li className="flex justify-between"><span className="text-gray-500">Location:</span> <strong className="text-right">{checkoutData.location}</strong></li>
+                  <li className="flex justify-between"><span className="text-gray-500">Sub-location:</span> <strong className="text-right">{checkoutData.sublocation}</strong></li>
+                  <li className="flex justify-between"><span className="text-gray-500">Street Address:</span> <strong className="text-right">{checkoutData.shippingAddress}</strong></li>
+                </ul>
+              </div>
+
+              <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-100 space-y-2 mb-6 text-sm font-medium">
+                <div className="flex justify-between text-gray-600"><span>Bag Subtotal</span><span className="font-bold text-gray-900">KES {cartSubtotal.toLocaleString()}</span></div>
+                <div className="flex justify-between text-gray-600">
+                  <span>Transport & Logistics ({checkoutData.county})</span>
+                  <span className="font-bold text-emerald-700">KES {activeTransportFee.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between font-black text-lg text-emerald-950 border-t border-emerald-200/80 pt-3 mt-1">
+                  <span>Total Amount</span><span>KES {cartTotal.toLocaleString()}</span>
+                </div>
+              </div>
+
+              {!user ? (
+                <button onClick={() => setView('login')} className="w-full bg-emerald-950 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-emerald-900 transition-colors">Sign In to Complete Order</button>
+              ) : (
+                <button 
+                  onClick={handleCheckout} 
+                  disabled={isCheckingOut}
+                  className={`w-full py-4 rounded-2xl font-black text-base flex justify-center items-center shadow-lg transition-all transform hover:-translate-y-0.5 ${
+                    checkoutData.paymentMethod === 'stk'
+                      ? 'bg-emerald-500 hover:bg-emerald-400 text-white hover:shadow-emerald-500/40'
+                      : 'bg-emerald-600 hover:bg-emerald-500 text-white hover:shadow-emerald-500/30'
+                  }`}
+                >
+                  {isCheckingOut ? (
+                    <><Activity className="animate-spin mr-2 h-5 w-5" /> Processing Order...</>
+                  ) : checkoutData.paymentMethod === 'stk' ? (
+                    <><Smartphone className="mr-2 h-5 w-5" /> Initiate STK Push & Pay KES {cartTotal.toLocaleString()}</>
+                  ) : (
+                    <><CheckCircle className="mr-2 h-5 w-5" /> Confirm Order & Pay KES {cartTotal.toLocaleString()}</>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderAuth = () => {
+    const handleResetRequest = async (e: React.FormEvent) => {
+      e.preventDefault();
       try {
-        const orders = await Order.findAll({
-          include: [{
-            model: User,
-            attributes: ['id', 'fullName', 'phoneNumber', 'email']
-          }],
-          order: [['createdAt', 'DESC']]
+        const res = await fetch(`${API_BASE_URL}/user/forgot-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phoneNumber: formData.phoneNumber })
         });
+        const data = await res.json();
+        if (res.ok) {
+          showToast('Password reset code sent to your phone!', 'success');
+          setResetStep('reset');
+        } else {
+          showToast(data.error || 'Failed to initiate reset', 'error');
+        }
+      } catch (err) {
+        showToast('Network error', 'error');
+      }
+    };
 
-        const pendingTransactions = orders
-          .map(order => {
-            const o = order.toJSON();
-            const isPaid = o.paymentDetails && (o.paymentDetails.isPaid === true || o.paymentDetails.paidTag === 'PAID' || o.status === 'paid');
-            const isDelivered = o.status === 'delivered';
-            
-            return {
-              ...o,
-              isPaid,
-              userName: o.User ? o.User.fullName : 'N/A',
-              userPhone: o.User ? o.User.phoneNumber : 'N/A',
-              userEmail: o.User ? o.User.email : 'N/A',
-              transactionCategory: isPaid ? (isDelivered ? 'completed' : 'pending_shipping') : 'unpaid'
-            };
+    const handlePasswordReset = async (e: React.FormEvent) => {
+      e.preventDefault();
+      try {
+        const res = await fetch(`${API_BASE_URL}/user/reset-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+             phoneNumber: formData.phoneNumber,
+             resetToken: formData.resetToken,
+             newPassword: formData.newPassword
           })
-          .filter(o => o.isPaid && !o.isDelivered);
-
-        res.json(pendingTransactions);
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.get('/api/admin/orders/export/csv', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const orders = await Order.findAll({
-          include: [{ model: User, attributes: ['fullName', 'phoneNumber', 'email'] }],
-          order: [['createdAt', 'DESC']]
         });
-
-        let csv = 'Order ID,Customer Name,Phone Number,Email,County,Town,Location,Sublocation,Street Address,Grand Total (KES),Payment Status,M-Pesa Receipt,Delivery Status,Order Date\n';
-        
-        orders.forEach(o => {
-          const customerName = o.User ? o.User.fullName.replace(/,/g, ' ') : 'N/A';
-          const phone = o.User ? o.User.phoneNumber : 'N/A';
-          const email = o.User ? o.User.email || 'N/A' : 'N/A';
-          const county = (o.county || '').replace(/,/g, ' ');
-          const town = (o.town || '').replace(/,/g, ' ');
-          const loc = (o.location || '').replace(/,/g, ' ');
-          const subloc = (o.sublocation || '').replace(/,/g, ' ');
-          const street = (o.shippingAddress?.streetAddress || o.shippingAddress?.details || '').replace(/,/g, ' ');
-          const payTag = o.paymentDetails ? (o.paymentDetails.paidTag || (o.paymentDetails.isPaid ? 'PAID' : 'PENDING')) : 'PENDING';
-          const receipt = o.paymentDetails ? (o.paymentDetails.mpesaReceipt || 'N/A') : 'N/A';
-          const dateStr = new Date(o.createdAt).toISOString().split('T')[0];
-          
-          csv += `${o.id},"${customerName}",${phone},${email},${county},${town},${loc},${subloc},"${street}",${o.grandTotal},${payTag},${receipt},${o.status},${dateStr}\n`;
-        });
-
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename=delivery-history-${Date.now()}.csv`);
-        res.status(200).send(csv);
-      } catch (err) {
-        console.error("DEBUG: CSV Export Error:", err);
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.put('/api/admin/orders/:id/status', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const order = await Order.findByPk(req.params.id);
-        if (!order) return res.status(404).json({ error: 'Order not found' });
-        
-        const oldStatus = order.status;
-        order.status = req.body.status;
-        await order.save();
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'UPDATE_ORDER_STATUS',
-          targetType: 'order',
-          targetId: order.id,
-          changes: { oldStatus, newStatus: req.body.status },
-          ipAddress: req.ip
-        });
-
-        io.emit('orderStatusUpdated', order);
-        res.json(order);
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    });
-
-    // --- ADMIN MANUAL PAYMENT STATUS OVERRIDE ---
-    expressApp.put('/api/admin/orders/:id/payment-status', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { isPaid, paidTag, mpesaReceipt, failureReason, method } = req.body || {};
-        const order = await Order.findByPk(req.params.id);
-        if (!order) return res.status(404).json({ error: 'Order not found' });
-
-        const currentPaymentDetails = order.paymentDetails || {};
-        const updatedIsPaid = isPaid !== undefined ? Boolean(isPaid) : currentPaymentDetails.isPaid;
-
-        order.paymentDetails = {
-          ...currentPaymentDetails,
-          isPaid: updatedIsPaid,
-          paidTag: paidTag || (updatedIsPaid ? 'PAID' : 'PENDING'),
-          mpesaReceipt: mpesaReceipt !== undefined ? mpesaReceipt : currentPaymentDetails.mpesaReceipt,
-          failureReason: failureReason !== undefined ? failureReason : currentPaymentDetails.failureReason,
-          method: method || currentPaymentDetails.method || 'mpesa_stk',
-          paidAt: updatedIsPaid ? (currentPaymentDetails.paidAt || new Date()) : currentPaymentDetails.paidAt
-        };
-
-        if (updatedIsPaid && order.status === 'payment_failed') {
-          order.status = 'pending';
-        }
-
-        await order.save();
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'UPDATE_ORDER_PAYMENT_STATUS',
-          targetType: 'order',
-          targetId: order.id,
-          changes: req.body,
-          ipAddress: req.ip
-        });
-
-        io.emit('orderStatusUpdated', order);
-        res.json(order);
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const systemRegisteredUsers = await User.findAll({ attributes: { exclude: ['password'] } });
-        res.json(systemRegisteredUsers);
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    });
-
-    expressApp.put('/api/admin/users/:id/modify', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { fullName, role, isActive } = req.body || {};
-        const targetUserRecord = await User.findByPk(req.params.id);
-        if (!targetUserRecord) return res.status(404).json({ error: 'Invalid document' });
-
-        if (fullName !== undefined) targetUserRecord.fullName = fullName;
-        if (role !== undefined) targetUserRecord.role = role;
-        if (isActive !== undefined) targetUserRecord.isActive = isActive;
-
-        await targetUserRecord.save();
-        
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'MODIFY_USER_CLEARANCE',
-          targetType: 'user',
-          targetId: targetUserRecord.id,
-          changes: req.body,
-          ipAddress: req.ip
-        });
-
-        res.json({ message: 'User updated', record: targetUserRecord });
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    });
-
-    expressApp.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const targetUserRecord = await User.findByPk(req.params.id);
-        if (!targetUserRecord) return res.status(404).json({ error: 'User not found' });
-        if (targetUserRecord.id === req.user.id) return res.status(403).json({ error: 'Cannot delete current active session admin' });
-
-        await targetUserRecord.destroy();
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'DELETE_USER',
-          targetType: 'user',
-          targetId: req.params.id,
-          ipAddress: req.ip
-        });
-
-        res.json({ message: 'User permanently deleted' });
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    });
-
-    expressApp.post('/api/admin/config/carousel', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { slides } = req.body || {};
-        if (!Array.isArray(slides)) {
-          return res.status(400).json({ error: 'Slides validation failed: input must be an array' });
-        }
-
-        const processedSlides = slides.map(slide => ({
-          ...slide,
-          duration: slide.duration || (slide.type === 'video' ? 5 : 4)
-        }));
-
-        let config = await SystemConfig.findOne({ where: { key: 'homepage_carousel' } });
-        if (!config) {
-          config = await SystemConfig.create({ key: 'homepage_carousel', value: processedSlides });
+        const data = await res.json();
+        if (res.ok) {
+          showToast('Password reset successful! Please sign in.', 'success');
+          setIsForgotPassword(false);
+          setIsLogin(true);
+          setResetStep('request');
         } else {
-          config.value = processedSlides;
-          config.changed('value', true);
-          await config.save();
+          showToast(data.error || 'Failed to reset password', 'error');
         }
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'UPDATE_CAROUSEL_CONFIG',
-          targetType: 'config',
-          changes: { slides: processedSlides },
-          ipAddress: req.ip
-        });
-
-        io.emit('carouselUpdated', config.value);
-        res.json({ message: 'Homepage carousel configuration synchronized successfully', slides: config.value });
       } catch (err) {
-        res.status(500).json({ error: err.message });
+        showToast('Network error', 'error');
       }
-    });
+    };
 
-    // --- EXPANDED HERO BACKDROP CONFIGURATION API (SUPPORTING 10 CONFIGURATIONS) ---
-    expressApp.post('/api/admin/config/hero', authenticateToken, requireAdmin, async (req, res) => {
+    const handleSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      const endpoint = isLogin ? '/user/login' : '/user/signup';
       try {
-        const { 
-          type, 
-          url, 
-          title, 
-          subtitle, 
-          badgeText,
-          buttonText,
-          buttonLink,
-          secondaryButtonText,
-          secondaryButtonLink,
-          overlayOpacity,
-          alignment,
-          autoPlay,
-          videoDuration, 
-          imageDuration 
-        } = req.body || {};
-        
-        let config = await SystemConfig.findOne({ where: { key: 'hero_settings' } });
-        
-        const newSettings = { 
-          type: type || 'video', 
-          url: url || '', 
-          title: title || 'Direct From Mwea Paddy Fields', 
-          subtitle: subtitle || '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.', 
-          badgeText: badgeText || '🌾 100% Authentic Mwea Harvest',
-          buttonText: buttonText || 'Shop Fresh Harvest Now',
-          buttonLink: buttonLink || '/catalog',
-          secondaryButtonText: secondaryButtonText || 'View Flash Deals',
-          secondaryButtonLink: secondaryButtonLink || '#flash-sales',
-          overlayOpacity: overlayOpacity !== undefined ? Number(overlayOpacity) : 0.4,
-          alignment: alignment || 'center',
-          autoPlay: autoPlay !== undefined ? Boolean(autoPlay) : true,
-          videoDuration: Number(videoDuration || 5),
-          imageDuration: Number(imageDuration || 4)
-        };
-
-        if (!config) {
-          config = await SystemConfig.create({ key: 'hero_settings', value: newSettings });
-        } else {
-          config.value = newSettings;
-          config.changed('value', true);
-          await config.save();
-        }
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'UPDATE_HERO_BACKDROP',
-          targetType: 'config',
-          changes: newSettings,
-          ipAddress: req.ip
+        const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData)
         });
-
-        io.emit('heroUpdated', config.value);
-        res.json({ message: 'Storefront hero backdrop synchronized successfully with 10 configurations', hero: config.value });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.post('/api/admin/config/payment-methods', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { paybillNumber, paybillAccount, tillNumber, stkEnabled } = req.body || {};
-        let config = await SystemConfig.findOne({ where: { key: 'mpesa_config' } });
+        const data = await res.json();
         
-        const updatedMpesaConfig = {
-          paybillNumber: paybillNumber || '522522',
-          paybillAccount: paybillAccount || 'MWEARICE',
-          tillNumber: tillNumber || '889900',
-          stkEnabled: stkEnabled !== undefined ? Boolean(stkEnabled) : true
-        };
-
-        if (!config) {
-          config = await SystemConfig.create({ key: 'mpesa_config', value: updatedMpesaConfig });
-        } else {
-          config.value = updatedMpesaConfig;
-          config.changed('value', true);
-          await config.save();
-        }
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'UPDATE_MPESA_CONFIG',
-          targetType: 'config',
-          changes: updatedMpesaConfig,
-          ipAddress: req.ip
-        });
-
-        res.json({ message: 'M-Pesa payment configuration synchronized successfully', config: config.value });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.post('/api/admin/config/transport', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { amount } = req.body || {};
-        const previousConfig = await SystemConfig.findOne({ where: { key: 'transport_fee' } });
-        
-        let updatedConfig;
-        if (previousConfig) {
-          previousConfig.value = Number(amount);
-          updatedConfig = await previousConfig.save();
-        } else {
-          updatedConfig = await SystemConfig.create({ key: 'transport_fee', value: Number(amount) });
-        }
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'UPDATE_TRANSPORT_FEE',
-          targetType: 'config',
-          changes: { newAmount: amount },
-          ipAddress: req.ip
-        });
-
-        res.json({ message: 'Transport fee updated', config: updatedConfig });
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    });
-
-    expressApp.post('/api/admin/config/black-friday', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { active, durationHours } = req.body || {}; 
-        const currentBfConfig = await SystemConfig.findOne({ where: { key: 'black_friday' } });
-
-        if (active) {
-          const computedExpirationStamp = new Date(Date.now() + ((durationHours || 24) * 60 * 60 * 1000));
-          flashSaleState.active = true;
-          flashSaleState.endTime = computedExpirationStamp.toISOString();
-          
-          if (currentBfConfig) {
-            currentBfConfig.value = { active: true, endTime: flashSaleState.endTime };
-            currentBfConfig.changed('value', true);
-            await currentBfConfig.save();
+        if (res.ok) {
+          try {
+            localStorage.setItem('token', data.token);
+            localStorage.setItem('user', JSON.stringify(data.user));
+          } catch (storageErr) {
+            console.error("Local storage update error:", storageErr);
           }
-
-          startFlashSaleCountdown(io);
-          io.emit('blackFridayStarted', { active: true, endTime: flashSaleState.endTime });
+          setToken(data.token);
+          setUser(data.user);
+          showToast(`Welcome back, ${data.user.fullName}!`, 'success');
+          setView('home');
         } else {
-          if (flashSaleState.countdownIntervalId) clearInterval(flashSaleState.countdownIntervalId);
-          flashSaleState.active = false;
-          flashSaleState.endTime = null;
-
-          if (currentBfConfig) {
-            currentBfConfig.value = { active: false, endTime: null };
-            currentBfConfig.changed('value', true);
-            await currentBfConfig.save();
-          }
-          io.emit('blackFridayEnded', { active: false });
+          showToast(data.error || 'Authentication failed', 'error');
         }
+      } catch (err) {
+        showToast('Network error during authentication', 'error');
+      }
+    };
 
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'TOGGLE_FLASH_HARVEST_SALE',
-          targetType: 'config',
-          changes: { active, durationHours },
-          ipAddress: req.ip
-        });
+    return (
+      <div className="min-h-[75vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-emerald-50/40">
+        <div className="max-w-md w-full bg-white p-8 sm:p-10 rounded-3xl shadow-xl border border-emerald-100 animate-fadeIn">
+          <div className="text-center mb-8">
+            <div className="bg-emerald-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Shield className="h-8 w-8 text-emerald-600" />
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-black text-emerald-950">
+               {isForgotPassword ? 'Reset Password' : (isLogin ? 'Welcome Back' : 'Create Account')}
+            </h2>
+            <p className="text-gray-500 mt-1 text-sm font-medium">
+               {isForgotPassword 
+                 ? (resetStep === 'request' ? 'Enter your phone number to receive a reset code.' : 'Enter the reset code and your new password.')
+                 : (isLogin ? 'Sign in to track orders and manage deliveries.' : 'Register to order wholesale Mwea grains.')}
+            </p>
+          </div>
+          
+          {isForgotPassword ? (
+            <form className="space-y-4" onSubmit={resetStep === 'request' ? handleResetRequest : handlePasswordReset}>
+              {resetStep === 'request' ? (
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Phone Number</label>
+                  <input required type="tel" placeholder="0712345678" onChange={(e) => setFormData({...formData, phoneNumber: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Phone Number</label>
+                    <input required type="tel" value={formData.phoneNumber} disabled className="text-black bg-gray-100 w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Reset Code</label>
+                    <input required type="text" placeholder="Enter 6-digit code" onChange={(e) => setFormData({...formData, resetToken: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">New Password</label>
+                    <input required type="password" placeholder="••••••••" onChange={(e) => setFormData({...formData, newPassword: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  </div>
+                </>
+              )}
+              <button type="submit" className="w-full py-4 px-4 rounded-xl shadow-lg font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all transform hover:-translate-y-0.5 mt-6">
+                {resetStep === 'request' ? 'Send Reset Code' : 'Update Password'}
+              </button>
+              <button type="button" onClick={() => { setIsForgotPassword(false); setResetStep('request'); }} className="w-full py-4 px-4 rounded-xl shadow-md font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all mt-3">
+                Back to Sign In
+              </button>
+            </form>
+          ) : (
+            <form className="space-y-4" onSubmit={handleSubmit}>
+              {!isLogin && (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Full Name</label>
+                    <input required type="text" placeholder="Full Name" onChange={(e) => setFormData({...formData, fullName: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Email Address</label>
+                    <input required type="email" placeholder="Email Address" onChange={(e) => setFormData({...formData, email: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+                  </div>
+                </>
+              )}
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Phone Number</label>
+                <input required type="tel" placeholder="0712345678" onChange={(e) => setFormData({...formData, phoneNumber: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Password</label>
+                <input required type="password" placeholder="••••••••" onChange={(e) => setFormData({...formData, password: e.target.value})} className="text-black bg-white w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-emerald-500 outline-none placeholder-gray-400" />
+              </div>
+              
+              {isLogin && (
+                <div className="flex justify-end pt-1">
+                  <button type="button" onClick={() => setIsForgotPassword(true)} className="text-xs font-bold text-emerald-600 hover:text-emerald-500 transition-colors">
+                    Forgot Password?
+                  </button>
+                </div>
+              )}
 
-        res.json({ message: 'Flash Harvest Sale configuration updated', engineState: flashSaleState });
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    });
+              <button type="submit" className="w-full py-4 px-4 rounded-xl shadow-lg font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all transform hover:-translate-y-0.5 mt-6">
+                {isLogin ? 'Sign In' : 'Register Account'}
+              </button>
+            </form>
+          )}
 
-    expressApp.post('/api/admin/config/counties', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { county, fee } = req.body || {};
-        let config = await SystemConfig.findOne({ where: { key: 'county_overrides' } });
+          {!isForgotPassword && (
+            <div className="mt-8 text-center border-t border-gray-100 pt-6">
+              <button onClick={() => setIsLogin(!isLogin)} className="text-emerald-700 hover:text-emerald-500 font-bold text-xs uppercase tracking-wider transition-colors">
+                {isLogin ? "Need an account? Register Here" : "Already registered? Sign In"}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderProfile = () => {
+    const pendingTransactions = myOrders.filter(o => o.status !== 'delivered' && o.status !== 'completed' && o.paymentStatus !== 'failed');
+    const completedTransactions = myOrders.filter(o => o.status === 'delivered' || o.status === 'completed');
+
+    return (
+      <div className="max-w-5xl mx-auto py-12 px-4 animate-fadeIn">
+        <div className="bg-white rounded-3xl shadow-md border border-emerald-100 p-6 sm:p-8 mb-10 flex flex-col sm:flex-row items-center justify-between gap-6 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -z-10 opacity-60"></div>
+          <div className="flex items-center gap-5 text-center sm:text-left z-10">
+            <div className="bg-emerald-100 w-20 h-20 rounded-full flex items-center justify-center shrink-0 border-2 border-emerald-200">
+               <UserIcon className="h-10 w-10 text-emerald-700" />
+            </div>
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-black text-emerald-950">{user?.fullName}</h1>
+              <p className="text-gray-500 font-medium text-sm flex items-center justify-center sm:justify-start mt-0.5">
+                <Shield className="h-4 w-4 mr-1 text-emerald-600" /> Role: <span className="uppercase font-bold text-emerald-700 ml-1">{user?.role}</span> • Phone: {user?.phoneNumber}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col items-center sm:items-end gap-3 z-10">
+            <div className="bg-amber-100 border border-amber-300 text-amber-800 px-4 py-2 rounded-xl flex items-center shadow-sm">
+              <Award className="h-5 w-5 mr-2" />
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-wider">Loyalty Points</div>
+                <div className="font-black text-lg leading-none">{loyaltyPoints} PTS</div>
+              </div>
+            </div>
+            <button onClick={fetchMyOrders} className="flex items-center text-emerald-600 hover:text-emerald-800 px-2 py-1 text-xs font-bold transition-all">
+              <RefreshCw className="h-4 w-4 mr-1" /> Refresh Orders
+            </button>
+          </div>
+        </div>
         
-        let currentOverrides = config && config.value ? config.value : {};
-        currentOverrides[county] = Number(fee);
+        <div className="bg-white rounded-3xl shadow-md border border-emerald-100 overflow-hidden mb-8">
+          <div className="p-6 sm:p-8 border-b border-gray-100 bg-emerald-50/30">
+            <h2 className="text-xl font-black text-gray-900 flex items-center">
+              <Clock className="mr-2 text-emerald-600 h-5 w-5" /> Pending Shipping Transactions
+            </h2>
+            <p className="text-xs text-gray-500 mt-1">Successful transactions that have not yet completed shipping procedures up to delivered.</p>
+          </div>
+          <div className="p-6 sm:p-8">
+            {pendingTransactions.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 font-medium text-sm">No pending shipping transactions.</div>
+            ) : (
+              <div className="space-y-4">
+                {pendingTransactions.map(o => (
+                  <div key={o.id} className="border border-amber-200 bg-amber-50/40 rounded-2xl p-5">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200 pb-3 mb-3">
+                      <div>
+                        <span className="font-mono font-black text-emerald-950 text-base">TXN #{o.transactionId || o.id}</span>
+                        <span className="text-xs text-gray-500 font-medium ml-3">Payment Status: <strong className="text-emerald-700 uppercase">{o.paymentStatus || 'Paid'}</strong></span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
+                          ● {o.status} (In Shipping)
+                        </span>
+                        <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
+                      </div>
+                    </div>
+                    <div className="text-xs text-gray-700">
+                      <strong>Shipping Route:</strong> {o.county}, {o.town}, {o.location} ({formatShippingAddress(o.shippingAddress)})
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
 
-        if (!config) {
-          config = await SystemConfig.create({ key: 'county_overrides', value: currentOverrides });
-        } else {
-          config.value = currentOverrides;
-          config.changed('value', true);
-          await config.save();
-        }
+        <div className="bg-white rounded-3xl shadow-md border border-emerald-100 overflow-hidden">
+          <div className="p-6 sm:p-8 border-b border-gray-100 bg-emerald-50/30">
+            <h2 className="text-xl font-black text-gray-900 flex items-center">
+              <CheckCircle className="mr-2 text-emerald-600 h-5 w-5" /> Completed & Delivered Transactions
+            </h2>
+            <p className="text-xs text-gray-500 mt-1">Successfully delivered orders with full transaction IDs and item details.</p>
+          </div>
+          <div className="p-6 sm:p-8">
+            {completedTransactions.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 font-medium text-sm">No completed delivery transactions recorded yet.</div>
+            ) : (
+              <div className="space-y-6">
+                {completedTransactions.map(o => (
+                  <div key={o.id} className="border border-gray-200 bg-gray-50/50 rounded-2xl p-5">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-200 pb-4 mb-4">
+                      <div>
+                        <span className="font-mono font-black text-emerald-950 text-base">TXN ID: #{o.transactionId || o.id}</span>
+                        <span className="text-xs text-gray-400 font-medium block sm:inline sm:ml-3">{new Date(o.createdAt).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          ● DELIVERED & COMPLETED
+                        </span>
+                        <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
+                      </div>
+                    </div>
 
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'UPDATE_COUNTY_OVERRIDE',
-          targetType: 'config',
-          changes: { county, fee },
-          ipAddress: req.ip
-        });
+                    <div className="text-xs text-gray-600 mb-4 bg-white p-4 rounded-xl border border-gray-200">
+                      <div className="font-bold text-gray-800 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-600"/> Delivery Details:</div>
+                      <ul className="space-y-1 pl-5 list-disc text-gray-700">
+                        <li><strong>County:</strong> {o.county || 'N/A'}</li>
+                        <li><strong>Town/District:</strong> {o.town || 'N/A'}</li>
+                        <li><strong>Location:</strong> {o.location || 'N/A'}</li>
+                        <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
+                        <li><strong>Street/Landmark:</strong> {formatShippingAddress(o.shippingAddress)}</li>
+                        <li><strong>Payment Status:</strong> <span className="uppercase text-emerald-600 font-bold">{o.paymentStatus || 'Paid'}</span></li>
+                      </ul>
+                    </div>
 
-        res.json({ message: `Regional override updated for ${county}`, overrides: config.value });
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    });
+                    <div className="space-y-1.5 text-xs">
+                      {o.items?.map((item: any, i: number) => (
+                        <div key={i} className="flex justify-between text-gray-700 bg-white px-3 py-2 rounded-lg border border-gray-100 font-medium">
+                          <span>{item.quantity}x {item.name || item.product?.variety}</span>
+                          <span className="font-bold">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
-    expressApp.get('/api/admin/logs', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const logs = await AdminLog.findAll({
-          include: [{ model: User, as: 'Admin', attributes: ['fullName'] }],
-          order: [['createdAt', 'DESC']],
-          limit: 150 
-        });
-        res.json(logs);
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    });
+  const renderAdmin = () => {
+    if (user?.role !== 'admin') {
+      return (
+        <div className="min-h-[80vh] flex items-center justify-center bg-[#0a0a0a]">
+          <div className="text-center bg-rose-950/20 border border-rose-900/50 p-10 rounded-3xl max-w-md">
+            <AlertTriangle className="h-12 w-12 text-rose-500 mx-auto mb-4 animate-bounce" />
+            <h2 className="text-rose-500 font-black text-2xl tracking-widest mb-2">403 FORBIDDEN</h2>
+            <p className="text-gray-400 text-sm">You lack the administrator clearance privileges required to access this system module.</p>
+          </div>
+        </div>
+      );
+    }
 
-    // ==========================================
-    // 8. DEFAULT FALLBACK ROUTE
-    // ==========================================
-    expressApp.get('/', (req, res) => {
-      res.json({ status: 'Online', message: '🌾 Premium Rice & Grain API Architecture is running seamlessly with Pay Hero Kenya.' });
-    });
+    const tabsList = [
+      { id: 'inventory', icon: <Package size={18}/>, label: 'Grain Catalog' },
+      { id: 'orders', icon: <ShoppingBag size={18}/>, label: 'Logistics & Orders' },
+      { id: 'finances', icon: <BarChart2 size={18}/>, label: 'Financial Dashboard' },
+      { id: 'users', icon: <Users size={18}/>, label: 'User Clearance' },
+      { id: 'carousel', icon: <ImageIcon size={18}/>, label: 'Hero Config' },
+      { id: 'config', icon: <Settings size={18}/>, label: 'Counties & Engine' },
+      { id: 'logs', icon: <Activity size={18}/>, label: 'Audit Logs' }
+    ];
 
-    server.listen(port, () => {
-      console.log(`\n=============================================================`);
-      console.log(`🌾 Premium Rice & Grain Standalone API Architecture Is Live`);
-      console.log(`📡 Serving REST API, WebSockets & Pay Hero Callbacks on port ${port}`);
-      console.log(`=============================================================\n`);
-    });
+    return (
+      <div className="flex flex-col md:flex-row min-h-[calc(100vh-80px)] bg-[#0a0a0a] text-white font-sans animate-fadeIn">
+        <aside className="w-full md:w-64 bg-[#111] border-b md:border-b-0 md:border-r border-gray-800/80 flex flex-col shrink-0 md:sticky md:top-20 md:h-[calc(100vh-80px)] overflow-y-auto">
+          <div className="p-5 border-b border-gray-800/60 hidden md:block shrink-0">
+            <div className="flex items-center gap-3 bg-[#181818] border border-gray-800 p-3 rounded-2xl">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold">
+                <Shield size={20}/>
+              </div>
+              <div className="truncate">
+                <p className="text-[10px] text-gray-500 font-black uppercase tracking-wider">Console Node</p>
+                <p className="text-sm font-bold text-gray-200 truncate">{user?.fullName}</p>
+              </div>
+            </div>
+          </div>
 
-  } catch (fatalInitCrashErr) {
-    console.error('❌ Root System Initialization Core Failure encountered:', fatalInitCrashErr);
-    process.exit(1);
-  }
+          <nav className="p-3 md:p-4 flex flex-row md:flex-col gap-1.5 overflow-x-auto md:overflow-x-visible shrink-0 flex-1">
+            {tabsList.map(tab => {
+              const isActive = adminTab === tab.id;
+              return (
+                <button 
+                  key={tab.id}
+                  onClick={() => setAdminTab(tab.id as any)}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-xs md:text-sm whitespace-nowrap transition-all duration-200 shrink-0 ${
+                    isActive 
+                      ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-950/50' 
+                      : 'text-gray-400 hover:bg-[#1a1a1a] hover:text-gray-200'
+                  }`}
+                >
+                  <span className={isActive ? 'text-white' : 'text-gray-500'}>{tab.icon}</span>
+                  {tab.label}
+                </button>
+              );
+            })}
+          </nav>
+        </aside>
+  
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto bg-[#0d0d0d]">
+          {adminTab === 'inventory' && (
+            <div className="animate-fadeIn space-y-6">
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><Leaf className="mr-3 text-emerald-500"/> Catalog Inventory Engine</h2>
+                <p className="text-gray-400 text-xs mt-1">Add, update prices, manage stock quantities, or upload picture URLs.</p>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 relative">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <Plus size={18}/> Initialize New Grain Record
+                </h3>
+                
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    const res = await fetch(`${API_BASE_URL}/admin/products`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                      body: JSON.stringify({
+                        ...newProduct,
+                        weightKg: Number(newProduct.weightKg),
+                        basePrice: Number(newProduct.basePrice),
+                        price: Number(newProduct.basePrice),
+                        costPrice: Number(newProduct.costPrice),
+                        stockQuantity: Number(newProduct.stockQuantity)
+                      })
+                    });
+                    if (res.ok) {
+                      showToast('New grain product initialized in database!', 'success');
+                      setNewProduct({ brandName: '', variety: '', weightKg: '', basePrice: '', costPrice: '', stockQuantity: '', imageUrl: '' });
+                      fetchProducts();
+                    } else {
+                      const errData = await res.json();
+                      showToast(errData.error || 'Failed to initialize new product', 'error');
+                    }
+                  } catch (err) { showToast('Error initializing product in server', 'error'); }
+                }} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <input required type="text" placeholder="Brand (e.g. Mwea Pishori)" value={newProduct.brandName} onChange={e=>setNewProduct({...newProduct, brandName:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
+                  <input required type="text" placeholder="Variety (e.g. Grade 1 Aromatic)" value={newProduct.variety} onChange={e=>setNewProduct({...newProduct, variety:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
+                  <input required type="number" placeholder="Weight (Kg)" value={newProduct.weightKg} onChange={e=>setNewProduct({...newProduct, weightKg:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
+                  <input required type="number" placeholder="Cost/Buying Price (KES)" value={newProduct.costPrice} onChange={e=>setNewProduct({...newProduct, costPrice:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
+                  <input required type="number" placeholder="Selling Price (KES)" value={newProduct.basePrice} onChange={e=>setNewProduct({...newProduct, basePrice:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
+                  <input required type="number" placeholder="Stock Quantity (Bags)" value={newProduct.stockQuantity} onChange={e=>setNewProduct({...newProduct, stockQuantity:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 placeholder-gray-500" />
+                  <input type="text" placeholder="Image URL (http://...)" value={newProduct.imageUrl} onChange={e=>setNewProduct({...newProduct, imageUrl:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500 font-mono placeholder-gray-500 md:col-span-2" />
+                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3.5 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all md:col-span-3">Commit Product to Database</button>
+                </form>
+              </div>
+
+              {editingProduct && (
+                <div className="bg-[#1a1a1a] border-2 border-emerald-500/50 rounded-3xl p-6 shadow-2xl animate-fadeIn">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Modifying Record #{editingProduct.id}</h3>
+                    <button onClick={() => setEditingProduct(null)} className="text-gray-400 hover:text-white"><X size={18}/></button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Brand Name</label>
+                      <input type="text" value={editingProduct.brandName} onChange={e=>setEditingProduct({...editingProduct, brandName:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Variety</label>
+                      <input type="text" value={editingProduct.variety} onChange={e=>setEditingProduct({...editingProduct, variety:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Buying/Cost Price</label>
+                      <input type="number" value={editingProduct.costPrice || ''} onChange={e=>setEditingProduct({...editingProduct, costPrice:Number(e.target.value)})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Selling Price</label>
+                      <input type="number" value={editingProduct.basePrice} onChange={e=>setEditingProduct({...editingProduct, basePrice:Number(e.target.value), price:Number(e.target.value)})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Stock Inventory</label>
+                      <input type="number" value={editingProduct.stockQuantity} onChange={e=>setEditingProduct({...editingProduct, stockQuantity:Number(e.target.value)})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Image URL</label>
+                      <input type="text" placeholder="Image URL" value={editingProduct.imageUrl || ''} onChange={e=>setEditingProduct({...editingProduct, imageUrl:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    </div>
+                  </div>
+                  <button onClick={async () => {
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/admin/products/${editingProduct.id}`, {
+                        method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify(editingProduct)
+                      });
+                      if (res.ok) {
+                        showToast('Product specifications modified', 'success');
+                        setEditingProduct(null);
+                        fetchProducts();
+                      } else {
+                        showToast('Failed to modify product record', 'error');
+                      }
+                    } catch (err) {
+                      showToast('Network error while modifying product', 'error');
+                    }
+                  }} className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs hover:bg-emerald-500 mr-3">Save Changes</button>
+                </div>
+              )}
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs whitespace-nowrap">
+                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="px-6 py-4">ID</th>
+                        <th className="px-6 py-4">Brand & Variety</th>
+                        <th className="px-6 py-4">Buying Price</th>
+                        <th className="px-6 py-4">Selling Price</th>
+                        <th className="px-6 py-4">Stock Matrix</th>
+                        <th className="px-6 py-4 text-center">Controls</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/60">
+                      {products.map(p => (
+                        <tr key={p.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                          <td className="px-6 py-4 font-mono text-gray-500">#{p.id}</td>
+                          <td className="px-6 py-4 font-bold text-gray-200">{p.brandName} - <span className="text-gray-400 font-normal">{p.variety} ({p.weightKg}kg)</span></td>
+                          <td className="px-6 py-4 font-bold font-mono text-gray-400">KES {p.costPrice?.toLocaleString() || '---'}</td>
+                          <td className="px-6 py-4 font-bold font-mono text-emerald-400">KES {p.price?.toLocaleString()}</td>
+                          <td className="px-6 py-4">
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black border font-mono ${
+                              p.stockQuantity > 10 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                            }`}>
+                              {p.stockQuantity} BAGS LEFT
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <button onClick={() => setEditingProduct(p)} className="text-gray-400 hover:text-emerald-400 p-2 bg-[#1f1f1f] rounded-xl mr-2 transition-colors" title="Edit"><Edit size={14}/></button>
+                            <button onClick={async () => {
+                              if (confirm(`Permanently delete ${p.brandName} ${p.variety}?`)) {
+                                try {
+                                  const res = await fetch(`${API_BASE_URL}/admin/products/${p.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+                                  if (res.ok) {
+                                    showToast('Product wiped from database', 'success');
+                                    fetchProducts();
+                                  } else {
+                                    showToast('Failed to delete product', 'error');
+                                  }
+                                } catch (err) {
+                                  showToast('Network error deleting product', 'error');
+                                }
+                              }
+                            }} className="text-gray-400 hover:text-rose-500 p-2 bg-[#1f1f1f] rounded-xl transition-colors" title="Delete"><Trash2 size={14}/></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {adminTab === 'orders' && (
+            <div className="animate-fadeIn space-y-6">
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><ShoppingBag className="mr-3 text-emerald-500"/> Logistics & Order Management</h2>
+                <p className="text-gray-400 text-xs mt-1">Review active orders, update delivery statuses, or monitor regional dispatch.</p>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-4 flex items-center gap-3">
+                <Search size={18} className="text-gray-500 ml-2" />
+                <input 
+                  type="text" 
+                  placeholder="Filter orders by ID, Customer Name, or Phone..."
+                  value={orderSearchQuery}
+                  onChange={(e) => setOrderSearchQuery(e.target.value)}
+                  className="bg-transparent text-white font-bold text-xs w-full outline-none placeholder-gray-600"
+                />
+              </div>
+
+              <div className="space-y-4">
+                {adminOrders
+                  .filter(o => {
+                    if (!orderSearchQuery) return true;
+                    const q = orderSearchQuery.toLowerCase();
+                    return String(o.id).includes(q) || o.user?.fullName?.toLowerCase().includes(q) || o.user?.phoneNumber?.includes(q) || o.county?.toLowerCase().includes(q);
+                  })
+                  .map(o => (
+                    <div key={o.id} className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-gray-800/80 pb-4 mb-4">
+                        <div>
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono font-black text-emerald-400 text-base">ORDER #{o.id}</span>
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                              o.status === 'delivered' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                            }`}>
+                              {o.status}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1">Customer: <strong className="text-white">{o.user?.fullName || 'Guest'}</strong> ({o.user?.phoneNumber || 'No Phone'}) • {new Date(o.createdAt).toLocaleString()}</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                           <div className="bg-[#1f1f1f] border border-gray-800 px-3 py-1.5 rounded-xl">
+                             <span className="text-[10px] text-gray-400 block uppercase font-bold">Payment Status (Backend)</span>
+                             <span className="text-xs font-black text-emerald-400 uppercase">{o.paymentStatus || 'Paid'}</span>
+                           </div>
+
+                           <span className="text-xs text-gray-400 font-bold">Shipping Status:</span>
+                           <select 
+                             value={o.status}
+                             onChange={async (e) => {
+                               const newStatus = e.target.value;
+                               try {
+                                 const res = await fetch(`${API_BASE_URL}/admin/orders/${o.id}/status`, {
+                                   method: 'PUT',
+                                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                   body: JSON.stringify({ status: newStatus })
+                                 });
+                                 if (res.ok) {
+                                   showToast(`Order #${o.id} shipping status updated to ${newStatus}`, 'success');
+                                   fetchAdminOrders();
+                                 } else {
+                                   showToast('Failed to update order status', 'error');
+                                 }
+                               } catch (err) {
+                                 showToast('Network error updating status', 'error');
+                               }
+                             }}
+                             className="bg-[#1f1f1f] text-white border border-gray-700 rounded-xl px-3 py-1.5 text-xs font-bold outline-none focus:border-emerald-500"
+                           >
+                             <option value="pending">Pending</option>
+                             <option value="processing">Processing</option>
+                             <option value="shipped">Shipped</option>
+                             <option value="delivered">Delivered</option>
+                             <option value="cancelled">Cancelled</option>
+                           </select>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {adminTab === 'logs' && (
+            <div className="animate-fadeIn space-y-6">
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> Pay Hero & System Logs</h2>
+                <p className="text-gray-400 text-xs mt-1">Real-time payment gateway callbacks and backend communication logs.</p>
+              </div>
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 overflow-hidden shadow-xl">
+                 <div className="flex justify-end mb-4">
+                   <button onClick={fetchAdminLogs} className="bg-emerald-900/40 text-emerald-400 hover:text-white px-4 py-2 rounded-xl text-xs font-bold border border-emerald-800/50 flex items-center transition-all">
+                     <RefreshCw size={14} className="mr-2" /> Refresh Logs
+                   </button>
+                 </div>
+                 <div className="overflow-x-auto">
+                   <table className="w-full text-left text-xs whitespace-nowrap">
+                      <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
+                         <tr>
+                            <th className="px-6 py-4">Date & Time</th>
+                            <th className="px-6 py-4">Transaction / Ref</th>
+                            <th className="px-6 py-4">Phone Number</th>
+                            <th className="px-6 py-4">Status & Desc</th>
+                         </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-800/60">
+                         {adminLogs.length === 0 ? (
+                            <tr><td colSpan={4} className="px-6 py-8 text-center text-gray-500">No logs found in the database.</td></tr>
+                         ) : (
+                            adminLogs.map((log, i) => (
+                               <tr key={i} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                                  <td className="px-6 py-4 font-mono text-gray-500">{new Date(log.createdAt || log.timestamp || Date.now()).toLocaleString()}</td>
+                                  <td className="px-6 py-4 font-mono text-emerald-400">{log.ExternalReference || log.reference || log.MerchantRequestID || 'N/A'}</td>
+                                  <td className="px-6 py-4 font-mono text-gray-300">{log.Phone || log.phoneNumber || 'N/A'}</td>
+                                  <td className="px-6 py-4 text-gray-400">
+                                     <span className={`px-2 py-1 rounded text-[10px] font-black mr-2 ${
+                                        (log.Status === 'Failed' || log.status === 'failed' || log.ResultCode !== 0) ? 'bg-rose-500/10 text-rose-400 border border-rose-500/30' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                     }`}>
+                                        {log.Status || log.status || (log.ResultCode === 0 ? 'Success' : 'Failed')}
+                                     </span>
+                                     {log.ResultDesc || log.message || 'No description provided'}
+                                  </td>
+                               </tr>
+                            ))
+                         )}
+                      </tbody>
+                   </table>
+                 </div>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
+      {renderNav()}
+      {toast && (
+        <div className={`fixed bottom-4 right-4 z-50 px-6 py-3 rounded-2xl shadow-2xl font-bold text-sm text-white flex items-center animate-fadeIn ${
+          toast.type === 'error' ? 'bg-rose-500' : 'bg-emerald-600'
+        }`}>
+          {toast.type === 'error' ? <AlertTriangle className="mr-2 h-5 w-5" /> : <CheckCircle className="mr-2 h-5 w-5" />}
+          {toast.message}
+        </div>
+      )}
+      <div className="flex-1 w-full">
+        {view === 'home' && renderHome()}
+        {view === 'shop' && renderShop()}
+        {view === 'cart' && renderCart()}
+        {view === 'login' && renderAuth()}
+        {view === 'profile' && renderProfile()}
+        {view === 'admin' && renderAdmin()}
+      </div>
+    </div>
+  );
 }
-
-startServer();
