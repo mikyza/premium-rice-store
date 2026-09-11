@@ -75,7 +75,6 @@ const DEFAULT_REGIONAL_LOGISTICS = {
   streets: ["Main Street / Highway", "Market Road", "Hospital Road", "School Lane", "Opposite Chief's Camp", "Supermarket Landmark"]
 };
 
-// Helper utility to safely format shipping address objects to strings to prevent React Error #31
 const formatShippingAddress = (addr: any) => {
   if (!addr) return 'Standard Delivery';
   if (typeof addr === 'string') return addr;
@@ -98,7 +97,6 @@ export default function PremiumRiceStore() {
   const [products, setProducts] = useState<any[]>([]);
   const [carousel, setCarousel] = useState<any[]>([]);
   
-  // Expanded Hero Configuration with 10 distinct professional settings
   const [heroSettings, setHeroSettings] = useState<any>({
     title: 'Direct From Mwea Paddy Fields',
     subtitle: '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.',
@@ -160,7 +158,6 @@ export default function PremiumRiceStore() {
   const [countyOverrideForm, setCountyOverrideForm] = useState({ county: 'Nairobi', fee: '' });
   
   const [financeYear, setFinanceYear] = useState<number>(new Date().getFullYear());
-  const [monthlyBuyingPrices, setMonthlyBuyingPrices] = useState<{ [key: string]: number }>({});
   const [editingUser, setEditingUser] = useState<any | null>(null);
 
   const getAccountCartKey = (u: any) => {
@@ -414,7 +411,6 @@ export default function PremiumRiceStore() {
 
   const fetchAdminLogs = async () => {
     try {
-      // Unified payment and system audit logs endpoint
       const res = await fetch(`${API_BASE_URL}/admin/logs`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -1619,7 +1615,7 @@ export default function PremiumRiceStore() {
                         </div>
                         <div className="flex items-center gap-3">
                            <div className="bg-[#1f1f1f] border border-gray-800 px-3 py-1.5 rounded-xl">
-                             <span className="text-[10px] text-gray-400 block uppercase font-bold">Payment Status (Backend)</span>
+                             <span className="text-[10px] text-gray-400 block uppercase font-bold">Payment Status</span>
                              <span className="text-xs font-black text-emerald-400 uppercase">{o.paymentStatus || 'Paid'}</span>
                            </div>
 
@@ -1690,7 +1686,6 @@ export default function PremiumRiceStore() {
           )}
 
           {adminTab === 'finances' && (() => {
-            const currentYear = new Date().getFullYear();
             const monthlyRevenue = Array(12).fill(0);
             const monthlyProfit = Array(12).fill(0);
             let totalYearlyRevenue = 0;
@@ -1721,10 +1716,10 @@ export default function PremiumRiceStore() {
 
                        const m = d.getMonth();
                        monthlyRevenue[m] += (order.grandTotal || 0);
-                       const orderProfit = order.items?.reduce((pSum: number, it: any) => {
-                          const s = it.priceAtPurchase || 0;
-                          const c = it.product?.costPrice || it.costPrice || (s * 0.75);
-                          return pSum + ((s - c) * it.quantity);
+                       const orderProfit = order.items?.reduce((pSum: number, item: any) => {
+                          const selling = item.priceAtPurchase || 0;
+                          const cost = item.product?.costPrice || item.costPrice || (selling * 0.75);
+                          return pSum + ((selling - cost) * item.quantity);
                        }, 0) || 0;
                        monthlyProfit[m] += orderProfit;
                        totalYearlyProfit += orderProfit;
@@ -1738,123 +1733,95 @@ export default function PremiumRiceStore() {
               <div className="animate-fadeIn space-y-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                   <div>
-                    <h2 className="text-2xl font-black text-white flex items-center"><BarChart2 className="mr-3 text-emerald-500"/> Financial Performance Dashboard</h2>
-                    <p className="text-gray-400 text-xs mt-1">Real-time revenue, gross profit margin, and sales metrics.</p>
+                    <h2 className="text-2xl font-black text-white flex items-center"><BarChart2 className="mr-3 text-emerald-500"/> Financial Analytics & Profit Engine</h2>
+                    <p className="text-gray-400 text-xs mt-1">Real-time revenue monitoring, cost margin analysis, and annual profit breakdown.</p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <label className="text-xs text-gray-400 font-bold uppercase">Fiscal Year:</label>
+                  <div className="flex items-center gap-2 bg-[#141414] p-2 rounded-2xl border border-gray-800">
+                    <Calendar size={16} className="text-emerald-400 ml-2" />
                     <select 
                       value={financeYear} 
                       onChange={(e) => setFinanceYear(Number(e.target.value))}
-                      className="bg-[#1f1f1f] text-emerald-400 font-bold text-xs border border-gray-700 rounded-xl px-3 py-2 outline-none"
+                      className="bg-transparent text-white font-black text-sm outline-none cursor-pointer pr-2"
                     >
-                      {[currentYear - 2, currentYear - 1, currentYear, currentYear + 1].map(y => (
-                        <option key={y} value={y}>{y}</option>
-                      ))}
+                      {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y} className="bg-black text-white">{y} Fiscal Year</option>)}
                     </select>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="bg-[#141414] border border-gray-800 p-5 rounded-3xl shadow-xl">
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Gross Revenue</span>
-                      <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400"><DollarSign size={16}/></div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                  <div className="bg-[#141414] border border-gray-800 p-6 rounded-3xl shadow-xl">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Gross Annual Revenue</span>
+                      <DollarSign className="text-emerald-400 h-5 w-5" />
                     </div>
-                    <div className="text-2xl font-black text-white font-mono">KES {totalYearlyRevenue.toLocaleString()}</div>
-                    <span className="text-[10px] text-emerald-400 font-bold mt-1 block">YTD Total ({financeYear})</span>
+                    <div className="text-3xl font-black font-mono text-white">KES {totalYearlyRevenue.toLocaleString()}</div>
+                    <span className="text-[10px] text-emerald-400 font-bold mt-2 block">● Verified Completed Orders</span>
                   </div>
 
-                  <div className="bg-[#141414] border border-gray-800 p-5 rounded-3xl shadow-xl">
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Estimated Gross Profit</span>
-                      <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400"><TrendingUp size={16}/></div>
+                  <div className="bg-[#141414] border border-gray-800 p-6 rounded-3xl shadow-xl">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Net Estimated Profit</span>
+                      <TrendingUp className="text-emerald-400 h-5 w-5" />
                     </div>
-                    <div className="text-2xl font-black text-emerald-400 font-mono">KES {totalYearlyProfit.toLocaleString()}</div>
-                    <span className="text-[10px] text-gray-400 font-bold mt-1 block">Net Profit Margin</span>
+                    <div className="text-3xl font-black font-mono text-emerald-400">KES {totalYearlyProfit.toLocaleString()}</div>
+                    <span className="text-[10px] text-gray-400 font-bold mt-2 block">Margin: {totalYearlyRevenue > 0 ? ((totalYearlyProfit/totalYearlyRevenue)*100).toFixed(1) : 0}%</span>
                   </div>
 
-                  <div className="bg-[#141414] border border-gray-800 p-5 rounded-3xl shadow-xl">
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Profit Margin %</span>
-                      <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400"><Percent size={16}/></div>
+                  <div className="bg-[#141414] border border-gray-800 p-6 rounded-3xl shadow-xl">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Total Orders Processed</span>
+                      <ShoppingBag className="text-emerald-400 h-5 w-5" />
                     </div>
-                    <div className="text-2xl font-black text-white font-mono">
-                      {totalYearlyRevenue > 0 ? ((totalYearlyProfit / totalYearlyRevenue) * 100).toFixed(1) : '0.0'}%
-                    </div>
-                    <span className="text-[10px] text-emerald-400 font-bold mt-1 block">Avg Return Rate</span>
-                  </div>
-
-                  <div className="bg-[#141414] border border-gray-800 p-5 rounded-3xl shadow-xl">
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Orders Count</span>
-                      <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400"><ShoppingBag size={16}/></div>
-                    </div>
-                    <div className="text-2xl font-black text-white font-mono">
-                      {adminOrders.filter(o => o.status !== 'failed' && o.paymentStatus !== 'failed').length}
-                    </div>
-                    <span className="text-[10px] text-gray-400 font-bold mt-1 block">Successful Orders</span>
+                    <div className="text-3xl font-black font-mono text-white">{adminOrders.length}</div>
+                    <span className="text-[10px] text-emerald-400 font-bold mt-2 block">● Active Nationwide Logistics</span>
                   </div>
                 </div>
 
                 <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wider mb-4">Monthly Breakdown ({financeYear})</h3>
+                  <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-wider mb-4">Product Category Revenue & Margin Distribution</h3>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs whitespace-nowrap">
                       <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
                         <tr>
-                          <th className="px-6 py-3">Month</th>
-                          <th className="px-6 py-3">Gross Revenue</th>
-                          <th className="px-6 py-3">Gross Profit</th>
-                          <th className="px-6 py-3">Margin %</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-800/60 font-mono">
-                        {monthNames.map((mn, idx) => {
-                          const rev = monthlyRevenue[idx];
-                          const prf = monthlyProfit[idx];
-                          const margin = rev > 0 ? ((prf / rev) * 100).toFixed(1) : '0.0';
-                          return (
-                            <tr key={mn} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                              <td className="px-6 py-3 font-bold text-gray-300 font-sans">{mn}</td>
-                              <td className="px-6 py-3 text-white font-bold">KES {rev.toLocaleString()}</td>
-                              <td className="px-6 py-3 text-emerald-400 font-bold">KES {prf.toLocaleString()}</td>
-                              <td className="px-6 py-3 text-gray-400">{margin}%</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wider mb-4">Grain Variety Sales Performance</h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs whitespace-nowrap">
-                      <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
-                        <tr>
-                          <th className="px-6 py-3">Variety / Product</th>
-                          <th className="px-6 py-3">Units Sold</th>
-                          <th className="px-6 py-3">Total Sales</th>
-                          <th className="px-6 py-3">Total Profit</th>
+                          <th className="px-6 py-4">Grain Grade</th>
+                          <th className="px-6 py-4">Total Sacks Sold</th>
+                          <th className="px-6 py-4">Gross Revenue</th>
+                          <th className="px-6 py-4">Total Net Profit</th>
+                          <th className="px-6 py-4">Margin %</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-800/60 font-mono">
                         {Object.keys(categorySales).length === 0 ? (
-                          <tr><td colSpan={4} className="px-6 py-4 text-center text-gray-500 font-sans">No sales recorded for selected fiscal year.</td></tr>
+                          <tr><td colSpan={5} className="text-center py-6 text-gray-500 font-sans">No sales data recorded for this fiscal period.</td></tr>
                         ) : (
-                          Object.entries(categorySales).map(([cat, data]) => (
-                            <tr key={cat} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                              <td className="px-6 py-3 font-bold text-gray-200 font-sans">{cat}</td>
-                              <td className="px-6 py-3 text-white font-bold">{data.quantity} bags</td>
-                              <td className="px-6 py-3 text-white">KES {data.revenue.toLocaleString()}</td>
-                              <td className="px-6 py-3 text-emerald-400 font-bold">KES {data.profit.toLocaleString()}</td>
-                            </tr>
-                          ))
+                          Object.entries(categorySales).map(([cat, data], idx) => {
+                             const marginPercent = data.revenue > 0 ? ((data.profit / data.revenue) * 100).toFixed(1) : 0;
+                             return (
+                               <tr key={idx} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                                 <td className="px-6 py-4 font-bold text-white font-sans">{cat}</td>
+                                 <td className="px-6 py-4 font-bold text-gray-300">{data.quantity} bags</td>
+                                 <td className="px-6 py-4 text-emerald-400 font-bold">KES {data.revenue.toLocaleString()}</td>
+                                 <td className="px-6 py-4 text-emerald-300 font-bold">KES {data.profit.toLocaleString()}</td>
+                                 <td className="px-6 py-4 text-amber-400 font-bold">{marginPercent}%</td>
+                               </tr>
+                             );
+                          })
                         )}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+
+                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                  <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-wider mb-4">Monthly Financial Performance Chart ({financeYear})</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
+                    {monthNames.map((m, idx) => (
+                      <div key={m} className="bg-[#181818] p-4 rounded-2xl border border-gray-800 text-center">
+                        <span className="text-xs font-bold text-gray-400 uppercase block mb-1">{m}</span>
+                        <div className="text-sm font-black font-mono text-white">KES {monthlyRevenue[idx].toLocaleString()}</div>
+                        <span className="text-[10px] font-bold text-emerald-400 font-mono block mt-1">+KES {monthlyProfit[idx].toLocaleString()}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -1863,14 +1830,9 @@ export default function PremiumRiceStore() {
 
           {adminTab === 'users' && (
             <div className="animate-fadeIn space-y-6">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Accounts Clearance Registry</h2>
-                  <p className="text-gray-400 text-xs mt-1">Manage user security clearances, phone numbers, and roles.</p>
-                </div>
-                <button onClick={fetchAdminUsers} className="bg-[#1f1f1f] border border-gray-700 text-emerald-400 hover:text-emerald-300 px-4 py-2 rounded-xl text-xs font-bold flex items-center transition-all">
-                  <RefreshCw size={14} className="mr-1.5" /> Refresh Users
-                </button>
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Access Clearance & Registry</h2>
+                <p className="text-gray-400 text-xs mt-1">Manage platform accounts, assign administrator privileges, or clean up inactive users.</p>
               </div>
 
               <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
@@ -1879,23 +1841,23 @@ export default function PremiumRiceStore() {
                     <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
                       <tr>
                         <th className="px-6 py-4">ID</th>
-                        <th className="px-6 py-4">Full Name</th>
+                        <th className="px-6 py-4">User Name</th>
                         <th className="px-6 py-4">Phone Number</th>
                         <th className="px-6 py-4">Email</th>
-                        <th className="px-6 py-4">Role</th>
-                        <th className="px-6 py-4 text-center">Clearance Action</th>
+                        <th className="px-6 py-4">Access Level</th>
+                        <th className="px-6 py-4 text-center">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800/60">
                       {adminUsers.map(u => (
                         <tr key={u.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
                           <td className="px-6 py-4 font-mono text-gray-500">#{u.id}</td>
-                          <td className="px-6 py-4 font-bold text-gray-200">{u.fullName || 'N/A'}</td>
+                          <td className="px-6 py-4 font-bold text-gray-200">{u.fullName}</td>
                           <td className="px-6 py-4 font-mono text-gray-300">{u.phoneNumber}</td>
                           <td className="px-6 py-4 text-gray-400">{u.email || 'N/A'}</td>
                           <td className="px-6 py-4">
                             <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
-                              u.role === 'admin' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                              u.role === 'admin' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                             }`}>
                               {u.role}
                             </span>
@@ -1904,7 +1866,7 @@ export default function PremiumRiceStore() {
                             <button 
                               onClick={async () => {
                                 const newRole = u.role === 'admin' ? 'user' : 'admin';
-                                if (confirm(`Change clearance role of ${u.fullName} to ${newRole.toUpperCase()}?`)) {
+                                if (confirm(`Toggle role of ${u.fullName} to ${newRole.toUpperCase()}?`)) {
                                   try {
                                     const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}/role`, {
                                       method: 'PUT',
@@ -1912,19 +1874,17 @@ export default function PremiumRiceStore() {
                                       body: JSON.stringify({ role: newRole })
                                     });
                                     if (res.ok) {
-                                      showToast(`Updated ${u.fullName}'s clearance role to ${newRole}`, 'success');
+                                      showToast(`Role updated to ${newRole}`, 'success');
                                       fetchAdminUsers();
                                     } else {
-                                      showToast('Failed to update clearance role', 'error');
+                                      showToast('Failed to update role', 'error');
                                     }
-                                  } catch (err) {
-                                    showToast('Network error updating user clearance', 'error');
-                                  }
+                                  } catch (err) { showToast('Network error updating role', 'error'); }
                                 }
                               }}
-                              className="bg-[#1f1f1f] hover:bg-emerald-950 text-emerald-400 border border-gray-700 hover:border-emerald-500 px-3 py-1.5 rounded-xl font-bold text-[11px] transition-all"
+                              className="text-gray-300 hover:text-emerald-400 bg-[#1f1f1f] px-3 py-1.5 rounded-xl font-bold text-[10px] mr-2 transition-colors"
                             >
-                              Toggle Role ({u.role === 'admin' ? 'Demote' : 'Promote'})
+                              Toggle Role
                             </button>
                           </td>
                         </tr>
@@ -1939,45 +1899,105 @@ export default function PremiumRiceStore() {
           {adminTab === 'carousel' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Banner Carousel & Visual Highlights</h2>
-                <p className="text-gray-400 text-xs mt-1">Configure homepage carousel banners and promotional slides.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Hero & Front-Page Banner Configurator</h2>
+                <p className="text-gray-400 text-xs mt-1">Configure homepage video streams, background slides, titles, and announcement tickers.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                  <Plus size={18}/> Add New Banner Slide
-                </h3>
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  if (!newSlide.title || !newSlide.url) return showToast('Title and Image URL are required', 'error');
-                  try {
-                    const updatedSlides = [...carousel, newSlide];
-                    const res = await fetch(`${API_BASE_URL}/admin/config/carousel`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                      body: JSON.stringify({ slides: updatedSlides })
-                    });
-                    if (res.ok) {
-                      showToast('New slide added to promotional carousel', 'success');
-                      setCarousel(updatedSlides);
-                      setNewSlide({ title: '', subtitle: '', url: '' });
-                    } else {
-                      showToast('Failed to save carousel configuration', 'error');
-                    }
-                  } catch (err) { showToast('Network error saving slide', 'error'); }
-                }} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <input required type="text" placeholder="Slide Title (e.g. Pure Mwea Harvest)" value={newSlide.title} onChange={e=>setNewSlide({...newSlide, title:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none placeholder-gray-500" />
-                  <input type="text" placeholder="Subtitle / Tagline" value={newSlide.subtitle} onChange={e=>setNewSlide({...newSlide, subtitle:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none placeholder-gray-500" />
-                  <input required type="text" placeholder="Image URL (http://...)" value={newSlide.url} onChange={e=>setNewSlide({...newSlide, url:e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none font-mono placeholder-gray-500" />
-                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3.5 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all md:col-span-3">Add Slide to Homepage Carousel</button>
-                </form>
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-2">Main Hero Section Configuration</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Headline Title</label>
+                    <input type="text" value={heroSettings.title || ''} onChange={e=>setHeroSettings({...heroSettings, title: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Subtitle Text</label>
+                    <input type="text" value={heroSettings.subtitle || ''} onChange={e=>setHeroSettings({...heroSettings, subtitle: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Primary Video Embed URL (YouTube/MP4)</label>
+                    <input type="text" value={heroSettings.video1 || ''} onChange={e=>setHeroSettings({...heroSettings, video1: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Secondary Video Embed URL</label>
+                    <input type="text" value={heroSettings.video2 || ''} onChange={e=>setHeroSettings({...heroSettings, video2: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Image Slide 1 URL</label>
+                    <input type="text" value={heroSettings.img1 || ''} onChange={e=>setHeroSettings({...heroSettings, img1: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Image Slide 2 URL</label>
+                    <input type="text" value={heroSettings.img2 || ''} onChange={e=>setHeroSettings({...heroSettings, img2: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Top Announcement Ticker Text</label>
+                    <input type="text" value={heroSettings.announcementTicker || ''} onChange={e=>setHeroSettings({...heroSettings, announcementTicker: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Badge Label Text</label>
+                    <input type="text" value={heroSettings.badgeText || ''} onChange={e=>setHeroSettings({...heroSettings, badgeText: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  </div>
+                </div>
+                <button 
+                  onClick={async () => {
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/admin/config/hero`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify(heroSettings)
+                      });
+                      if (res.ok) {
+                        showToast('Hero settings saved successfully!', 'success');
+                        fetchHero();
+                      } else {
+                        showToast('Failed to save hero settings', 'error');
+                      }
+                    } catch (err) { showToast('Network error saving hero settings', 'error'); }
+                  }}
+                  className="bg-emerald-600 text-white font-bold text-xs px-6 py-3 rounded-xl hover:bg-emerald-500 transition-all mt-4"
+                >
+                  Save Hero Section Settings
+                </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {carousel.map((slide, idx) => (
-                  <div key={idx} className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl flex flex-col">
-                    <div className="h-44 bg-emerald-950 relative">
-                      <img src={slide.url} alt={slide.title} className="w-full h-full object-cover opacity-70" />
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Promotional Carousel Cards</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <input type="text" placeholder="Card Title" value={newSlide.title} onChange={e=>setNewSlide({...newSlide, title: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  <input type="text" placeholder="Card Subtitle" value={newSlide.subtitle} onChange={e=>setNewSlide({...newSlide, subtitle: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  <input type="text" placeholder="Image URL" value={newSlide.url} onChange={e=>setNewSlide({...newSlide, url: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                </div>
+                <button 
+                  onClick={async () => {
+                    if (!newSlide.title || !newSlide.url) return showToast('Please provide Title and Image URL', 'error');
+                    const updated = [...carousel, newSlide];
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/admin/config/carousel`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify(updated)
+                      });
+                      if (res.ok) {
+                        showToast('Carousel slide added!', 'success');
+                        setNewSlide({ title: '', subtitle: '', url: '' });
+                        fetchCarousel();
+                      } else {
+                        showToast('Failed to add slide', 'error');
+                      }
+                    } catch (err) { showToast('Network error adding slide', 'error'); }
+                  }}
+                  className="bg-emerald-600 text-white font-bold text-xs px-6 py-3 rounded-xl hover:bg-emerald-500 transition-all"
+                >
+                  Add Carousel Card
+                </button>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                  {carousel.map((slide, idx) => (
+                    <div key={idx} className="bg-[#1a1a1a] p-4 rounded-2xl border border-gray-800 relative">
+                      <img src={slide.url} alt={slide.title} className="w-full h-32 object-cover rounded-xl mb-3" />
+                      <h4 className="font-bold text-white text-sm">{slide.title}</h4>
+                      <p className="text-xs text-gray-400">{slide.subtitle}</p>
                       <button 
                         onClick={async () => {
                           const updated = carousel.filter((_, i) => i !== idx);
@@ -1985,31 +2005,21 @@ export default function PremiumRiceStore() {
                             const res = await fetch(`${API_BASE_URL}/admin/config/carousel`, {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                              body: JSON.stringify({ slides: updated })
+                              body: JSON.stringify(updated)
                             });
                             if (res.ok) {
-                              showToast('Slide removed from carousel', 'success');
-                              setCarousel(updated);
-                            } else {
-                              showToast('Failed to update carousel', 'error');
+                              showToast('Slide removed!', 'success');
+                              fetchCarousel();
                             }
-                          } catch (err) { showToast('Network error removing slide', 'error'); }
+                          } catch (err) { showToast('Error deleting slide', 'error'); }
                         }}
-                        className="absolute top-3 right-3 bg-rose-600/80 hover:bg-rose-600 text-white p-2 rounded-xl transition-colors shadow-lg"
-                        title="Remove Slide"
+                        className="mt-3 bg-rose-500/20 text-rose-300 border border-rose-500/40 w-full py-2 rounded-xl font-bold text-xs hover:bg-rose-500 hover:text-white transition-all"
                       >
-                        <Trash2 size={16}/>
+                        Remove Slide
                       </button>
                     </div>
-                    <div className="p-5 flex-1 flex flex-col justify-between">
-                      <div>
-                        <h4 className="font-bold text-base text-white">{slide.title}</h4>
-                        <p className="text-xs text-gray-400 mt-1">{slide.subtitle}</p>
-                      </div>
-                      <span className="text-[10px] font-mono text-gray-500 truncate mt-4 block">{slide.url}</span>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -2017,132 +2027,99 @@ export default function PremiumRiceStore() {
           {adminTab === 'config' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> Hero & Regional Freight Configurator</h2>
-                <p className="text-gray-400 text-xs mt-1">Customize storefront hero media, titles, overlay opacity, and county transport fees.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> Regional Logistics & Counties Transport Engine</h2>
+                <p className="text-gray-400 text-xs mt-1">Configure baseline shipping fees and county-specific transport pricing overrides.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                  <Sliders size={18}/> Expanded Storefront Hero Parameters
-                </h3>
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  try {
-                    const res = await fetch(`${API_BASE_URL}/admin/config/hero`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                      body: JSON.stringify(heroSettings)
-                    });
-                    if (res.ok) {
-                      showToast('Hero settings saved and synchronized live!', 'success');
-                      fetchHero();
-                    } else {
-                      showToast('Failed to update hero configuration', 'error');
-                    }
-                  } catch (err) { showToast('Network error updating hero settings', 'error'); }
-                }} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Hero Headline Title</label>
-                    <input type="text" value={heroSettings.title || ''} onChange={e=>setHeroSettings({...heroSettings, title: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Hero Subtitle</label>
-                    <input type="text" value={heroSettings.subtitle || ''} onChange={e=>setHeroSettings({...heroSettings, subtitle: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Primary Video Stream URL (YouTube Embed)</label>
-                    <input type="text" value={heroSettings.video1 || ''} onChange={e=>setHeroSettings({...heroSettings, video1: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Secondary Video Stream URL</label>
-                    <input type="text" value={heroSettings.video2 || ''} onChange={e=>setHeroSettings({...heroSettings, video2: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Primary Background Image URL</label>
-                    <input type="text" value={heroSettings.img1 || ''} onChange={e=>setHeroSettings({...heroSettings, img1: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Secondary Background Image URL</label>
-                    <input type="text" value={heroSettings.img2 || ''} onChange={e=>setHeroSettings({...heroSettings, img2: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">CTA Button Label</label>
-                    <input type="text" value={heroSettings.ctaButtonText || ''} onChange={e=>setHeroSettings({...heroSettings, ctaButtonText: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Badge Tagline</label>
-                    <input type="text" value={heroSettings.badgeText || ''} onChange={e=>setHeroSettings({...heroSettings, badgeText: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Announcement Ticker Text</label>
-                    <input type="text" value={heroSettings.announcementTicker || ''} onChange={e=>setHeroSettings({...heroSettings, announcementTicker: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Support Hotline Display</label>
-                    <input type="text" value={heroSettings.supportHotlineDisplay || ''} onChange={e=>setHeroSettings({...heroSettings, supportHotlineDisplay: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3.5 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all md:col-span-2">Apply Storefront Parameters</button>
-                </form>
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Default Baseline Transport Fee</h3>
+                <div className="flex items-center gap-4 max-w-md">
+                  <input 
+                    type="number" 
+                    value={baseTransportFee} 
+                    onChange={e => setBaseTransportFee(Number(e.target.value))}
+                    className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono w-full"
+                  />
+                  <button 
+                    onClick={() => showToast('Base transport fee saved locally', 'success')}
+                    className="bg-emerald-600 text-white font-bold text-xs px-6 py-3.5 rounded-xl hover:bg-emerald-500 shrink-0"
+                  >
+                    Set Default
+                  </button>
+                </div>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                  <Globe size={18}/> County Transport Fee Override Engine
-                </h3>
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  if (!countyOverrideForm.fee) return showToast('Please specify a fee value', 'error');
-                  try {
-                    const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                      body: JSON.stringify({ county: countyOverrideForm.county, fee: Number(countyOverrideForm.fee) })
-                    });
-                    if (res.ok) {
-                      showToast(`Transport fee for ${countyOverrideForm.county} set to KES ${countyOverrideForm.fee}`, 'success');
-                      setCountyOverrides({...countyOverrides, [countyOverrideForm.county]: Number(countyOverrideForm.fee)});
-                      setCountyOverrideForm({ county: 'Nairobi', fee: '' });
-                    } else {
-                      showToast('Failed to set county override', 'error');
-                    }
-                  } catch (err) { showToast('Network error setting county override', 'error'); }
-                }} className="flex flex-col sm:flex-row gap-4">
-                  <select value={countyOverrideForm.county} onChange={e=>setCountyOverrideForm({...countyOverrideForm, county: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none flex-1">
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">County Specific Transport Pricing Override</h3>
+                <div className="flex flex-col sm:flex-row gap-3 max-w-xl">
+                  <select 
+                    value={countyOverrideForm.county}
+                    onChange={e=>setCountyOverrideForm({...countyOverrideForm, county: e.target.value})}
+                    className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs"
+                  >
                     {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c} County</option>)}
                   </select>
-                  <input type="number" placeholder="Override Delivery Fee (KES)" value={countyOverrideForm.fee} onChange={e=>setCountyOverrideForm({...countyOverrideForm, fee: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none flex-1 placeholder-gray-500" />
-                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3.5 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all">Save County Fee</button>
-                </form>
+                  <input 
+                    type="number" 
+                    placeholder="Fee (KES)"
+                    value={countyOverrideForm.fee}
+                    onChange={e=>setCountyOverrideForm({...countyOverrideForm, fee: e.target.value})}
+                    className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono"
+                  />
+                  <button 
+                    onClick={async () => {
+                      if (!countyOverrideForm.fee) return showToast('Enter valid fee', 'error');
+                      const updated = { ...countyOverrides, [countyOverrideForm.county]: Number(countyOverrideForm.fee) };
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                          body: JSON.stringify(updated)
+                        });
+                        if (res.ok) {
+                          showToast(`Transport fee for ${countyOverrideForm.county} set to KES ${countyOverrideForm.fee}`, 'success');
+                          setCountyOverrideForm({ county: 'Nairobi', fee: '' });
+                          fetchCountiesConfig();
+                        } else {
+                          showToast('Failed to update county override', 'error');
+                        }
+                      } catch (err) { showToast('Network error setting override', 'error'); }
+                    }}
+                    className="bg-emerald-600 text-white font-bold text-xs px-6 py-3 rounded-xl hover:bg-emerald-500 shrink-0"
+                  >
+                    Save Override
+                  </button>
+                </div>
 
-                <div className="mt-6 border-t border-gray-800 pt-4">
-                  <h4 className="text-xs font-bold text-gray-400 uppercase mb-3">Active County Delivery Overrides ({Object.keys(countyOverrides).length})</h4>
-                  <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
-                    {Object.entries(countyOverrides).map(([county, fee]) => (
-                      <div key={county} className="bg-[#1c1c1c] border border-gray-700 px-3 py-1.5 rounded-xl text-xs flex items-center gap-2 font-mono">
-                        <span className="text-gray-300 font-sans font-bold">{county}:</span>
-                        <span className="text-emerald-400 font-bold">KES {fee}</span>
-                        <button 
-                          onClick={async () => {
-                            try {
-                              const res = await fetch(`${API_BASE_URL}/admin/config/counties/${county}`, {
-                                method: 'DELETE',
-                                headers: { 'Authorization': `Bearer ${token}` }
-                              });
-                              if (res.ok) {
-                                const newObj = {...countyOverrides};
-                                delete newObj[county];
-                                setCountyOverrides(newObj);
-                                showToast(`Removed override for ${county}`, 'success');
-                              }
-                            } catch (err) { showToast('Error deleting override', 'error'); }
-                          }} 
-                          className="text-gray-500 hover:text-rose-400 ml-1"
-                        >
-                          <X size={14}/>
-                        </button>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6">
+                  {Object.entries(countyOverrides).map(([county, fee]) => (
+                    <div key={county} className="bg-[#181818] p-3 rounded-2xl border border-gray-800 flex justify-between items-center text-xs">
+                      <div>
+                        <span className="font-bold text-white block">{county}</span>
+                        <span className="font-mono text-emerald-400">KES {fee}</span>
                       </div>
-                    ))}
-                  </div>
+                      <button 
+                        onClick={async () => {
+                          const updated = { ...countyOverrides };
+                          delete updated[county];
+                          try {
+                            const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                              body: JSON.stringify(updated)
+                            });
+                            if (res.ok) {
+                              showToast(`Removed override for ${county}`, 'success');
+                              fetchCountiesConfig();
+                            }
+                          } catch (err) { showToast('Error deleting override', 'error'); }
+                        }}
+                        className="text-gray-500 hover:text-rose-400 p-1"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -2150,84 +2127,30 @@ export default function PremiumRiceStore() {
 
           {adminTab === 'logs' && (
             <div className="animate-fadeIn space-y-6">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div>
-                  <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> System & M-Pesa Payment Audit Logs</h2>
-                  <p className="text-gray-400 text-xs mt-1">Real-time payment logs, STK push callbacks, and database event trail from backend.</p>
-                </div>
-                <button onClick={fetchAdminLogs} className="bg-[#1f1f1f] border border-gray-700 text-emerald-400 hover:text-emerald-300 px-4 py-2 rounded-xl text-xs font-bold flex items-center transition-all">
-                  <RefreshCw size={14} className="mr-1.5" /> Refresh Payment Logs
-                </button>
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> Real-time System Audit & Payment Logs</h2>
+                <p className="text-gray-400 text-xs mt-1">Live callback monitoring, M-Pesa push logs, and system error traces.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
-                <div className="p-4 bg-[#1a1a1a] border-b border-gray-800 flex justify-between items-center text-xs font-bold text-gray-300">
-                  <span>Backend Payment Logs Stream ({adminLogs.length} entries)</span>
-                  <span className="text-emerald-400 font-mono">Backend Feed: Connected</span>
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 font-mono text-xs shadow-xl">
+                <div className="flex justify-between items-center mb-4 pb-3 border-b border-gray-800">
+                  <span className="text-emerald-400 font-bold uppercase tracking-wider text-[10px]">Backend Audit Stream</span>
+                  <button onClick={fetchAdminLogs} className="text-gray-400 hover:text-white flex items-center gap-1 text-[10px] font-bold">
+                    <RefreshCw size={12}/> Refresh Logs
+                  </button>
                 </div>
-                
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs whitespace-nowrap">
-                    <thead className="bg-[#181818] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
-                      <tr>
-                        <th className="px-6 py-4">Timestamp</th>
-                        <th className="px-6 py-4">Event / Action</th>
-                        <th className="px-6 py-4">Receipt / Ref</th>
-                        <th className="px-6 py-4">M-Pesa Phone / User</th>
-                        <th className="px-6 py-4">Amount</th>
-                        <th className="px-6 py-4">Status</th>
-                        <th className="px-6 py-4">Payload / Details</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-800/60 font-mono">
-                      {adminLogs.length === 0 ? (
-                        <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-500 font-sans">No payment or system audit logs found.</td></tr>
-                      ) : (
-                        adminLogs.map((log: any, idx: number) => {
-                          const actionText = log.action || log.event || log.type || 'Payment Callback';
-                          const receiptText = log.mpesaReceiptNumber || log.receipt || log.transactionId || log.checkoutRequestID || log.id || 'N/A';
-                          const phoneOrUser = log.phoneNumber || log.phone || log.user?.phoneNumber || log.userId || 'N/A';
-                          const amountVal = log.amount || log.grandTotal ? `KES ${(log.amount || log.grandTotal).toLocaleString()}` : 'N/A';
-                          const statusText = log.status || log.paymentStatus || 'COMPLETED';
-                          
-                          let detailsFormatted = '';
-                          if (log.details) {
-                            detailsFormatted = typeof log.details === 'object' ? JSON.stringify(log.details) : String(log.details);
-                          } else if (log.message) {
-                            detailsFormatted = String(log.message);
-                          } else if (log.resultDesc) {
-                            detailsFormatted = String(log.resultDesc);
-                          } else {
-                            detailsFormatted = '-';
-                          }
-
-                          return (
-                            <tr key={log.id || idx} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                              <td className="px-6 py-4 text-gray-400 text-[11px]">
-                                {log.createdAt ? new Date(log.createdAt).toLocaleString() : new Date().toLocaleString()}
-                              </td>
-                              <td className="px-6 py-4 font-bold text-white font-sans">{actionText}</td>
-                              <td className="px-6 py-4 font-bold text-emerald-400">{receiptText}</td>
-                              <td className="px-6 py-4 text-gray-300">{phoneOrUser}</td>
-                              <td className="px-6 py-4 font-bold text-white">{amountVal}</td>
-                              <td className="px-6 py-4">
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                                  statusText.toLowerCase().includes('fail') || statusText.toLowerCase().includes('err')
-                                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                                    : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                }`}>
-                                  {statusText}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 text-gray-400 text-[11px] max-w-xs truncate" title={detailsFormatted}>
-                                {detailsFormatted}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
+                <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
+                  {adminLogs.length === 0 ? (
+                    <div className="text-gray-500 text-center py-8">No recent system or payment callback logs recorded.</div>
+                  ) : (
+                    adminLogs.map((log, idx) => (
+                      <div key={idx} className="bg-[#181818] p-3 rounded-xl border border-gray-800 text-gray-300 leading-relaxed">
+                        <span className="text-gray-500 text-[10px] block">{new Date(log.createdAt || Date.now()).toLocaleString()}</span>
+                        <div className="text-emerald-300 font-bold mt-0.5">{log.event || log.action || 'PAYMENT_EVENT'}</div>
+                        <pre className="text-[10px] text-gray-400 mt-1 whitespace-pre-wrap font-mono">{typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : log.details || log.message || JSON.stringify(log)}</pre>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -2238,8 +2161,18 @@ export default function PremiumRiceStore() {
   };
 
   return (
-    <div className="min-h-screen bg-emerald-50/20 text-gray-900 font-sans flex flex-col">
+    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans flex flex-col selection:bg-emerald-500 selection:text-white">
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 text-sm font-black border animate-bounce ${
+          toast.type === 'error' ? 'bg-rose-950 text-rose-200 border-rose-800' : 'bg-emerald-950 text-emerald-200 border-emerald-800'
+        }`}>
+          {toast.type === 'error' ? <AlertCircle size={20} className="text-rose-400 shrink-0"/> : <CheckCircle size={20} className="text-emerald-400 shrink-0"/>}
+          <span>{toast.message}</span>
+        </div>
+      )}
+
       {renderNav()}
+
       <main className="flex-1">
         {view === 'home' && renderHome()}
         {view === 'shop' && renderShop()}
@@ -2249,56 +2182,40 @@ export default function PremiumRiceStore() {
         {view === 'admin' && renderAdmin()}
       </main>
 
-      {toast && (
-        <div className={`fixed bottom-6 right-6 px-6 py-3.5 rounded-2xl text-white font-black text-sm shadow-2xl z-50 flex items-center animate-bounce border ${
-          toast.type === 'error' ? 'bg-rose-600 border-rose-500' : 'bg-emerald-600 border-emerald-500'
-        }`}>
-          {toast.type === 'error' ? <AlertCircle className="mr-2.5 h-5 w-5" /> : <CheckCircle className="mr-2.5 h-5 w-5" />}
-          {toast.message}
-        </div>
-      )}
-
-      <footer className="bg-emerald-950 text-emerald-200 py-12 border-t border-emerald-900 mt-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 md:grid-cols-4 gap-8">
+      <footer className="bg-emerald-950 text-emerald-200 border-t border-emerald-900 py-12 px-4 mt-auto">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 mb-8 text-xs">
           <div>
-            <div className="flex items-center mb-4">
-              <Leaf className="h-7 w-7 text-emerald-400 mr-2" />
-              <span className="font-black text-xl text-white tracking-tight">MWEA HUB</span>
+            <div className="flex items-center text-white font-black text-xl mb-3">
+              <Leaf className="mr-2 text-emerald-400 h-6 w-6" /> MWEA HUB
             </div>
-            <p className="text-xs text-emerald-300/80 leading-relaxed">
-              Direct agricultural rice supply chain connecting Mwea irrigation scheme rice farmers directly to households and retail consumers across all 47 counties in Kenya.
-            </p>
+            <p className="text-emerald-400 leading-relaxed">Direct Mwea rice supply chain platform delivering authentic aromatic grains directly from farms to households and retailers across Kenya.</p>
           </div>
           <div>
-            <h4 className="text-xs font-black uppercase text-emerald-400 tracking-wider mb-4">Grain Catalog</h4>
-            <ul className="space-y-2 text-xs font-medium">
-              <li className="hover:text-white cursor-pointer" onClick={() => setView('shop')}>Aromatic Pishori Grade 1</li>
-              <li className="hover:text-white cursor-pointer" onClick={() => setView('shop')}>Super Basmati Long Grain</li>
-              <li className="hover:text-white cursor-pointer" onClick={() => setView('shop')}>Wholesale 25kg Sacks</li>
-              <li className="hover:text-white cursor-pointer" onClick={() => setView('shop')}>5kg & 10kg Family Sacks</li>
+            <h4 className="font-bold text-white text-sm uppercase tracking-wider mb-3">Coverage & Shipping</h4>
+            <ul className="space-y-2 text-emerald-300 font-medium">
+              <li>Full 47 Counties Support</li>
+              <li>Nairobi & Kiambu Express Dispatch</li>
+              <li>Wholesale Sacks (25kg - 50kg)</li>
+              <li>Real-time STK Push Direct Billing</li>
             </ul>
           </div>
           <div>
-            <h4 className="text-xs font-black uppercase text-emerald-400 tracking-wider mb-4">Coverage & Logistics</h4>
-            <ul className="space-y-2 text-xs font-medium">
-              <li>Nairobi & Kiambu Express Delivery</li>
-              <li>Mombasa & Coastal Regions</li>
-              <li>Rift Valley & Lake Basin Direct Shipping</li>
-              <li>All 47 Counties Transport Logistics</li>
+            <h4 className="font-bold text-white text-sm uppercase tracking-wider mb-3">Customer Support</h4>
+            <ul className="space-y-2 text-emerald-300 font-medium">
+              <li>Hotline: {heroSettings?.supportHotlineDisplay || '+254 700 000000'}</li>
+              <li>Mwea Milling Depot, Wanguru</li>
+              <li>Email: support@mweahub.co.ke</li>
+              <li>Verified Agricultural Standards</li>
             </ul>
           </div>
           <div>
-            <h4 className="text-xs font-black uppercase text-emerald-400 tracking-wider mb-4">MWEA HUB Support</h4>
-            <p className="text-xs text-emerald-300/80 leading-relaxed mb-3">
-              Hotline: {heroSettings?.supportHotlineDisplay || '+254 700 000000'}
-            </p>
-            <span className="text-[10px] bg-emerald-900 border border-emerald-700 text-emerald-300 px-3 py-1 rounded-full font-bold inline-block">
-              🟢 Live Order Tracking Active
-            </span>
+            <h4 className="font-bold text-white text-sm uppercase tracking-wider mb-3">Store Guarantee</h4>
+            <p className="text-emerald-400 leading-relaxed">100% genuine aromatic long-grain Pishori. Unblended, directly milled, and quality checked.</p>
           </div>
         </div>
-        <div className="max-w-7xl mx-auto px-4 mt-8 pt-8 border-t border-emerald-900/60 text-center text-xs text-emerald-400/60 font-medium">
-          © {new Date().getFullYear()} MWEA HUB DIRECT RICE LOGISTICS PLATFORM. ALL RIGHTS RESERVED.
+        <div className="max-w-7xl mx-auto border-t border-emerald-900/80 pt-6 flex flex-col sm:flex-row justify-between items-center text-[11px] text-emerald-500 font-bold">
+          <div>© {new Date().getFullYear()} MWEA HUB DIRECT STORE. ALL RIGHTS RESERVED.</div>
+          <div className="mt-2 sm:mt-0">MADE WITH PRECISION FOR KENYAN HARVEST LOGISTICS</div>
         </div>
       </footer>
     </div>
