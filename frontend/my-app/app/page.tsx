@@ -1234,7 +1234,7 @@ export default function PremiumRiceStore() {
     );
   };
 
-  const renderProfile = () => {
+const renderProfile = () => {
     const pendingTransactions = myOrders.filter(o => o.status !== 'delivered' && o.status !== 'completed' && o.paymentStatus !== 'failed');
     const completedTransactions = myOrders.filter(o => o.status === 'delivered' || o.status === 'completed');
 
@@ -1279,25 +1279,32 @@ export default function PremiumRiceStore() {
               <div className="text-center py-8 text-gray-500 font-medium text-sm">No pending shipping transactions.</div>
             ) : (
               <div className="space-y-4">
-                {pendingTransactions.map(o => (
-                  <div key={o.id} className="border border-amber-200 bg-amber-50/40 rounded-2xl p-5">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200 pb-3 mb-3">
-                      <div>
-                        <span className="font-mono font-black text-emerald-950 text-base">TXN #{o.transactionId || o.id}</span>
-                        <span className="text-xs text-gray-500 font-medium ml-3">Payment Status: <strong className="text-emerald-700 uppercase">{o.paymentStatus || 'Paid'}</strong></span>
+                {pendingTransactions.map(o => {
+                  const normalizedPaymentStatus = o.paymentStatus ? o.paymentStatus.toLowerCase() : '';
+                  const isPaid = normalizedPaymentStatus === 'completed' || normalizedPaymentStatus === 'paid' || normalizedPaymentStatus === 'success';
+                  
+                  return (
+                    <div key={o.id} className="border border-amber-200 bg-amber-50/40 rounded-2xl p-5">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200 pb-3 mb-3">
+                        <div>
+                          <span className="font-mono font-black text-emerald-950 text-base">TXN #{o.transactionId || o.id}</span>
+                          <span className="text-xs text-gray-500 font-medium ml-3">
+                            Payment Status: <strong className={`uppercase ${isPaid ? 'text-emerald-700' : 'text-amber-600'}`}>{o.paymentStatus || 'Pending'}</strong>
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
+                            ● {o.status} (In Shipping)
+                          </span>
+                          <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
-                          ● {o.status} (In Shipping)
-                        </span>
-                        <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
+                      <div className="text-xs text-gray-700">
+                        <strong>Shipping Route:</strong> {o.county}, {o.town}, {o.location} ({formatShippingAddress(o.shippingAddress)})
                       </div>
                     </div>
-                    <div className="text-xs text-gray-700">
-                      <strong>Shipping Route:</strong> {o.county}, {o.town}, {o.location} ({formatShippingAddress(o.shippingAddress)})
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1315,43 +1322,53 @@ export default function PremiumRiceStore() {
               <div className="text-center py-8 text-gray-500 font-medium text-sm">No completed delivery transactions recorded yet.</div>
             ) : (
               <div className="space-y-6">
-                {completedTransactions.map(o => (
-                  <div key={o.id} className="border border-gray-200 bg-gray-50/50 rounded-2xl p-5">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-200 pb-4 mb-4">
-                      <div>
-                        <span className="font-mono font-black text-emerald-950 text-base">TXN ID: #{o.transactionId || o.id}</span>
-                        <span className="text-xs text-gray-400 font-medium block sm:inline sm:ml-3">{new Date(o.createdAt).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
-                          ● DELIVERED & COMPLETED
-                        </span>
-                        <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
-                      </div>
-                    </div>
+                {completedTransactions.map(o => {
+                  const normalizedPaymentStatus = o.paymentStatus ? o.paymentStatus.toLowerCase() : '';
+                  const isPaid = normalizedPaymentStatus === 'completed' || normalizedPaymentStatus === 'paid' || normalizedPaymentStatus === 'success';
 
-                    <div className="text-xs text-gray-600 mb-4 bg-white p-4 rounded-xl border border-gray-200">
-                      <div className="font-bold text-gray-800 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-600"/> Delivery Details:</div>
-                      <ul className="space-y-1 pl-5 list-disc text-gray-700">
-                        <li><strong>County:</strong> {o.county || 'N/A'}</li>
-                        <li><strong>Town/District:</strong> {o.town || 'N/A'}</li>
-                        <li><strong>Location:</strong> {o.location || 'N/A'}</li>
-                        <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
-                        <li><strong>Street/Landmark:</strong> {formatShippingAddress(o.shippingAddress)}</li>
-                        <li><strong>Payment Status:</strong> <span className="uppercase text-emerald-600 font-bold">{o.paymentStatus || 'Paid'}</span></li>
-                      </ul>
-                    </div>
-
-                    <div className="space-y-1.5 text-xs">
-                      {o.items?.map((item: any, i: number) => (
-                        <div key={i} className="flex justify-between text-gray-700 bg-white px-3 py-2 rounded-lg border border-gray-100 font-medium">
-                          <span>{item.quantity}x {item.name || item.product?.variety}</span>
-                          <span className="font-bold">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
+                  return (
+                    <div key={o.id} className="border border-gray-200 bg-gray-50/50 rounded-2xl p-5">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-200 pb-4 mb-4">
+                        <div>
+                          <span className="font-mono font-black text-emerald-950 text-base">TXN ID: #{o.transactionId || o.id}</span>
+                          <span className="text-xs text-gray-400 font-medium block sm:inline sm:ml-3">{new Date(o.createdAt).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</span>
                         </div>
-                      ))}
+                        <div className="flex items-center gap-3">
+                          <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            ● DELIVERED & COMPLETED
+                          </span>
+                          <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-gray-600 mb-4 bg-white p-4 rounded-xl border border-gray-200">
+                        <div className="font-bold text-gray-800 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-600"/> Delivery Details:</div>
+                        <ul className="space-y-1 pl-5 list-disc text-gray-700">
+                          <li><strong>County:</strong> {o.county || 'N/A'}</li>
+                          <li><strong>Town/District:</strong> {o.town || 'N/A'}</li>
+                          <li><strong>Location:</strong> {o.location || 'N/A'}</li>
+                          <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
+                          <li><strong>Street/Landmark:</strong> {formatShippingAddress(o.shippingAddress)}</li>
+                          <li>
+                            <strong>Payment Status:</strong>{' '}
+                            <span className={`uppercase font-bold ${isPaid ? 'text-emerald-600' : 'text-amber-600'}`}>
+                              {o.paymentStatus || 'Pending'}
+                            </span>
+                          </li>
+                        </ul>
+                      </div>
+
+                      <div className="space-y-1.5 text-xs">
+                        {o.items?.map((item: any, i: number) => (
+                          <div key={i} className="flex justify-between text-gray-700 bg-white px-3 py-2 rounded-lg border border-gray-100 font-medium">
+                            <span>{item.quantity}x {item.name || item.product?.variety}</span>
+                            <span className="font-bold">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
