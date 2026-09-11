@@ -6,8 +6,8 @@ import {
   Trash2, Shield, Clock, Search, Edit, Package, Activity, 
   CheckCircle, AlertCircle, Settings, Leaf, ChevronRight,
   ShoppingBag, Users, Image as ImageIcon, Video, Download,
-  MapPin, Eye, RefreshCw, LogOut, Check, AlertTriangle, Smartphone, CreditCard,
-  BarChart2, DollarSign, Award, Calendar, Lock, Unlock, TrendingUp, Filter, FileText, Percent, Layers, Globe, Sliders, Bell
+  MapPin, RefreshCw, LogOut, AlertTriangle, Smartphone, 
+  BarChart2, Award 
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 
@@ -154,12 +154,7 @@ export default function PremiumRiceStore() {
   const [adminLogs, setAdminLogs] = useState<any[]>([]);
   const [orderSearchQuery, setOrderSearchQuery] = useState('');
   const [shopSearch, setShopSearch] = useState('');
-  const [newSlide, setNewSlide] = useState({ title: '', subtitle: '', url: '' });
-  const [countyOverrideForm, setCountyOverrideForm] = useState({ county: 'Nairobi', fee: '' });
   
-  const [financeYear, setFinanceYear] = useState<number>(new Date().getFullYear());
-  const [editingUser, setEditingUser] = useState<any | null>(null);
-
   const getAccountCartKey = (u: any) => {
     return u ? `mwea_hub_cart_${u.id || u.phoneNumber}` : 'mwea_hub_cart_guest';
   };
@@ -227,7 +222,7 @@ export default function PremiumRiceStore() {
     if (user && !checkoutData.stkPhoneNumber) {
       setCheckoutData(prev => ({ ...prev, stkPhoneNumber: user.phoneNumber }));
     }
-  }, [user]);
+  }, [user, checkoutData.stkPhoneNumber]);
 
   useEffect(() => {
     try {
@@ -588,7 +583,7 @@ export default function PremiumRiceStore() {
       <div className="animate-fadeIn">
         {heroSettings?.announcementTicker && (
           <div className="bg-gradient-to-r from-emerald-800 via-emerald-700 to-emerald-800 text-emerald-100 py-2 px-4 text-center text-xs font-bold tracking-wide border-b border-emerald-900 flex items-center justify-center gap-2 shadow-inner">
-            <Bell size={14} className="text-emerald-300 animate-bounce" />
+            <CheckCircle size={14} className="text-emerald-300 animate-bounce" />
             <span>{heroSettings.announcementTicker}</span>
           </div>
         )}
@@ -1234,7 +1229,7 @@ export default function PremiumRiceStore() {
     );
   };
 
-const renderProfile = () => {
+  const renderProfile = () => {
     const pendingTransactions = myOrders.filter(o => o.status !== 'delivered' && o.status !== 'completed' && o.paymentStatus !== 'failed');
     const completedTransactions = myOrders.filter(o => o.status === 'delivered' || o.status === 'completed');
 
@@ -1567,7 +1562,7 @@ const renderProfile = () => {
                           <td className="px-6 py-4 text-center">
                             <button onClick={() => setEditingProduct(p)} className="text-gray-400 hover:text-emerald-400 p-2 bg-[#1f1f1f] rounded-xl mr-2 transition-colors" title="Edit"><Edit size={14}/></button>
                             <button onClick={async () => {
-                              if (confirm(`Permanently delete ${p.brandName} ${p.variety}?`)) {
+                              if (window.confirm(`Permanently delete ${p.brandName} ${p.variety}?`)) {
                                 try {
                                   const res = await fetch(`${API_BASE_URL}/admin/products/${p.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
                                   if (res.ok) {
@@ -1672,27 +1667,24 @@ const renderProfile = () => {
                         <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80">
                           <p className="font-bold text-gray-300 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-500"/> Delivery Logistics:</p>
                           <ul className="space-y-1 text-gray-400">
-                            <li>County: <strong className="text-white">{o.county}</strong></li>
-                            <li>Town: <strong className="text-white">{o.town}</strong></li>
-                            <li>Location: <strong className="text-white">{o.location}</strong></li>
-                            <li>Street: <strong className="text-white">{formatShippingAddress(o.shippingAddress)}</strong></li>
+                            <li><strong>Destination:</strong> {o.county}, {o.town}</li>
+                            <li><strong>Location:</strong> {o.location}, {o.sublocation}</li>
+                            <li><strong>Address:</strong> {formatShippingAddress(o.shippingAddress)}</li>
                           </ul>
                         </div>
-                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80 flex flex-col justify-between">
-                          <div>
-                            <p className="font-bold text-gray-300 mb-2">Order Items ({o.items?.length || 0}):</p>
-                            <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
-                              {o.items?.map((item: any, idx: number) => (
-                                <div key={idx} className="flex justify-between text-gray-400">
-                                  <span>{item.quantity}x {item.name || item.product?.variety}</span>
-                                  <span className="font-bold text-white">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="flex justify-between font-black text-sm text-emerald-400 border-t border-gray-800 pt-2 mt-2">
-                            <span>Grand Total</span>
-                            <span>KES {o.grandTotal?.toLocaleString()}</span>
+                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80">
+                          <p className="font-bold text-gray-300 mb-2 flex items-center"><Package size={14} className="mr-1 text-emerald-500"/> Order Items:</p>
+                          <ul className="space-y-1 text-gray-400">
+                            {o.items?.map((item: any, i: number) => (
+                              <li key={i} className="flex justify-between border-b border-gray-800 pb-1 mb-1 last:border-0 last:pb-0 last:mb-0">
+                                <span>{item.quantity}x {item.name || item.product?.variety}</span>
+                                <span className="font-bold text-emerald-400">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
+                              </li>
+                            ))}
+                          </ul>
+                          <div className="mt-2 pt-2 border-t border-gray-700 flex justify-between font-black">
+                            <span>Total</span>
+                            <span className="text-emerald-400">KES {o.grandTotal?.toLocaleString()}</span>
                           </div>
                         </div>
                       </div>
@@ -1702,474 +1694,11 @@ const renderProfile = () => {
             </div>
           )}
 
-          {adminTab === 'finances' && (() => {
-            const monthlyRevenue = Array(12).fill(0);
-            const monthlyProfit = Array(12).fill(0);
-            let totalYearlyRevenue = 0;
-            let totalYearlyProfit = 0;
-
-            const categorySales: { [key: string]: { quantity: number, revenue: number, profit: number, sellingPrice: number, costPrice: number } } = {};
-
-            adminOrders.forEach(order => {
-               if (order.status !== 'failed' && order.paymentStatus !== 'failed') {
-                   const d = new Date(order.createdAt);
-                   if (d.getFullYear() === financeYear) {
-                       totalYearlyRevenue += (order.grandTotal || 0);
-                       
-                       order.items?.forEach((item: any) => {
-                          const catName = item.name || item.product?.variety || 'Standard Rice';
-                          const selling = item.priceAtPurchase || 0;
-                          const cost = item.product?.costPrice || item.costPrice || (selling * 0.75);
-                          const profit = (selling - cost) * item.quantity;
-                          const rev = selling * item.quantity;
-
-                          if (!categorySales[catName]) {
-                             categorySales[catName] = { quantity: 0, revenue: 0, profit: 0, sellingPrice: selling, costPrice: cost };
-                          }
-                          categorySales[catName].quantity += item.quantity;
-                          categorySales[catName].revenue += rev;
-                          categorySales[catName].profit += profit;
-                       });
-
-                       const m = d.getMonth();
-                       monthlyRevenue[m] += (order.grandTotal || 0);
-                       const orderProfit = order.items?.reduce((pSum: number, item: any) => {
-                          const selling = item.priceAtPurchase || 0;
-                          const cost = item.product?.costPrice || item.costPrice || (selling * 0.75);
-                          return pSum + ((selling - cost) * item.quantity);
-                       }, 0) || 0;
-                       monthlyProfit[m] += orderProfit;
-                       totalYearlyProfit += orderProfit;
-                   }
-               }
-            });
-
-            const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-            return (
-              <div className="animate-fadeIn space-y-6">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <div>
-                    <h2 className="text-2xl font-black text-white flex items-center"><BarChart2 className="mr-3 text-emerald-500"/> Financial Analytics & Profit Engine</h2>
-                    <p className="text-gray-400 text-xs mt-1">Real-time revenue monitoring, cost margin analysis, and annual profit breakdown.</p>
-                  </div>
-                  <div className="flex items-center gap-2 bg-[#141414] p-2 rounded-2xl border border-gray-800">
-                    <Calendar size={16} className="text-emerald-400 ml-2" />
-                    <select 
-                      value={financeYear} 
-                      onChange={(e) => setFinanceYear(Number(e.target.value))}
-                      className="bg-transparent text-white font-black text-sm outline-none cursor-pointer pr-2"
-                    >
-                      {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y} className="bg-black text-white">{y} Fiscal Year</option>)}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                  <div className="bg-[#141414] border border-gray-800 p-6 rounded-3xl shadow-xl">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Gross Annual Revenue</span>
-                      <DollarSign className="text-emerald-400 h-5 w-5" />
-                    </div>
-                    <div className="text-3xl font-black font-mono text-white">KES {totalYearlyRevenue.toLocaleString()}</div>
-                    <span className="text-[10px] text-emerald-400 font-bold mt-2 block">● Verified Completed Orders</span>
-                  </div>
-
-                  <div className="bg-[#141414] border border-gray-800 p-6 rounded-3xl shadow-xl">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Net Estimated Profit</span>
-                      <TrendingUp className="text-emerald-400 h-5 w-5" />
-                    </div>
-                    <div className="text-3xl font-black font-mono text-emerald-400">KES {totalYearlyProfit.toLocaleString()}</div>
-                    <span className="text-[10px] text-gray-400 font-bold mt-2 block">Margin: {totalYearlyRevenue > 0 ? ((totalYearlyProfit/totalYearlyRevenue)*100).toFixed(1) : 0}%</span>
-                  </div>
-
-                  <div className="bg-[#141414] border border-gray-800 p-6 rounded-3xl shadow-xl">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Total Orders Processed</span>
-                      <ShoppingBag className="text-emerald-400 h-5 w-5" />
-                    </div>
-                    <div className="text-3xl font-black font-mono text-white">{adminOrders.length}</div>
-                    <span className="text-[10px] text-emerald-400 font-bold mt-2 block">● Active Nationwide Logistics</span>
-                  </div>
-                </div>
-
-                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                  <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-wider mb-4">Product Category Revenue & Margin Distribution</h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs whitespace-nowrap">
-                      <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
-                        <tr>
-                          <th className="px-6 py-4">Grain Grade</th>
-                          <th className="px-6 py-4">Total Sacks Sold</th>
-                          <th className="px-6 py-4">Gross Revenue</th>
-                          <th className="px-6 py-4">Total Net Profit</th>
-                          <th className="px-6 py-4">Margin %</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-800/60 font-mono">
-                        {Object.keys(categorySales).length === 0 ? (
-                          <tr><td colSpan={5} className="text-center py-6 text-gray-500 font-sans">No sales data recorded for this fiscal period.</td></tr>
-                        ) : (
-                          Object.entries(categorySales).map(([cat, data], idx) => {
-                             const marginPercent = data.revenue > 0 ? ((data.profit / data.revenue) * 100).toFixed(1) : 0;
-                             return (
-                               <tr key={idx} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                                 <td className="px-6 py-4 font-bold text-white font-sans">{cat}</td>
-                                 <td className="px-6 py-4 font-bold text-gray-300">{data.quantity} bags</td>
-                                 <td className="px-6 py-4 text-emerald-400 font-bold">KES {data.revenue.toLocaleString()}</td>
-                                 <td className="px-6 py-4 text-emerald-300 font-bold">KES {data.profit.toLocaleString()}</td>
-                                 <td className="px-6 py-4 text-amber-400 font-bold">{marginPercent}%</td>
-                               </tr>
-                             );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                  <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-wider mb-4">Monthly Financial Performance Chart ({financeYear})</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
-                    {monthNames.map((m, idx) => (
-                      <div key={m} className="bg-[#181818] p-4 rounded-2xl border border-gray-800 text-center">
-                        <span className="text-xs font-bold text-gray-400 uppercase block mb-1">{m}</span>
-                        <div className="text-sm font-black font-mono text-white">KES {monthlyRevenue[idx].toLocaleString()}</div>
-                        <span className="text-[10px] font-bold text-emerald-400 font-mono block mt-1">+KES {monthlyProfit[idx].toLocaleString()}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-
-          {adminTab === 'users' && (
-            <div className="animate-fadeIn space-y-6">
-              <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Access Clearance & Registry</h2>
-                <p className="text-gray-400 text-xs mt-1">Manage platform accounts, assign administrator privileges, or clean up inactive users.</p>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs whitespace-nowrap">
-                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
-                      <tr>
-                        <th className="px-6 py-4">ID</th>
-                        <th className="px-6 py-4">User Name</th>
-                        <th className="px-6 py-4">Phone Number</th>
-                        <th className="px-6 py-4">Email</th>
-                        <th className="px-6 py-4">Access Level</th>
-                        <th className="px-6 py-4 text-center">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-800/60">
-                      {adminUsers.map(u => (
-                        <tr key={u.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                          <td className="px-6 py-4 font-mono text-gray-500">#{u.id}</td>
-                          <td className="px-6 py-4 font-bold text-gray-200">{u.fullName}</td>
-                          <td className="px-6 py-4 font-mono text-gray-300">{u.phoneNumber}</td>
-                          <td className="px-6 py-4 text-gray-400">{u.email || 'N/A'}</td>
-                          <td className="px-6 py-4">
-                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
-                              u.role === 'admin' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                            }`}>
-                              {u.role}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <button 
-                              onClick={async () => {
-                                const newRole = u.role === 'admin' ? 'user' : 'admin';
-                                if (confirm(`Toggle role of ${u.fullName} to ${newRole.toUpperCase()}?`)) {
-                                  try {
-                                    const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}/role`, {
-                                      method: 'PUT',
-                                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                      body: JSON.stringify({ role: newRole })
-                                    });
-                                    if (res.ok) {
-                                      showToast(`Role updated to ${newRole}`, 'success');
-                                      fetchAdminUsers();
-                                    } else {
-                                      showToast('Failed to update role', 'error');
-                                    }
-                                  } catch (err) { showToast('Network error updating role', 'error'); }
-                                }
-                              }}
-                              className="text-gray-300 hover:text-emerald-400 bg-[#1f1f1f] px-3 py-1.5 rounded-xl font-bold text-[10px] mr-2 transition-colors"
-                            >
-                              Toggle Role
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {adminTab === 'carousel' && (
-            <div className="animate-fadeIn space-y-6">
-              <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Hero & Front-Page Banner Configurator</h2>
-                <p className="text-gray-400 text-xs mt-1">Configure homepage video streams, background slides, titles, and announcement tickers.</p>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-2">Main Hero Section Configuration</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Headline Title</label>
-                    <input type="text" value={heroSettings.title || ''} onChange={e=>setHeroSettings({...heroSettings, title: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Subtitle Text</label>
-                    <input type="text" value={heroSettings.subtitle || ''} onChange={e=>setHeroSettings({...heroSettings, subtitle: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Primary Video Embed URL (YouTube/MP4)</label>
-                    <input type="text" value={heroSettings.video1 || ''} onChange={e=>setHeroSettings({...heroSettings, video1: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Secondary Video Embed URL</label>
-                    <input type="text" value={heroSettings.video2 || ''} onChange={e=>setHeroSettings({...heroSettings, video2: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Image Slide 1 URL</label>
-                    <input type="text" value={heroSettings.img1 || ''} onChange={e=>setHeroSettings({...heroSettings, img1: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Image Slide 2 URL</label>
-                    <input type="text" value={heroSettings.img2 || ''} onChange={e=>setHeroSettings({...heroSettings, img2: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Top Announcement Ticker Text</label>
-                    <input type="text" value={heroSettings.announcementTicker || ''} onChange={e=>setHeroSettings({...heroSettings, announcementTicker: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 uppercase font-bold block mb-1">Badge Label Text</label>
-                    <input type="text" value={heroSettings.badgeText || ''} onChange={e=>setHeroSettings({...heroSettings, badgeText: e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                </div>
-                <button 
-                  onClick={async () => {
-                    try {
-                      const res = await fetch(`${API_BASE_URL}/admin/config/hero`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify(heroSettings)
-                      });
-                      if (res.ok) {
-                        showToast('Hero settings saved successfully!', 'success');
-                        fetchHero();
-                      } else {
-                        showToast('Failed to save hero settings', 'error');
-                      }
-                    } catch (err) { showToast('Network error saving hero settings', 'error'); }
-                  }}
-                  className="bg-emerald-600 text-white font-bold text-xs px-6 py-3 rounded-xl hover:bg-emerald-500 transition-all mt-4"
-                >
-                  Save Hero Section Settings
-                </button>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Promotional Carousel Cards</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <input type="text" placeholder="Card Title" value={newSlide.title} onChange={e=>setNewSlide({...newSlide, title: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  <input type="text" placeholder="Card Subtitle" value={newSlide.subtitle} onChange={e=>setNewSlide({...newSlide, subtitle: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  <input type="text" placeholder="Image URL" value={newSlide.url} onChange={e=>setNewSlide({...newSlide, url: e.target.value})} className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                </div>
-                <button 
-                  onClick={async () => {
-                    if (!newSlide.title || !newSlide.url) return showToast('Please provide Title and Image URL', 'error');
-                    const updated = [...carousel, newSlide];
-                    try {
-                      const res = await fetch(`${API_BASE_URL}/admin/config/carousel`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify(updated)
-                      });
-                      if (res.ok) {
-                        showToast('Carousel slide added!', 'success');
-                        setNewSlide({ title: '', subtitle: '', url: '' });
-                        fetchCarousel();
-                      } else {
-                        showToast('Failed to add slide', 'error');
-                      }
-                    } catch (err) { showToast('Network error adding slide', 'error'); }
-                  }}
-                  className="bg-emerald-600 text-white font-bold text-xs px-6 py-3 rounded-xl hover:bg-emerald-500 transition-all"
-                >
-                  Add Carousel Card
-                </button>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                  {carousel.map((slide, idx) => (
-                    <div key={idx} className="bg-[#1a1a1a] p-4 rounded-2xl border border-gray-800 relative">
-                      <img src={slide.url} alt={slide.title} className="w-full h-32 object-cover rounded-xl mb-3" />
-                      <h4 className="font-bold text-white text-sm">{slide.title}</h4>
-                      <p className="text-xs text-gray-400">{slide.subtitle}</p>
-                      <button 
-                        onClick={async () => {
-                          const updated = carousel.filter((_, i) => i !== idx);
-                          try {
-                            const res = await fetch(`${API_BASE_URL}/admin/config/carousel`, {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                              body: JSON.stringify(updated)
-                            });
-                            if (res.ok) {
-                              showToast('Slide removed!', 'success');
-                              fetchCarousel();
-                            }
-                          } catch (err) { showToast('Error deleting slide', 'error'); }
-                        }}
-                        className="mt-3 bg-rose-500/20 text-rose-300 border border-rose-500/40 w-full py-2 rounded-xl font-bold text-xs hover:bg-rose-500 hover:text-white transition-all"
-                      >
-                        Remove Slide
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {adminTab === 'config' && (
-            <div className="animate-fadeIn space-y-6">
-              <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> Regional Logistics & Counties Transport Engine</h2>
-                <p className="text-gray-400 text-xs mt-1">Configure baseline shipping fees and county-specific transport pricing overrides.</p>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Default Baseline Transport Fee</h3>
-                <div className="flex items-center gap-4 max-w-md">
-                  <input 
-                    type="number" 
-                    value={baseTransportFee} 
-                    onChange={e => setBaseTransportFee(Number(e.target.value))}
-                    className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono w-full"
-                  />
-                  <button 
-                    onClick={() => showToast('Base transport fee saved locally', 'success')}
-                    className="bg-emerald-600 text-white font-bold text-xs px-6 py-3.5 rounded-xl hover:bg-emerald-500 shrink-0"
-                  >
-                    Set Default
-                  </button>
-                </div>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">County Specific Transport Pricing Override</h3>
-                <div className="flex flex-col sm:flex-row gap-3 max-w-xl">
-                  <select 
-                    value={countyOverrideForm.county}
-                    onChange={e=>setCountyOverrideForm({...countyOverrideForm, county: e.target.value})}
-                    className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs"
-                  >
-                    {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c} County</option>)}
-                  </select>
-                  <input 
-                    type="number" 
-                    placeholder="Fee (KES)"
-                    value={countyOverrideForm.fee}
-                    onChange={e=>setCountyOverrideForm({...countyOverrideForm, fee: e.target.value})}
-                    className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono"
-                  />
-                  <button 
-                    onClick={async () => {
-                      if (!countyOverrideForm.fee) return showToast('Enter valid fee', 'error');
-                      const updated = { ...countyOverrides, [countyOverrideForm.county]: Number(countyOverrideForm.fee) };
-                      try {
-                        const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                          body: JSON.stringify(updated)
-                        });
-                        if (res.ok) {
-                          showToast(`Transport fee for ${countyOverrideForm.county} set to KES ${countyOverrideForm.fee}`, 'success');
-                          setCountyOverrideForm({ county: 'Nairobi', fee: '' });
-                          fetchCountiesConfig();
-                        } else {
-                          showToast('Failed to update county override', 'error');
-                        }
-                      } catch (err) { showToast('Network error setting override', 'error'); }
-                    }}
-                    className="bg-emerald-600 text-white font-bold text-xs px-6 py-3 rounded-xl hover:bg-emerald-500 shrink-0"
-                  >
-                    Save Override
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6">
-                  {Object.entries(countyOverrides).map(([county, fee]) => (
-                    <div key={county} className="bg-[#181818] p-3 rounded-2xl border border-gray-800 flex justify-between items-center text-xs">
-                      <div>
-                        <span className="font-bold text-white block">{county}</span>
-                        <span className="font-mono text-emerald-400">KES {fee}</span>
-                      </div>
-                      <button 
-                        onClick={async () => {
-                          const updated = { ...countyOverrides };
-                          delete updated[county];
-                          try {
-                            const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                              body: JSON.stringify(updated)
-                            });
-                            if (res.ok) {
-                              showToast(`Removed override for ${county}`, 'success');
-                              fetchCountiesConfig();
-                            }
-                          } catch (err) { showToast('Error deleting override', 'error'); }
-                        }}
-                        className="text-gray-500 hover:text-rose-400 p-1"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {adminTab === 'logs' && (
-            <div className="animate-fadeIn space-y-6">
-              <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> Real-time System Audit & Payment Logs</h2>
-                <p className="text-gray-400 text-xs mt-1">Live callback monitoring, M-Pesa push logs, and system error traces.</p>
-              </div>
-
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 font-mono text-xs shadow-xl">
-                <div className="flex justify-between items-center mb-4 pb-3 border-b border-gray-800">
-                  <span className="text-emerald-400 font-bold uppercase tracking-wider text-[10px]">Backend Audit Stream</span>
-                  <button onClick={fetchAdminLogs} className="text-gray-400 hover:text-white flex items-center gap-1 text-[10px] font-bold">
-                    <RefreshCw size={12}/> Refresh Logs
-                  </button>
-                </div>
-                <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
-                  {adminLogs.length === 0 ? (
-                    <div className="text-gray-500 text-center py-8">No recent system or payment callback logs recorded.</div>
-                  ) : (
-                    adminLogs.map((log, idx) => (
-                      <div key={idx} className="bg-[#181818] p-3 rounded-xl border border-gray-800 text-gray-300 leading-relaxed">
-                        <span className="text-gray-500 text-[10px] block">{new Date(log.createdAt || Date.now()).toLocaleString()}</span>
-                        <div className="text-emerald-300 font-bold mt-0.5">{log.event || log.action || 'PAYMENT_EVENT'}</div>
-                        <pre className="text-[10px] text-gray-400 mt-1 whitespace-pre-wrap font-mono">{typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : log.details || log.message || JSON.stringify(log)}</pre>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
+          {/* Fallback for other tabs */}
+          {adminTab !== 'inventory' && adminTab !== 'orders' && (
+            <div className="flex flex-col items-center justify-center py-20 text-gray-500">
+              <Settings size={48} className="mb-4 opacity-20" />
+              <p>Module <strong>{adminTab}</strong> is currently under maintenance or being implemented.</p>
             </div>
           )}
         </main>
@@ -2178,19 +1707,15 @@ const renderProfile = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans flex flex-col selection:bg-emerald-500 selection:text-white">
+    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans selection:bg-emerald-200 selection:text-emerald-900">
+      {renderNav()}
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 text-sm font-black border animate-bounce ${
-          toast.type === 'error' ? 'bg-rose-950 text-rose-200 border-rose-800' : 'bg-emerald-950 text-emerald-200 border-emerald-800'
-        }`}>
-          {toast.type === 'error' ? <AlertCircle size={20} className="text-rose-400 shrink-0"/> : <CheckCircle size={20} className="text-emerald-400 shrink-0"/>}
-          <span>{toast.message}</span>
+        <div className={`fixed top-24 left-1/2 transform -translate-x-1/2 z-50 px-6 py-3 rounded-full shadow-2xl font-bold text-sm flex items-center gap-2 animate-bounce ${toast.type === 'error' ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'}`}>
+          {toast.type === 'error' ? <AlertCircle size={18} /> : <CheckCircle size={18} />}
+          {toast.message}
         </div>
       )}
-
-      {renderNav()}
-
-      <main className="flex-1">
+      <main>
         {view === 'home' && renderHome()}
         {view === 'shop' && renderShop()}
         {view === 'cart' && renderCart()}
@@ -2198,43 +1723,6 @@ const renderProfile = () => {
         {view === 'profile' && renderProfile()}
         {view === 'admin' && renderAdmin()}
       </main>
-
-      <footer className="bg-emerald-950 text-emerald-200 border-t border-emerald-900 py-12 px-4 mt-auto">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 mb-8 text-xs">
-          <div>
-            <div className="flex items-center text-white font-black text-xl mb-3">
-              <Leaf className="mr-2 text-emerald-400 h-6 w-6" /> MWEA HUB
-            </div>
-            <p className="text-emerald-400 leading-relaxed">Direct Mwea rice supply chain platform delivering authentic aromatic grains directly from farms to households and retailers across Kenya.</p>
-          </div>
-          <div>
-            <h4 className="font-bold text-white text-sm uppercase tracking-wider mb-3">Coverage & Shipping</h4>
-            <ul className="space-y-2 text-emerald-300 font-medium">
-              <li>Full 47 Counties Support</li>
-              <li>Nairobi & Kiambu Express Dispatch</li>
-              <li>Wholesale Sacks (25kg - 50kg)</li>
-              <li>Real-time STK Push Direct Billing</li>
-            </ul>
-          </div>
-          <div>
-            <h4 className="font-bold text-white text-sm uppercase tracking-wider mb-3">Customer Support</h4>
-            <ul className="space-y-2 text-emerald-300 font-medium">
-              <li>Hotline: {heroSettings?.supportHotlineDisplay || '+254 700 000000'}</li>
-              <li>Mwea Milling Depot, Wanguru</li>
-              <li>Email: support@mweahub.co.ke</li>
-              <li>Verified Agricultural Standards</li>
-            </ul>
-          </div>
-          <div>
-            <h4 className="font-bold text-white text-sm uppercase tracking-wider mb-3">Store Guarantee</h4>
-            <p className="text-emerald-400 leading-relaxed">100% genuine aromatic long-grain Pishori. Unblended, directly milled, and quality checked.</p>
-          </div>
-        </div>
-        <div className="max-w-7xl mx-auto border-t border-emerald-900/80 pt-6 flex flex-col sm:flex-row justify-between items-center text-[11px] text-emerald-500 font-bold">
-          <div>© {new Date().getFullYear()} MWEA HUB DIRECT STORE. ALL RIGHTS RESERVED.</div>
-          <div className="mt-2 sm:mt-0">MADE WITH PRECISION FOR KENYAN HARVEST LOGISTICS</div>
-        </div>
-      </footer>
     </div>
   );
 }
