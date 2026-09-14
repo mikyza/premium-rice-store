@@ -1,66 +1,69 @@
-import { Transaction, Payment, Order, sequelize } from './db.js'; // Adjust path to your model file
+// controllers/paymentController.js
+import { Transaction, Payment, Order } from '../db.js';
+import axios from 'axios';
 
-export const handlePayHeroWebhook = async (req, res) => {
+export const initiatePayHeroPayment = async (req, res) => {
   try {
-    const callbackData = req.body;
-    
-    // PayHero typically returns response structures containing the reference/external reference and status
-    // (Adjust these property paths based on PayHero's exact documentation schema)
-    const paymentInfo = callbackData.response || callbackData;
-    const checkoutRequestId = paymentInfo.CheckoutRequestID || paymentInfo.reference;
-    const resultCode = paymentInfo.ResultCode; // e.g., 0 for success, non-zero for failure
-    const mpesaReceiptNumber = paymentInfo.MpesaReceiptNumber || paymentInfo.receipt_number;
-    
-    // Map PayHero's code/status dynamically to your application states
-    let dynamicStatus = 'initiated';
-    let transactionStatus = 'initiated';
-    
-    if (resultCode === 0 || resultCode === '0' || paymentInfo.status === 'Success') {
-      dynamicStatus = 'completed';
-      transactionStatus = 'completed';
-    } else if (resultCode !== undefined || paymentInfo.status === 'Failed') {
-      dynamicStatus = 'failed';
-      transactionStatus = 'failed';
+    const { orderId, phoneNumber, amount } = req.body;
+
+    const order = await Order.findByPk(orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    // Find the transaction using the dynamic reference from PayHero
-    const transaction = await Transaction.findOne({ 
-      where: { checkoutRequestId } 
-    });
+    // Call PayHero API (adjust payload based on PayHero's actual STK Push documentation)
+    const payheroPayload = {
+      amount: amount,
+      phone_number: phoneNumber,
+      channel_id: process.env.PAYHERO_CHANNEL_ID,
+      provider: 'm-pesa',
+      callback_url: `${process.env.BACKEND_URL}/api/payments/payhero/webhook`,
+      external_reference: `ORD-${orderId}-${Date.now()}`
+    };
 
-    if (!transaction) {
-      return res.status(404).json({ success: false, message: 'Transaction not found' });
-    }
-
-    // Update Transaction dynamically
-    await transaction.update({
-      status: transactionStatus,
-      rawResponse: callbackData
-    });
-
-    // Update associated Payment record if it exists
-    const payment = await Payment.findOne({ where: { orderId: transaction.orderId } });
-    if (payment) {
-      await payment.update({
-        status: dynamicStatus.toUpperCase(),
-        mpesaReceiptNumber: mpesaReceiptNumber || payment.mpesaReceiptNumber,
-        failureReason: paymentInfo.ResultDesc || paymentInfo.message,
-        rawResponse: callbackData
-      });
-    }
-
-    // Update Order status dynamically based on the payment outcome
-    if (transaction.orderId) {
-      const order = await Order.findByPk(transaction.orderId);
-      if (order) {
-        const orderStatus = dynamicStatus === 'completed' ? 'paid' : 'payment_failed';
-        await order.update({ status: orderStatus });
+    const response = await axios.post('https://api.payhero.co.ke/v2/payments', payheroPayload, {
+      auth: {
+        username: process.env.PAYHERO_API_USERNAME,
+        password: process.env.PAYHERO_API_PASSWORD
       }
-    }
+    });
 
-    return res.status(200).json({ success: true, message: 'Webhook processed successfully' });
+    const data = response.data;
+    const checkoutRequestId = data.CheckoutRequestID || data.reference;
+
+    // Create a pending transaction matching your actual database schema
+    await Transaction.create({
+      orderId: orderId,
+      userId: order.userId,
+      transactionRef: payheroPayload.external_reference,
+      checkoutRequestId: checkoutRequestId,
+      amount: amount,
+      paymentMethod: 'mpesa',
+      status: 'initiated',
+      rawResponse: data
+    });
+
+    // Create or link a Payment record
+    await Payment.create({
+      orderId: orderId,
+      externalReference: payheroPayload.external_reference,
+      provider: 'm-pesa',
+      amount: amount,
+      phoneNumber: phoneNumber,
+      status: 'PENDING',
+      rawResponse: data
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'STK push sent successfully',
+      data
+    });
   } catch (error) {
-    console.error('PayHero Webhook Error:', error);
-    return res.status(500).json({ success: false, error: error.message });
+    console.error('PayHero Initiation Error:', error.response?.data || error.message);
+    return res.status(500).json({ 
+      success: false, 
+      error: error.response?.data || error.message 
+    });
   }
 };
