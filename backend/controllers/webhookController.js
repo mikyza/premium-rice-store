@@ -1,4 +1,4 @@
-import { Transaction, Payment, Order } from '../db.js';
+import { Transaction, Payment, Order } from '../lib/db.js';
 
 export const handlePayHeroWebhook = async (req, res) => {
   try {
