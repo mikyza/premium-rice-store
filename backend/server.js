@@ -1018,7 +1018,8 @@ async function startServer() {
           return res.status(400).json({ error: 'Phone number parameter is required for STK push' });
         }
 
-        const hostUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+        // Updated for Render Production URL
+        const hostUrl = process.env.BASE_URL || 'https://premium-rice-store-7.onrender.com';
         const callbackEndpoint = `${hostUrl}/api/payments/payhero/callback`;
 
         console.log(`📱 Direct Pay Hero STK Push triggered for ${targetPhone}, Amount: KES ${targetAmount}, Ref: ${ref}`);
@@ -1181,7 +1182,8 @@ async function startServer() {
 
         if (paymentMethod === 'mpesa_stk') {
           const targetPhone = mpesaPhoneNumber || req.user.phoneNumber;
-          const hostUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+          // Updated for Render Production URL
+          const hostUrl = process.env.BASE_URL || 'https://premium-rice-store-7.onrender.com';
           const callbackEndpoint = `${hostUrl}/api/payments/payhero/callback`;
 
           try {
