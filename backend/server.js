@@ -15,6 +15,8 @@ import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
 import { Resend } from 'resend';
+import { handlePayHeroWebhook } from './controllers/webhookController.js';
+import { initiatePayHeroPayment } from './controllers/paymentController.js';
 
 dotenv.config();
 
@@ -531,6 +533,12 @@ async function startServer() {
     // ==========================================
     // 6. PUBLIC REST API CONTROLLERS & PAYMENTS
     // ==========================================
+
+    // 1. Route called by your frontend checkout page to start M-Pesa STK push
+    expressApp.post('/api/payments/payhero/initiate', initiatePayHeroPayment);
+
+    // 2. Route called automatically by PayHero servers when the transaction completes/fails
+    expressApp.post('/api/payments/payhero/webhook', handlePayHeroWebhook);
 
     expressApp.post('/api/user/signup', async (req, res) => {
       try {
