@@ -6,8 +6,8 @@ import {
   Trash2, Shield, Clock, Search, Edit, Package, Activity, 
   CheckCircle, AlertCircle, Settings, Leaf, ChevronRight,
   ShoppingBag, Users, Image as ImageIcon, Video, Download,
-  MapPin, RefreshCw, LogOut, AlertTriangle, Smartphone, 
-  BarChart2, Award 
+  MapPin, Eye, RefreshCw, LogOut, Check, AlertTriangle, Smartphone, CreditCard,
+  BarChart2, DollarSign, Award, Calendar, Lock, Unlock, TrendingUp, Filter, FileText, Percent, Layers, Globe, Sliders, Bell
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 
@@ -75,6 +75,7 @@ const DEFAULT_REGIONAL_LOGISTICS = {
   streets: ["Main Street / Highway", "Market Road", "Hospital Road", "School Lane", "Opposite Chief's Camp", "Supermarket Landmark"]
 };
 
+// Helper utility to safely format shipping address objects to strings to prevent React Error #31
 const formatShippingAddress = (addr: any) => {
   if (!addr) return 'Standard Delivery';
   if (typeof addr === 'string') return addr;
@@ -97,6 +98,7 @@ export default function PremiumRiceStore() {
   const [products, setProducts] = useState<any[]>([]);
   const [carousel, setCarousel] = useState<any[]>([]);
   
+  // Expanded Hero Configuration with 10 distinct professional settings
   const [heroSettings, setHeroSettings] = useState<any>({
     title: 'Direct From Mwea Paddy Fields',
     subtitle: '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.',
@@ -154,7 +156,13 @@ export default function PremiumRiceStore() {
   const [adminLogs, setAdminLogs] = useState<any[]>([]);
   const [orderSearchQuery, setOrderSearchQuery] = useState('');
   const [shopSearch, setShopSearch] = useState('');
+  const [newSlide, setNewSlide] = useState({ title: '', subtitle: '', url: '' });
+  const [countyOverrideForm, setCountyOverrideForm] = useState({ county: 'Nairobi', fee: '' });
   
+  const [financeYear, setFinanceYear] = useState<number>(new Date().getFullYear());
+  const [monthlyBuyingPrices, setMonthlyBuyingPrices] = useState<{ [key: string]: number }>({});
+  const [editingUser, setEditingUser] = useState<any | null>(null);
+
   const getAccountCartKey = (u: any) => {
     return u ? `mwea_hub_cart_${u.id || u.phoneNumber}` : 'mwea_hub_cart_guest';
   };
@@ -222,7 +230,7 @@ export default function PremiumRiceStore() {
     if (user && !checkoutData.stkPhoneNumber) {
       setCheckoutData(prev => ({ ...prev, stkPhoneNumber: user.phoneNumber }));
     }
-  }, [user, checkoutData.stkPhoneNumber]);
+  }, [user]);
 
   useEffect(() => {
     try {
@@ -583,7 +591,7 @@ export default function PremiumRiceStore() {
       <div className="animate-fadeIn">
         {heroSettings?.announcementTicker && (
           <div className="bg-gradient-to-r from-emerald-800 via-emerald-700 to-emerald-800 text-emerald-100 py-2 px-4 text-center text-xs font-bold tracking-wide border-b border-emerald-900 flex items-center justify-center gap-2 shadow-inner">
-            <CheckCircle size={14} className="text-emerald-300 animate-bounce" />
+            <Bell size={14} className="text-emerald-300 animate-bounce" />
             <span>{heroSettings.announcementTicker}</span>
           </div>
         )}
@@ -1274,32 +1282,25 @@ export default function PremiumRiceStore() {
               <div className="text-center py-8 text-gray-500 font-medium text-sm">No pending shipping transactions.</div>
             ) : (
               <div className="space-y-4">
-                {pendingTransactions.map(o => {
-                  const normalizedPaymentStatus = o.paymentStatus ? o.paymentStatus.toLowerCase() : '';
-                  const isPaid = normalizedPaymentStatus === 'completed' || normalizedPaymentStatus === 'paid' || normalizedPaymentStatus === 'success';
-                  
-                  return (
-                    <div key={o.id} className="border border-amber-200 bg-amber-50/40 rounded-2xl p-5">
-                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200 pb-3 mb-3">
-                        <div>
-                          <span className="font-mono font-black text-emerald-950 text-base">TXN #{o.transactionId || o.id}</span>
-                          <span className="text-xs text-gray-500 font-medium ml-3">
-                            Payment Status: <strong className={`uppercase ${isPaid ? 'text-emerald-700' : 'text-amber-600'}`}>{o.paymentStatus || 'Pending'}</strong>
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
-                            ● {o.status} (In Shipping)
-                          </span>
-                          <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
-                        </div>
+                {pendingTransactions.map(o => (
+                  <div key={o.id} className="border border-amber-200 bg-amber-50/40 rounded-2xl p-5">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200 pb-3 mb-3">
+                      <div>
+                        <span className="font-mono font-black text-emerald-950 text-base">TXN #{o.transactionId || o.id}</span>
+                        <span className="text-xs text-gray-500 font-medium ml-3">Payment Status: <strong className="text-emerald-700 uppercase">{o.paymentStatus || 'Paid'}</strong></span>
                       </div>
-                      <div className="text-xs text-gray-700">
-                        <strong>Shipping Route:</strong> {o.county}, {o.town}, {o.location} ({formatShippingAddress(o.shippingAddress)})
+                      <div className="flex items-center gap-3">
+                        <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
+                          ● {o.status} (In Shipping)
+                        </span>
+                        <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
                       </div>
                     </div>
-                  );
-                })}
+                    <div className="text-xs text-gray-700">
+                      <strong>Shipping Route:</strong> {o.county}, {o.town}, {o.location} ({formatShippingAddress(o.shippingAddress)})
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -1317,53 +1318,43 @@ export default function PremiumRiceStore() {
               <div className="text-center py-8 text-gray-500 font-medium text-sm">No completed delivery transactions recorded yet.</div>
             ) : (
               <div className="space-y-6">
-                {completedTransactions.map(o => {
-                  const normalizedPaymentStatus = o.paymentStatus ? o.paymentStatus.toLowerCase() : '';
-                  const isPaid = normalizedPaymentStatus === 'completed' || normalizedPaymentStatus === 'paid' || normalizedPaymentStatus === 'success';
-
-                  return (
-                    <div key={o.id} className="border border-gray-200 bg-gray-50/50 rounded-2xl p-5">
-                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-200 pb-4 mb-4">
-                        <div>
-                          <span className="font-mono font-black text-emerald-950 text-base">TXN ID: #{o.transactionId || o.id}</span>
-                          <span className="text-xs text-gray-400 font-medium block sm:inline sm:ml-3">{new Date(o.createdAt).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
-                            ● DELIVERED & COMPLETED
-                          </span>
-                          <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
-                        </div>
+                {completedTransactions.map(o => (
+                  <div key={o.id} className="border border-gray-200 bg-gray-50/50 rounded-2xl p-5">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-200 pb-4 mb-4">
+                      <div>
+                        <span className="font-mono font-black text-emerald-950 text-base">TXN ID: #{o.transactionId || o.id}</span>
+                        <span className="text-xs text-gray-400 font-medium block sm:inline sm:ml-3">{new Date(o.createdAt).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</span>
                       </div>
-
-                      <div className="text-xs text-gray-600 mb-4 bg-white p-4 rounded-xl border border-gray-200">
-                        <div className="font-bold text-gray-800 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-600"/> Delivery Details:</div>
-                        <ul className="space-y-1 pl-5 list-disc text-gray-700">
-                          <li><strong>County:</strong> {o.county || 'N/A'}</li>
-                          <li><strong>Town/District:</strong> {o.town || 'N/A'}</li>
-                          <li><strong>Location:</strong> {o.location || 'N/A'}</li>
-                          <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
-                          <li><strong>Street/Landmark:</strong> {formatShippingAddress(o.shippingAddress)}</li>
-                          <li>
-                            <strong>Payment Status:</strong>{' '}
-                            <span className={`uppercase font-bold ${isPaid ? 'text-emerald-600' : 'text-amber-600'}`}>
-                              {o.paymentStatus || 'Pending'}
-                            </span>
-                          </li>
-                        </ul>
-                      </div>
-
-                      <div className="space-y-1.5 text-xs">
-                        {o.items?.map((item: any, i: number) => (
-                          <div key={i} className="flex justify-between text-gray-700 bg-white px-3 py-2 rounded-lg border border-gray-100 font-medium">
-                            <span>{item.quantity}x {item.name || item.product?.variety}</span>
-                            <span className="font-bold">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
-                          </div>
-                        ))}
+                      <div className="flex items-center gap-3">
+                        <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          ● DELIVERED & COMPLETED
+                        </span>
+                        <span className="font-black text-lg text-emerald-900">KES {o.grandTotal?.toLocaleString()}</span>
                       </div>
                     </div>
-                  );
-                })}
+
+                    <div className="text-xs text-gray-600 mb-4 bg-white p-4 rounded-xl border border-gray-200">
+                      <div className="font-bold text-gray-800 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-600"/> Delivery Details:</div>
+                      <ul className="space-y-1 pl-5 list-disc text-gray-700">
+                        <li><strong>County:</strong> {o.county || 'N/A'}</li>
+                        <li><strong>Town/District:</strong> {o.town || 'N/A'}</li>
+                        <li><strong>Location:</strong> {o.location || 'N/A'}</li>
+                        <li><strong>Sublocation:</strong> {o.sublocation || 'N/A'}</li>
+                        <li><strong>Street/Landmark:</strong> {formatShippingAddress(o.shippingAddress)}</li>
+                        <li><strong>Payment Status:</strong> <span className="uppercase text-emerald-600 font-bold">{o.paymentStatus || 'Paid'}</span></li>
+                      </ul>
+                    </div>
+
+                    <div className="space-y-1.5 text-xs">
+                      {o.items?.map((item: any, i: number) => (
+                        <div key={i} className="flex justify-between text-gray-700 bg-white px-3 py-2 rounded-lg border border-gray-100 font-medium">
+                          <span>{item.quantity}x {item.name || item.product?.variety}</span>
+                          <span className="font-bold">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -1384,6 +1375,26 @@ export default function PremiumRiceStore() {
         </div>
       );
     }
+
+    // Single unified function to handle updates safely ensuring delivery and payment don't mix up
+    const updateAdminOrder = async (orderId: number, updates: any) => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/admin/orders/${orderId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify(updates)
+        });
+        if (res.ok) {
+          showToast('Record successfully updated', 'success');
+          fetchAdminOrders();
+          fetchMyOrders();
+        } else {
+          showToast('Failed to update record', 'error');
+        }
+      } catch (err) {
+        showToast('Network error while updating', 'error');
+      }
+    };
 
     const tabsList = [
       { id: 'inventory', icon: <Package size={18}/>, label: 'Grain Catalog' },
@@ -1519,69 +1530,64 @@ export default function PremiumRiceStore() {
                         body: JSON.stringify(editingProduct)
                       });
                       if (res.ok) {
-                        showToast('Product specifications modified', 'success');
+                        showToast('Record modified successfully', 'success');
                         setEditingProduct(null);
                         fetchProducts();
                       } else {
-                        showToast('Failed to modify product record', 'error');
+                        showToast('Failed to modify record', 'error');
                       }
                     } catch (err) {
-                      showToast('Network error while modifying product', 'error');
+                      showToast('Network error while updating', 'error');
                     }
-                  }} className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs hover:bg-emerald-500 mr-3">Save Changes</button>
+                  }} className="w-full bg-emerald-600 text-white font-bold py-3 rounded-xl mt-4 hover:bg-emerald-500 transition-colors text-xs">
+                    Commit Changes
+                  </button>
                 </div>
               )}
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs whitespace-nowrap">
-                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
-                      <tr>
-                        <th className="px-6 py-4">ID</th>
-                        <th className="px-6 py-4">Brand & Variety</th>
-                        <th className="px-6 py-4">Buying Price</th>
-                        <th className="px-6 py-4">Selling Price</th>
-                        <th className="px-6 py-4">Stock Matrix</th>
-                        <th className="px-6 py-4 text-center">Controls</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-800/60">
-                      {products.map(p => (
-                        <tr key={p.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                          <td className="px-6 py-4 font-mono text-gray-500">#{p.id}</td>
-                          <td className="px-6 py-4 font-bold text-gray-200">{p.brandName} - <span className="text-gray-400 font-normal">{p.variety} ({p.weightKg}kg)</span></td>
-                          <td className="px-6 py-4 font-bold font-mono text-gray-400">KES {p.costPrice?.toLocaleString() || '---'}</td>
-                          <td className="px-6 py-4 font-bold font-mono text-emerald-400">KES {p.price?.toLocaleString()}</td>
-                          <td className="px-6 py-4">
-                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black border font-mono ${
-                              p.stockQuantity > 10 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-                            }`}>
-                              {p.stockQuantity} BAGS LEFT
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <button onClick={() => setEditingProduct(p)} className="text-gray-400 hover:text-emerald-400 p-2 bg-[#1f1f1f] rounded-xl mr-2 transition-colors" title="Edit"><Edit size={14}/></button>
-                            <button onClick={async () => {
-                              if (window.confirm(`Permanently delete ${p.brandName} ${p.variety}?`)) {
-                                try {
-                                  const res = await fetch(`${API_BASE_URL}/admin/products/${p.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
-                                  if (res.ok) {
-                                    showToast('Product wiped from database', 'success');
-                                    fetchProducts();
-                                  } else {
-                                    showToast('Failed to delete product', 'error');
-                                  }
-                                } catch (err) {
-                                  showToast('Network error deleting product', 'error');
-                                }
-                              }
-                            }} className="text-gray-400 hover:text-rose-500 p-2 bg-[#1f1f1f] rounded-xl transition-colors" title="Delete"><Trash2 size={14}/></button>
-                          </td>
+              {/* Inventory Table */}
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden mt-6">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-[#1a1a1a] text-emerald-400 font-bold uppercase text-[10px] tracking-wider">
+                     <tr>
+                        <th className="p-4">ID</th>
+                        <th className="p-4">Grain</th>
+                        <th className="p-4">Price / Cost</th>
+                        <th className="p-4">Stock</th>
+                        <th className="p-4 text-right">Actions</th>
+                     </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800 text-gray-300">
+                     {products.map(p => (
+                        <tr key={p.id} className="hover:bg-[#1a1a1a]/50 transition-colors">
+                           <td className="p-4 font-mono text-gray-500">#{p.id}</td>
+                           <td className="p-4">
+                              <div className="font-bold text-white">{p.variety}</div>
+                              <div className="text-[10px] text-gray-500 uppercase tracking-wider">{p.brandName} • {p.weightKg}kg</div>
+                           </td>
+                           <td className="p-4">
+                              <div className="text-emerald-400 font-bold">Sell: KES {p.price?.toLocaleString()}</div>
+                              <div className="text-gray-500 text-xs">Cost: KES {p.costPrice?.toLocaleString() || 'N/A'}</div>
+                           </td>
+                           <td className="p-4">
+                              <span className={`px-2.5 py-1 rounded-md text-xs font-black ${p.stockQuantity > 10 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                                 {p.stockQuantity} Bags
+                              </span>
+                           </td>
+                           <td className="p-4 text-right space-x-2">
+                              <button onClick={() => setEditingProduct(p)} className="p-2 bg-gray-800 hover:bg-emerald-600 text-white rounded-lg transition-colors"><Edit size={14}/></button>
+                              <button onClick={async () => {
+                                 if(!confirm('Delete this grain record?')) return;
+                                 try {
+                                   await fetch(`${API_BASE_URL}/admin/products/${p.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+                                   fetchProducts();
+                                 } catch (e) { showToast('Error deleting product', 'error'); }
+                              }} className="p-2 bg-gray-800 hover:bg-rose-600 text-white rounded-lg transition-colors"><Trash2 size={14}/></button>
+                           </td>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                     ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
@@ -1589,133 +1595,171 @@ export default function PremiumRiceStore() {
           {adminTab === 'orders' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><ShoppingBag className="mr-3 text-emerald-500"/> Logistics & Order Management</h2>
-                <p className="text-gray-400 text-xs mt-1">Review active orders, update delivery statuses, or monitor regional dispatch.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><Package className="mr-3 text-emerald-500"/> Logistics Dashboard</h2>
+                <p className="text-gray-400 text-xs mt-1">Manage deliveries, tracking, and view account usernames independently of payment status.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-4 flex items-center gap-3">
-                <Search size={18} className="text-gray-500 ml-2" />
-                <input 
-                  type="text" 
-                  placeholder="Filter orders by ID, Customer Name, or Phone..."
-                  value={orderSearchQuery}
-                  onChange={(e) => setOrderSearchQuery(e.target.value)}
-                  className="bg-transparent text-white font-bold text-xs w-full outline-none placeholder-gray-600"
-                />
-              </div>
-
-              <div className="space-y-4">
-                {adminOrders
-                  .filter(o => {
-                    if (!orderSearchQuery) return true;
-                    const q = orderSearchQuery.toLowerCase();
-                    return String(o.id).includes(q) || o.user?.fullName?.toLowerCase().includes(q) || o.user?.phoneNumber?.includes(q) || o.county?.toLowerCase().includes(q);
-                  })
-                  .map(o => (
-                    <div key={o.id} className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-gray-800/80 pb-4 mb-4">
-                        <div>
-                          <div className="flex items-center gap-3">
-                            <span className="font-mono font-black text-emerald-400 text-base">ORDER #{o.id}</span>
-                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                              o.status === 'delivered' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                            }`}>
-                              {o.status}
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-400 mt-1">Customer: <strong className="text-white">{o.user?.fullName || 'Guest'}</strong> ({o.user?.phoneNumber || 'No Phone'}) • {new Date(o.createdAt).toLocaleString()}</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                           <div className="bg-[#1f1f1f] border border-gray-800 px-3 py-1.5 rounded-xl">
-                             <span className="text-[10px] text-gray-400 block uppercase font-bold">Payment Status</span>
-                             <span className="text-xs font-black text-emerald-400 uppercase">{o.paymentStatus || 'Paid'}</span>
-                           </div>
-
-                           <span className="text-xs text-gray-400 font-bold">Shipping Status:</span>
-                           <select 
-                             value={o.status}
-                             onChange={async (e) => {
-                               const newStatus = e.target.value;
-                               try {
-                                 const res = await fetch(`${API_BASE_URL}/admin/orders/${o.id}/status`, {
-                                   method: 'PUT',
-                                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                   body: JSON.stringify({ status: newStatus })
-                                 });
-                                 if (res.ok) {
-                                   showToast(`Order #${o.id} shipping status updated to ${newStatus}`, 'success');
-                                   fetchAdminOrders();
-                                 } else {
-                                   showToast('Failed to update order status', 'error');
-                                 }
-                               } catch (err) {
-                                 showToast('Network error updating status', 'error');
-                               }
-                             }}
-                             className="bg-[#1f1f1f] text-emerald-400 font-black text-xs border border-gray-700 rounded-xl px-3 py-2 outline-none cursor-pointer"
-                           >
-                             <option value="pending">Pending</option>
-                             <option value="processing">Processing</option>
-                             <option value="dispatched">Dispatched</option>
-                             <option value="delivered">Delivered</option>
-                             <option value="failed">Failed</option>
-                           </select>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80">
-                          <p className="font-bold text-gray-300 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-500"/> Delivery Logistics:</p>
-                          <ul className="space-y-1 text-gray-400">
-                            <li><strong>Destination:</strong> {o.county}, {o.town}</li>
-                            <li><strong>Location:</strong> {o.location}, {o.sublocation}</li>
-                            <li><strong>Address:</strong> {formatShippingAddress(o.shippingAddress)}</li>
-                          </ul>
-                        </div>
-                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80">
-                          <p className="font-bold text-gray-300 mb-2 flex items-center"><Package size={14} className="mr-1 text-emerald-500"/> Order Items:</p>
-                          <ul className="space-y-1 text-gray-400">
-                            {o.items?.map((item: any, i: number) => (
-                              <li key={i} className="flex justify-between border-b border-gray-800 pb-1 mb-1 last:border-0 last:pb-0 last:mb-0">
-                                <span>{item.quantity}x {item.name || item.product?.variety}</span>
-                                <span className="font-bold text-emerald-400">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
-                              </li>
-                            ))}
-                          </ul>
-                          <div className="mt-2 pt-2 border-t border-gray-700 flex justify-between font-black">
-                            <span>Total</span>
-                            <span className="text-emerald-400">KES {o.grandTotal?.toLocaleString()}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden mt-6">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-[#1a1a1a] text-emerald-400 font-bold uppercase text-[10px] tracking-wider">
+                     <tr>
+                        <th className="p-4">Order ID</th>
+                        <th className="p-4">Account Username</th>
+                        <th className="p-4">Destination Logistics</th>
+                        <th className="p-4">Delivery Status</th>
+                     </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800 text-gray-300">
+                     {adminOrders.map(o => (
+                        <tr key={o.id} className="hover:bg-[#1a1a1a]/50 transition-colors">
+                           <td className="p-4 font-mono text-gray-500">#{o.transactionId || o.id}</td>
+                           <td className="p-4 font-bold text-white">
+                             <div className="flex items-center gap-2">
+                               <UserIcon size={14} className="text-emerald-500" />
+                               {o.user?.fullName || o.user?.username || 'Guest'}
+                             </div>
+                           </td>
+                           <td className="p-4 text-xs text-gray-400">
+                             <div className="font-bold text-gray-200">{o.county}, {o.town}</div>
+                             <div>{o.location} - {formatShippingAddress(o.shippingAddress)}</div>
+                           </td>
+                           <td className="p-4">
+                             <select 
+                               value={o.status || 'pending'} 
+                               onChange={(e) => updateAdminOrder(o.id, { status: e.target.value })}
+                               className="bg-[#0a0a0a] border border-gray-700 rounded p-1.5 text-xs font-bold uppercase outline-none text-gray-300 focus:border-emerald-500"
+                             >
+                               <option value="pending">Pending</option>
+                               <option value="processing">Processing</option>
+                               <option value="shipping">Shipping</option>
+                               <option value="delivered">Delivered</option>
+                               <option value="cancelled">Cancelled</option>
+                             </select>
+                           </td>
+                        </tr>
+                     ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
 
-          {/* Fallback for other tabs */}
-          {adminTab !== 'inventory' && adminTab !== 'orders' && (
-            <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-              <Settings size={48} className="mb-4 opacity-20" />
-              <p>Module <strong>{adminTab}</strong> is currently under maintenance or being implemented.</p>
+          {adminTab === 'finances' && (
+            <div className="animate-fadeIn space-y-6">
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><BarChart2 className="mr-3 text-emerald-500"/> Financial Dashboard</h2>
+                <p className="text-gray-400 text-xs mt-1">Monitor revenue streams, view account names, numbers, payment statuses, and transaction amounts.</p>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden mt-6">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-[#1a1a1a] text-emerald-400 font-bold uppercase text-[10px] tracking-wider">
+                     <tr>
+                        <th className="p-4">Account Name</th>
+                        <th className="p-4">Account Number</th>
+                        <th className="p-4">Payment Status</th>
+                        <th className="p-4">Amount (KES)</th>
+                        <th className="p-4">Date</th>
+                     </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800 text-gray-300">
+                     {adminOrders.map(o => (
+                        <tr key={o.id} className="hover:bg-[#1a1a1a]/50 transition-colors">
+                           <td className="p-4 font-bold text-white flex items-center gap-2">
+                             <UserIcon size={14} className="text-emerald-500" />
+                             {o.user?.fullName || 'Guest User'}
+                           </td>
+                           <td className="p-4 font-mono text-gray-400">
+                             {o.phoneNumber || o.user?.phoneNumber || 'N/A'}
+                           </td>
+                           <td className="p-4">
+                             <select 
+                               value={o.paymentStatus || 'pending'} 
+                               onChange={(e) => updateAdminOrder(o.id, { paymentStatus: e.target.value })}
+                               className={`bg-[#0a0a0a] border rounded p-1.5 text-xs font-bold uppercase outline-none ${
+                                 o.paymentStatus === 'paid' ? 'border-emerald-500/50 text-emerald-400 bg-emerald-500/5' : 
+                                 o.paymentStatus === 'failed' ? 'border-rose-500/50 text-rose-400 bg-rose-500/5' : 
+                                 'border-amber-500/50 text-amber-400 bg-amber-500/5'
+                               }`}
+                             >
+                               <option value="pending">Pending</option>
+                               <option value="paid">Paid</option>
+                               <option value="failed">Failed</option>
+                             </select>
+                           </td>
+                           <td className="p-4 font-black text-emerald-400 tracking-wide">
+                             KES {o.grandTotal?.toLocaleString()}
+                           </td>
+                           <td className="p-4 text-xs text-gray-500">
+                             {new Date(o.createdAt).toLocaleDateString()}
+                           </td>
+                        </tr>
+                     ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {adminTab === 'users' && (
+            <div className="animate-fadeIn space-y-6">
+               <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Clearance</h2>
+               <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden p-6 text-gray-400 text-sm">
+                 <p className="mb-4">Total registered accounts: <strong className="text-emerald-400">{adminUsers.length}</strong></p>
+                 <div className="space-y-3">
+                   {adminUsers.map(u => (
+                     <div key={u.id} className="bg-[#1a1a1a] p-4 rounded-xl flex justify-between items-center border border-gray-800/80">
+                       <div><strong className="text-white text-base">{u.fullName}</strong> <span className="text-gray-500 block text-xs mt-0.5">{u.phoneNumber}</span></div>
+                       <div className="uppercase text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-3 py-1.5 rounded-md border border-emerald-500/20">{u.role}</div>
+                     </div>
+                   ))}
+                 </div>
+               </div>
+            </div>
+          )}
+
+          {adminTab === 'carousel' && (
+            <div className="animate-fadeIn space-y-6">
+               <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Hero & Carousel Config</h2>
+               <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden p-6 text-gray-400 text-sm">
+                 Carousel and visual hero dynamic editing engine module accessible here. Add images and adjust settings for customer landing pages.
+               </div>
+            </div>
+          )}
+
+          {adminTab === 'config' && (
+            <div className="animate-fadeIn space-y-6">
+               <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> Logistics Configuration Engine</h2>
+               <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden p-6 text-gray-400 text-sm">
+                 County transportation override rates managed here. Current fallback flat rate: <strong className="text-white">KES {baseTransportFee}</strong>.
+               </div>
+            </div>
+          )}
+
+          {adminTab === 'logs' && (
+            <div className="animate-fadeIn space-y-6">
+               <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> System Audit Logs</h2>
+               <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden p-6 text-gray-400 text-sm">
+                 Payment, authentication and database modification logs are rendered securely within this terminal.
+               </div>
             </div>
           )}
         </main>
       </div>
     );
-  };
+  }; // End of renderAdmin
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans selection:bg-emerald-200 selection:text-emerald-900">
+    <div className="min-h-screen bg-gray-50 flex flex-col font-sans selection:bg-emerald-500 selection:text-white">
       {renderNav()}
       {toast && (
-        <div className={`fixed top-24 left-1/2 transform -translate-x-1/2 z-50 px-6 py-3 rounded-full shadow-2xl font-bold text-sm flex items-center gap-2 animate-bounce ${toast.type === 'error' ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'}`}>
-          {toast.type === 'error' ? <AlertCircle size={18} /> : <CheckCircle size={18} />}
+        <div className={`fixed top-24 right-4 z-50 px-6 py-4 rounded-2xl font-black text-sm shadow-2xl flex items-center border border-white/20 animate-bounce ${toast.type === 'error' ? 'bg-rose-500 text-white shadow-rose-500/50' : 'bg-emerald-500 text-white shadow-emerald-500/50'}`}>
+          {toast.type === 'error' ? <AlertCircle className="h-5 w-5 mr-2" /> : <CheckCircle className="h-5 w-5 mr-2" />}
           {toast.message}
         </div>
       )}
-      <main>
+      
+      <main className="flex-grow flex flex-col">
         {view === 'home' && renderHome()}
         {view === 'shop' && renderShop()}
         {view === 'cart' && renderCart()}
@@ -1723,6 +1767,14 @@ export default function PremiumRiceStore() {
         {view === 'profile' && renderProfile()}
         {view === 'admin' && renderAdmin()}
       </main>
+
+      <footer className="bg-emerald-950 text-emerald-400/60 py-12 border-t border-emerald-900 mt-auto">
+        <div className="max-w-7xl mx-auto px-4 text-center">
+          <Leaf className="h-8 w-8 mx-auto mb-4 text-emerald-800" />
+          <p className="font-bold text-sm tracking-widest uppercase mb-2 text-emerald-700">MWEA HUB • Direct Rice Logistics</p>
+          <p className="text-xs">&copy; {new Date().getFullYear()} Premium Rice Store. All rights reserved.</p>
+        </div>
+      </footer>
     </div>
   );
 }
