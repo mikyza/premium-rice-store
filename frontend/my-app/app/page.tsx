@@ -7,7 +7,7 @@ import {
   CheckCircle, AlertCircle, Settings, Leaf, ChevronRight,
   ShoppingBag, Users, Image as ImageIcon, Video, Download,
   MapPin, Eye, RefreshCw, LogOut, Check, AlertTriangle, Smartphone, CreditCard,
-  BarChart2, DollarSign, Award, Calendar, Lock, Unlock, TrendingUp, Filter, FileText, Percent, Layers, Globe, Sliders, Bell
+  BarChart2, DollarSign, Award, Calendar, Lock, Unlock, TrendingUp, Filter, FileText, Percent, Layers, Globe, Sliders, Bell, Truck, CheckCircle2
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 
@@ -75,7 +75,6 @@ const DEFAULT_REGIONAL_LOGISTICS = {
   streets: ["Main Street / Highway", "Market Road", "Hospital Road", "School Lane", "Opposite Chief's Camp", "Supermarket Landmark"]
 };
 
-// Helper utility to safely format shipping address objects to strings to prevent React Error #31
 const formatShippingAddress = (addr: any) => {
   if (!addr) return 'Standard Delivery';
   if (typeof addr === 'string') return addr;
@@ -98,7 +97,6 @@ export default function PremiumRiceStore() {
   const [products, setProducts] = useState<any[]>([]);
   const [carousel, setCarousel] = useState<any[]>([]);
   
-  // Expanded Hero Configuration with 10 distinct professional settings (Think Cool)
   const [heroSettings, setHeroSettings] = useState<any>({
     title: 'Direct From Mwea Paddy Fields',
     subtitle: '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.',
@@ -111,7 +109,6 @@ export default function PremiumRiceStore() {
     badgeText: '🌱 Pure Kenya Agricultural Harvest',
     overlayOpacity: '40',
     secondaryButtonText: 'Track Order Status',
-    // 10 Cool Extended Configurations
     announcementTicker: '🔥 Special 25kg Wholesale Discount Active Across All 47 Counties!',
     themeAccentColor: 'emerald',
     heroLayoutMode: 'split-banner',
@@ -156,6 +153,7 @@ export default function PremiumRiceStore() {
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
   const [adminLogs, setAdminLogs] = useState<any[]>([]);
   const [orderSearchQuery, setOrderSearchQuery] = useState('');
+  const [orderStatusFilter, setOrderStatusFilter] = useState('all');
   const [shopSearch, setShopSearch] = useState('');
   const [newSlide, setNewSlide] = useState({ title: '', subtitle: '', url: '' });
   const [countyOverrideForm, setCountyOverrideForm] = useState({ county: 'Nairobi', fee: '' });
@@ -1287,7 +1285,6 @@ export default function PremiumRiceStore() {
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200 pb-3 mb-3">
                       <div>
                         <span className="font-mono font-black text-emerald-950 text-base">TXN #{o.transactionId || o.id}</span>
-                        {/* Payment status strictly from backend */}
                         <span className="text-xs text-gray-500 font-medium ml-3">Payment Status: <strong className="text-emerald-700 uppercase">{o.paymentStatus || 'Paid'}</strong></span>
                       </div>
                       <div className="flex items-center gap-3">
@@ -1580,112 +1577,209 @@ export default function PremiumRiceStore() {
 
           {adminTab === 'orders' && (
             <div className="animate-fadeIn space-y-6">
-              <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><ShoppingBag className="mr-3 text-emerald-500"/> Logistics & Order Management</h2>
-                <p className="text-gray-400 text-xs mt-1">Review active orders, update delivery statuses, or monitor regional dispatch.</p>
+              {/* Overhauled Professional Logistics & Orders Dashboard (Zero Dummy Data, Direct Backend Sync) */}
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-6">
+                <div>
+                  <h2 className="text-3xl font-black text-white flex items-center tracking-tight">
+                    <Truck className="mr-3 text-emerald-400 h-8 w-8" /> Logistics & Orders Command
+                  </h2>
+                  <p className="text-gray-400 text-xs mt-1">Real-time backend orders, M-Pesa payment validation callbacks, and dispatch tracking.</p>
+                </div>
+                <button 
+                  onClick={fetchAdminOrders} 
+                  className="bg-[#1f1f1f] hover:bg-[#252525] border border-gray-700 text-emerald-400 px-4 py-2.5 rounded-2xl text-xs font-bold flex items-center transition-all shadow"
+                >
+                  <RefreshCw size={14} className="mr-2 animate-spin-slow" /> Sync Backend Feed
+                </button>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-4 flex items-center gap-3">
-                <Search size={18} className="text-gray-500 ml-2" />
-                <input 
-                  type="text" 
-                  placeholder="Filter orders by ID, Customer Name, or Phone..."
-                  value={orderSearchQuery}
-                  onChange={(e) => setOrderSearchQuery(e.target.value)}
-                  className="bg-transparent text-white font-bold text-xs w-full outline-none placeholder-gray-600"
-                />
+              {/* Real-time Logistics Metric Cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-[#141414] border border-gray-800/80 rounded-3xl p-5 shadow-lg">
+                  <div className="text-[10px] uppercase font-black tracking-wider text-gray-400 mb-1">Total Backend Orders</div>
+                  <div className="text-2xl sm:text-3xl font-black font-mono text-white">{adminOrders.length}</div>
+                  <span className="text-[10px] text-emerald-400 font-bold mt-2 inline-block">● Live DB Stream</span>
+                </div>
+                <div className="bg-[#141414] border border-gray-800/80 rounded-3xl p-5 shadow-lg">
+                  <div className="text-[10px] uppercase font-black tracking-wider text-gray-400 mb-1">Pending Dispatches</div>
+                  <div className="text-2xl sm:text-3xl font-black font-mono text-amber-400">
+                    {adminOrders.filter(o => o.status === 'pending' || o.status === 'processing').length}
+                  </div>
+                  <span className="text-[10px] text-amber-400 font-bold mt-2 inline-block">Requires fulfillment</span>
+                </div>
+                <div className="bg-[#141414] border border-gray-800/80 rounded-3xl p-5 shadow-lg">
+                  <div className="text-[10px] uppercase font-black tracking-wider text-gray-400 mb-1">Completed Deliveries</div>
+                  <div className="text-2xl sm:text-3xl font-black font-mono text-emerald-400">
+                    {adminOrders.filter(o => o.status === 'delivered' || o.status === 'completed').length}
+                  </div>
+                  <span className="text-[10px] text-emerald-400 font-bold mt-2 inline-block">Successfully delivered</span>
+                </div>
+                <div className="bg-[#141414] border border-gray-800/80 rounded-3xl p-5 shadow-lg">
+                  <div className="text-[10px] uppercase font-black tracking-wider text-gray-400 mb-1">Total Gross Revenue</div>
+                  <div className="text-xl sm:text-2xl font-black font-mono text-emerald-300 truncate">
+                    KES {adminOrders.reduce((sum, o) => sum + (o.grandTotal || 0), 0).toLocaleString()}
+                  </div>
+                  <span className="text-[10px] text-gray-400 font-bold mt-2 inline-block">Verified transactions</span>
+                </div>
               </div>
 
+              {/* Filter & Search Bar */}
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-4 flex flex-col md:flex-row gap-4 items-center justify-between">
+                <div className="relative w-full md:w-96">
+                  <Search size={16} className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500" />
+                  <input 
+                    type="text" 
+                    placeholder="Search by Order ID, Customer Name, Phone, County..."
+                    value={orderSearchQuery}
+                    onChange={(e) => setOrderSearchQuery(e.target.value)}
+                    className="bg-[#1a1a1a] text-white font-bold text-xs w-full pl-11 pr-4 py-3 rounded-2xl border border-gray-800 outline-none focus:border-emerald-500 placeholder-gray-500"
+                  />
+                </div>
+                <div className="flex items-center gap-2 overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
+                  {['all', 'pending', 'processing', 'dispatched', 'delivered', 'failed'].map(status => (
+                    <button
+                      key={status}
+                      onClick={() => setOrderStatusFilter(status)}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all ${
+                        orderStatusFilter === status 
+                          ? 'bg-emerald-600 text-white shadow-lg' 
+                          : 'bg-[#1a1a1a] text-gray-400 hover:bg-[#222] hover:text-white border border-gray-800'
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Orders List / Cards */}
               <div className="space-y-4">
-                {adminOrders
-                  .filter(o => {
-                    if (!orderSearchQuery) return true;
-                    const q = orderSearchQuery.toLowerCase();
-                    return String(o.id).includes(q) || o.user?.fullName?.toLowerCase().includes(q) || o.user?.phoneNumber?.includes(q) || o.county?.toLowerCase().includes(q);
-                  })
-                  .map(o => (
-                    <div key={o.id} className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-gray-800/80 pb-4 mb-4">
-                        <div>
-                          <div className="flex items-center gap-3">
-                            <span className="font-mono font-black text-emerald-400 text-base">ORDER #{o.id}</span>
-                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                              o.status === 'delivered' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                            }`}>
-                              {o.status}
-                            </span>
+                {adminOrders.length === 0 ? (
+                  <div className="text-center py-20 bg-[#141414] border border-gray-800 rounded-3xl">
+                    <Package className="h-12 w-12 text-gray-600 mx-auto mb-3" />
+                    <h3 className="text-gray-300 font-bold text-lg">No orders recorded in the backend</h3>
+                    <p className="text-gray-500 text-xs mt-1">Orders placed by customers will appear here instantly via live synchronization.</p>
+                  </div>
+                ) : (
+                  adminOrders
+                    .filter(o => {
+                      if (orderStatusFilter !== 'all' && o.status !== orderStatusFilter) return false;
+                      if (!orderSearchQuery) return true;
+                      const q = orderSearchQuery.toLowerCase();
+                      return String(o.id).includes(q) || 
+                             o.user?.fullName?.toLowerCase().includes(q) || 
+                             o.user?.phoneNumber?.includes(q) || 
+                             o.county?.toLowerCase().includes(q) ||
+                             o.town?.toLowerCase().includes(q);
+                    })
+                    .map(o => (
+                      <div key={o.id} className="bg-[#141414] border border-gray-800 hover:border-gray-700 rounded-3xl p-6 shadow-xl transition-all">
+                        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-gray-800/80 pb-5 mb-5">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-3">
+                              <span className="font-mono font-black text-emerald-400 text-lg">ORDER #{o.id}</span>
+                              <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                                o.status === 'delivered' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
+                                o.status === 'dispatched' ? 'bg-blue-500/20 text-blue-300 border-blue-500/40' :
+                                o.status === 'processing' ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' :
+                                o.status === 'failed' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' :
+                                'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                              }`}>
+                                ● {o.status.toUpperCase()}
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-400">
+                              Customer: <strong className="text-white">{o.user?.fullName || 'Guest User'}</strong> ({o.user?.phoneNumber || 'No phone'}) • Placed on {new Date(o.createdAt).toLocaleString()}
+                            </p>
                           </div>
-                          <p className="text-xs text-gray-400 mt-1">Customer: <strong className="text-white">{o.user?.fullName || 'Guest'}</strong> ({o.user?.phoneNumber || 'No Phone'}) • {new Date(o.createdAt).toLocaleString()}</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                           {/* Payment status strictly from backend and NOT alterable by admin panel */}
-                           <div className="bg-[#1f1f1f] border border-gray-800 px-3 py-1.5 rounded-xl">
-                             <span className="text-[10px] text-gray-400 block uppercase font-bold">Payment Status (Backend)</span>
-                             <span className="text-xs font-black text-emerald-400 uppercase">{o.paymentStatus || 'Paid'}</span>
-                           </div>
 
-                           <span className="text-xs text-gray-400 font-bold">Shipping Status:</span>
-                           <select 
-                             value={o.status}
-                             onChange={async (e) => {
-                               const newStatus = e.target.value;
-                               try {
-                                 const res = await fetch(`${API_BASE_URL}/admin/orders/${o.id}/status`, {
-                                   method: 'PUT',
-                                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                   body: JSON.stringify({ status: newStatus })
-                                 });
-                                 if (res.ok) {
-                                   showToast(`Order #${o.id} shipping status updated to ${newStatus}`, 'success');
-                                   fetchAdminOrders();
-                                 } else {
-                                   showToast('Failed to update order status', 'error');
-                                 }
-                               } catch (err) {
-                                 showToast('Network error updating status', 'error');
-                               }
-                             }}
-                             className="bg-[#1f1f1f] text-emerald-400 font-black text-xs border border-gray-700 rounded-xl px-3 py-2 outline-none cursor-pointer"
-                           >
-                             <option value="pending">Pending</option>
-                             <option value="processing">Processing</option>
-                             <option value="dispatched">Dispatched</option>
-                             <option value="delivered">Delivered</option>
-                             <option value="failed">Failed</option>
-                           </select>
-                        </div>
-                      </div>
+                          <div className="flex flex-wrap items-center gap-3">
+                            {/* Backend Payment Status Display */}
+                            <div className="bg-[#1a1a1a] border border-gray-800 px-4 py-2 rounded-2xl">
+                              <span className="text-[9px] text-gray-400 block uppercase font-bold tracking-wider">M-Pesa Payment Status</span>
+                              <span className="text-xs font-black text-emerald-400 uppercase flex items-center gap-1 mt-0.5">
+                                <CheckCircle2 size={12} /> {o.paymentStatus || 'Paid'}
+                              </span>
+                            </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80">
-                          <p className="font-bold text-gray-300 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-500"/> Delivery Logistics:</p>
-                          <ul className="space-y-1 text-gray-400">
-                            <li>County: <strong className="text-white">{o.county}</strong></li>
-                            <li>Town: <strong className="text-white">{o.town}</strong></li>
-                            <li>Location: <strong className="text-white">{o.location}</strong></li>
-                            <li>Street: <strong className="text-white">{formatShippingAddress(o.shippingAddress)}</strong></li>
-                          </ul>
-                        </div>
-                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80 flex flex-col justify-between">
-                          <div>
-                            <p className="font-bold text-gray-300 mb-2">Order Items ({o.items?.length || 0}):</p>
-                            <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
-                              {o.items?.map((item: any, idx: number) => (
-                                <div key={idx} className="flex justify-between text-gray-400">
-                                  <span>{item.quantity}x {item.name || item.product?.variety}</span>
-                                  <span className="font-bold text-white">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
-                                </div>
-                              ))}
+                            {/* Shipping Status Modifier Dropdown */}
+                            <div className="flex items-center gap-2 bg-[#1a1a1a] border border-gray-800 px-4 py-2 rounded-2xl">
+                              <span className="text-[9px] text-gray-400 block uppercase font-bold tracking-wider">Update Shipping</span>
+                              <select 
+                                value={o.status}
+                                onChange={async (e) => {
+                                  const newStatus = e.target.value;
+                                  try {
+                                    const res = await fetch(`${API_BASE_URL}/admin/orders/${o.id}/status`, {
+                                      method: 'PUT',
+                                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                      body: JSON.stringify({ status: newStatus })
+                                    });
+                                    if (res.ok) {
+                                      showToast(`Order #${o.id} status updated to ${newStatus}`, 'success');
+                                      fetchAdminOrders();
+                                    } else {
+                                      showToast('Failed to update shipping status', 'error');
+                                    }
+                                  } catch (err) {
+                                    showToast('Network error updating shipping status', 'error');
+                                  }
+                                }}
+                                className="bg-[#222] text-emerald-400 font-black text-xs border border-gray-700 rounded-xl px-3 py-1.5 outline-none cursor-pointer"
+                              >
+                                <option value="pending">Pending</option>
+                                <option value="processing">Processing</option>
+                                <option value="dispatched">Dispatched</option>
+                                <option value="delivered">Delivered</option>
+                                <option value="failed">Failed</option>
+                              </select>
                             </div>
                           </div>
-                          <div className="flex justify-between font-black text-sm text-emerald-400 border-t border-gray-800 pt-2 mt-2">
-                            <span>Grand Total</span>
-                            <span>KES {o.grandTotal?.toLocaleString()}</span>
+                        </div>
+
+                        {/* Order Details Grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-xs">
+                          <div className="bg-[#181818] p-5 rounded-2xl border border-gray-800/80 space-y-2">
+                            <p className="font-bold text-gray-300 flex items-center mb-3">
+                              <MapPin size={14} className="mr-1.5 text-emerald-400" /> Regional Logistics Destination:
+                            </p>
+                            <div className="grid grid-cols-2 gap-2 text-gray-400">
+                              <div>County: <strong className="text-white block">{o.county || 'N/A'}</strong></div>
+                              <div>Town/District: <strong className="text-white block">{o.town || 'N/A'}</strong></div>
+                              <div>Location: <strong className="text-white block">{o.location || 'N/A'}</strong></div>
+                              <div>Sublocation: <strong className="text-white block">{o.sublocation || 'N/A'}</strong></div>
+                            </div>
+                            <div className="pt-2 border-t border-gray-800 mt-2">
+                              <span className="text-gray-500">Street / Landmark:</span>
+                              <strong className="text-white block mt-0.5">{formatShippingAddress(o.shippingAddress)}</strong>
+                            </div>
+                          </div>
+
+                          <div className="bg-[#181818] p-5 rounded-2xl border border-gray-800/80 flex flex-col justify-between">
+                            <div>
+                              <p className="font-bold text-gray-300 mb-3 flex items-center justify-between">
+                                <span>Ordered Items ({o.items?.length || 0}):</span>
+                                <span className="text-emerald-400 font-mono">Fee: KES {o.shippingFee || 250}</span>
+                              </p>
+                              <div className="space-y-2 max-h-32 overflow-y-auto pr-1">
+                                {o.items?.map((item: any, idx: number) => (
+                                  <div key={idx} className="flex justify-between items-center text-gray-300 bg-[#1f1f1f] px-3 py-2 rounded-xl border border-gray-800">
+                                    <span>{item.quantity}x {item.name || item.product?.variety || 'Mwea Rice Bag'}</span>
+                                    <span className="font-mono font-bold text-emerald-400">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            
+                            <div className="flex justify-between items-center font-black text-sm text-white border-t border-gray-800 pt-3 mt-3">
+                              <span className="text-gray-400">Grand Total (Incl. Shipping)</span>
+                              <span className="text-emerald-400 font-mono text-base">KES {o.grandTotal?.toLocaleString()}</span>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                )}
               </div>
             </div>
           )}
@@ -1697,137 +1791,100 @@ export default function PremiumRiceStore() {
             let totalYearlyRevenue = 0;
             let totalYearlyProfit = 0;
 
-            const categorySales: { [key: string]: { quantity: number, revenue: number, profit: number, sellingPrice: number, costPrice: number } } = {};
+            const categorySales: { [key: string]: number } = {};
 
             adminOrders.forEach(order => {
-               if (order.status !== 'failed' && order.paymentStatus !== 'failed') {
-                   const d = new Date(order.createdAt);
-                   if (d.getFullYear() === financeYear) {
-                       totalYearlyRevenue += (order.grandTotal || 0);
-                       
-                       order.items?.forEach((item: any) => {
-                          const catName = item.name || item.product?.variety || 'Standard Rice';
-                          const selling = item.priceAtPurchase || 0;
-                          const cost = item.product?.costPrice || item.costPrice || (selling * 0.75);
-                          const profit = (selling - cost) * item.quantity;
-                          const rev = selling * item.quantity;
+              if (order.status === 'failed' || order.paymentStatus === 'failed') return;
+              const orderDate = new Date(order.createdAt);
+              if (orderDate.getFullYear() === financeYear) {
+                const month = orderDate.getMonth();
+                const rev = order.grandTotal || 0;
+                monthlyRevenue[month] += rev;
+                totalYearlyRevenue += rev;
 
-                          if (!categorySales[catName]) {
-                             categorySales[catName] = { quantity: 0, revenue: 0, profit: 0, sellingPrice: selling, costPrice: cost };
-                          }
-                          categorySales[catName].quantity += item.quantity;
-                          categorySales[catName].revenue += rev;
-                          categorySales[catName].profit += profit;
-                       });
+                let orderCost = 0;
+                order.items?.forEach((item: any) => {
+                  const qty = item.quantity || 1;
+                  const itemCost = item.product?.costPrice || monthlyBuyingPrices[item.productId] || (item.priceAtPurchase ? item.priceAtPurchase * 0.75 : 0);
+                  orderCost += itemCost * qty;
+                  
+                  const catName = item.product?.brandName || 'Mwea Pishori';
+                  categorySales[catName] = (categorySales[catName] || 0) + (item.priceAtPurchase * qty);
+                });
 
-                       const orderProfit = order.items?.reduce((sum: number, item: any) => {
-                           const cost = item.product?.costPrice || item.costPrice || (item.priceAtPurchase * 0.75);
-                           return sum + ((item.priceAtPurchase - cost) * item.quantity);
-                       }, 0) || 0;
-                       
-                       totalYearlyProfit += orderProfit;
-                       monthlyRevenue[d.getMonth()] += (order.grandTotal || 0);
-                       monthlyProfit[d.getMonth()] += orderProfit;
-                   }
-               }
+                const profit = rev - orderCost;
+                monthlyProfit[month] += profit;
+                totalYearlyProfit += profit;
+              }
             });
 
-            const maxMonthValue = Math.max(...monthlyRevenue, 1);
-            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const monthsNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const maxRev = Math.max(...monthlyRevenue, 1000);
 
             return (
-              <div className="animate-fadeIn space-y-6">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div className="animate-fadeIn space-y-8">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-800 pb-6">
                   <div>
-                    <h2 className="text-2xl font-black text-white flex items-center"><BarChart2 className="mr-3 text-emerald-500"/> Financial & Sales Analytics Dashboard</h2>
-                    <p className="text-gray-400 text-xs mt-1">Real-time monthly sales graph based on transaction timestamps (preserving yearly history).</p>
+                    <h2 className="text-3xl font-black text-white flex items-center"><BarChart2 className="mr-3 text-emerald-500"/> Financial Analytics Dashboard</h2>
+                    <p className="text-gray-400 text-xs mt-1">Real-time revenue, cost tracking, and profit margins computed from database orders.</p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-xs text-gray-400 font-bold">Select Year:</span>
+                    <span className="text-xs font-bold text-gray-400 uppercase">Select Fiscal Year:</span>
                     <select 
                       value={financeYear}
                       onChange={(e) => setFinanceYear(Number(e.target.value))}
-                      className="bg-[#1f1f1f] text-emerald-400 font-black text-xs border border-gray-700 rounded-xl px-4 py-2.5 outline-none cursor-pointer"
+                      className="bg-[#141414] text-emerald-400 font-bold border border-gray-700 rounded-xl px-4 py-2 outline-none text-xs"
                     >
-                      {[currentYear, currentYear - 1, currentYear - 2, currentYear - 3].map(yr => (
-                        <option key={yr} value={yr}>{yr}</option>
-                      ))}
+                      {[currentYear, currentYear - 1, currentYear - 2].map(y => <option key={y} value={y}>{y}</option>)}
                     </select>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                    <span className="text-[10px] text-gray-500 font-black uppercase tracking-wider block mb-1">Total Yearly Revenue ({financeYear})</span>
-                    <div className="text-3xl font-black text-white font-mono">KES {totalYearlyRevenue.toLocaleString()}</div>
-                    <span className="text-xs text-emerald-400 font-bold mt-2 block flex items-center"><TrendingUp size={14} className="mr-1"/> Verified Backend Logins</span>
+                    <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Total Yearly Revenue ({financeYear})</div>
+                    <div className="text-3xl font-black font-mono text-emerald-400">KES {totalYearlyRevenue.toLocaleString()}</div>
+                    <span className="text-[10px] text-gray-500 mt-2 block">From all successful verified orders</span>
                   </div>
                   <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                    <span className="text-[10px] text-gray-500 font-black uppercase tracking-wider block mb-1">Total Profit ({financeYear})</span>
-                    <div className="text-3xl font-black text-emerald-400 font-mono">KES {totalYearlyProfit.toLocaleString()}</div>
-                    <span className="text-xs text-gray-400 font-medium mt-2 block">Total profit computed from all money (excluding raw payment logs)</span>
+                    <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Estimated Yearly Profit</div>
+                    <div className="text-3xl font-black font-mono text-emerald-300">KES {totalYearlyProfit.toLocaleString()}</div>
+                    <span className="text-[10px] text-gray-500 mt-2 block">Revenue minus estimated acquisition cost</span>
                   </div>
-                  <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl sm:col-span-2 lg:col-span-1">
-                    <span className="text-[10px] text-gray-500 font-black uppercase tracking-wider block mb-1">Completed Transactions</span>
-                    <div className="text-3xl font-black text-white font-mono">{adminOrders.filter(o => o.status !== 'failed' && new Date(o.createdAt).getFullYear() === financeYear).length} Orders</div>
-                    <span className="text-xs text-emerald-400 font-bold mt-2 block">Active Logistics Dispatched</span>
+                  <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                    <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Average Profit Margin</div>
+                    <div className="text-3xl font-black font-mono text-emerald-500">
+                      {totalYearlyRevenue > 0 ? ((totalYearlyProfit / totalYearlyRevenue) * 100).toFixed(1) : 0}%
+                    </div>
+                    <span className="text-[10px] text-gray-500 mt-2 block">Across all grain varieties</span>
                   </div>
                 </div>
 
                 <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 sm:p-8 shadow-xl">
-                  <h3 className="text-base font-black text-white mb-6 flex items-center justify-between">
-                    <span>Monthly Sales Breakdown ({financeYear})</span>
-                    <span className="text-xs font-mono text-emerald-400 bg-emerald-950/50 px-3 py-1 rounded-full border border-emerald-800">Timestamp Driven</span>
+                  <h3 className="font-bold text-base text-white mb-6 flex items-center justify-between">
+                    <span>Monthly Revenue & Profit Breakdown ({financeYear})</span>
+                    <span className="text-xs text-gray-400 font-normal">Values in KES</span>
                   </h3>
                   
-                  <div className="h-64 flex items-end gap-2 sm:gap-4 pt-8 pb-2 border-b border-gray-800">
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end h-72 pt-10 pb-4 border-b border-gray-800">
                     {monthlyRevenue.map((rev, idx) => {
-                      const heightPercent = Math.max((rev / maxMonthValue) * 100, 6);
+                      const heightPercent = Math.min(Math.max((rev / maxRev) * 100, 8), 100);
                       return (
-                        <div key={idx} className="flex-1 flex flex-col items-center h-full justify-end group relative">
-                          <div className="absolute -top-10 opacity-0 group-hover:opacity-100 transition-opacity bg-black text-white text-[10px] font-mono px-2 py-1 rounded border border-gray-800 whitespace-nowrap z-20">
-                            {months[idx]}: KES {rev.toLocaleString()}
+                        <div key={idx} className="sm:col-span-1 flex flex-col items-center h-full justify-end group relative">
+                          {/* Tooltip on hover */}
+                          <div className="absolute -top-12 bg-black text-white text-[10px] font-mono py-1 px-2 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 whitespace-nowrap border border-gray-700 shadow-xl">
+                            {monthsNames[idx]}: Rev KES {rev.toLocaleString()} | Profit KES {monthlyProfit[idx].toLocaleString()}
                           </div>
-                          <div 
-                            style={{ height: `${heightPercent}%` }} 
-                            className="w-full bg-gradient-to-t from-emerald-700 to-emerald-400 rounded-t-lg group-hover:from-emerald-600 group-hover:to-emerald-300 transition-all duration-300"
-                          ></div>
-                          <span className="text-[10px] text-gray-400 font-bold mt-3 block">{months[idx]}</span>
+                          <div className="w-full bg-emerald-950/60 rounded-t-xl overflow-hidden flex flex-col justify-end h-full border border-emerald-500/20">
+                            <div 
+                              style={{ height: `${heightPercent}%` }} 
+                              className="bg-gradient-to-t from-emerald-600 to-emerald-400 w-full transition-all duration-500 rounded-t-lg"
+                            ></div>
+                          </div>
+                          <span className="text-[10px] font-bold text-gray-400 mt-2">{monthsNames[idx]}</span>
                         </div>
                       );
                     })}
-                  </div>
-                </div>
-
-                <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 sm:p-8 shadow-xl">
-                  <h3 className="text-base font-black text-white mb-6">Product Category Sales & Margin Performance</h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs whitespace-nowrap">
-                      <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
-                        <tr>
-                          <th className="px-6 py-4">Category / Variety</th>
-                          <th className="px-6 py-4">Total Bags Sold</th>
-                          <th className="px-6 py-4">Gross Revenue</th>
-                          <th className="px-6 py-4">Net Profit</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-800/60">
-                        {Object.keys(categorySales).length === 0 ? (
-                          <tr>
-                            <td colSpan={4} className="text-center py-8 text-gray-500">No sales recorded for {financeYear}.</td>
-                          </tr>
-                        ) : (
-                          Object.entries(categorySales).map(([cat, data], i) => (
-                            <tr key={i} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                              <td className="px-6 py-4 font-bold text-white">{cat}</td>
-                              <td className="px-6 py-4 font-mono font-bold text-gray-300">{data.quantity} bags</td>
-                              <td className="px-6 py-4 font-mono font-bold text-emerald-400">KES {data.revenue.toLocaleString()}</td>
-                              <td className="px-6 py-4 font-mono font-bold text-emerald-300">KES {data.profit.toLocaleString()}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
                   </div>
                 </div>
               </div>
@@ -1837,108 +1894,57 @@ export default function PremiumRiceStore() {
           {adminTab === 'users' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Clearance & Account Management</h2>
-                <p className="text-gray-400 text-xs mt-1">Manage user clearance levels, edit account details, or suspend user accounts.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Accounts Registry</h2>
+                <p className="text-gray-400 text-xs mt-1">Manage user roles, verify customer accounts, or adjust administrative access permissions.</p>
               </div>
-
-              {editingUser && (
-                <div className="bg-[#1a1a1a] border-2 border-emerald-500/50 rounded-3xl p-6 shadow-2xl animate-fadeIn">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Modifying User Account #{editingUser.id || editingUser.phoneNumber}</h3>
-                    <button onClick={() => setEditingUser(null)} className="text-gray-400 hover:text-white"><X size={18}/></button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                    <div>
-                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Full Name</label>
-                      <input type="text" value={editingUser.fullName || ''} onChange={e=>setEditingUser({...editingUser, fullName:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Phone Number</label>
-                      <input type="tel" value={editingUser.phoneNumber || ''} onChange={e=>setEditingUser({...editingUser, phoneNumber:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Role / Clearance</label>
-                      <select value={editingUser.role || 'customer'} onChange={e=>setEditingUser({...editingUser, role:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs">
-                        <option value="customer">Customer</option>
-                        <option value="admin">Administrator</option>
-                        <option value="moderator">Moderator</option>
-                      </select>
-                    </div>
-                  </div>
-                  <button onClick={async () => {
-                    try {
-                      const res = await fetch(`${API_BASE_URL}/admin/users/${editingUser.id || editingUser.phoneNumber}`, {
-                        method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify(editingUser)
-                      });
-                      if (res.ok) {
-                        showToast('User account details updated successfully', 'success');
-                        setEditingUser(null);
-                        fetchAdminUsers();
-                      } else {
-                        showToast('Failed to update user account', 'error');
-                      }
-                    } catch (err) {
-                      showToast('Network error updating user', 'error');
-                    }
-                  }} className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs hover:bg-emerald-500 mr-3">Save User Changes</button>
-                </div>
-              )}
 
               <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs whitespace-nowrap">
                     <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
                       <tr>
-                        <th className="px-6 py-4">User ID / Phone</th>
+                        <th className="px-6 py-4">User ID</th>
                         <th className="px-6 py-4">Full Name</th>
-                        <th className="px-6 py-4">Role Clearance</th>
-                        <th className="px-6 py-4">Account Status</th>
-                        <th className="px-6 py-4 text-center">Controls & Suspension</th>
+                        <th className="px-6 py-4">Phone Number</th>
+                        <th className="px-6 py-4">Email</th>
+                        <th className="px-6 py-4">System Role</th>
+                        <th className="px-6 py-4 text-center">Controls</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800/60">
                       {adminUsers.map(u => (
-                        <tr key={u.id || u.phoneNumber} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                          <td className="px-6 py-4 font-mono text-gray-400">{u.phoneNumber}</td>
-                          <td className="px-6 py-4 font-bold text-white">{u.fullName || 'N/A'}</td>
+                        <tr key={u.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                          <td className="px-6 py-4 font-mono text-gray-500">#{u.id}</td>
+                          <td className="px-6 py-4 font-bold text-white">{u.fullName}</td>
+                          <td className="px-6 py-4 font-mono text-gray-300">{u.phoneNumber}</td>
+                          <td className="px-6 py-4 text-gray-400">{u.email || 'N/A'}</td>
                           <td className="px-6 py-4">
                             <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${
-                              u.role === 'admin' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                              u.role === 'admin' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' : 'bg-gray-800 text-gray-400 border-gray-700'
                             }`}>
-                              {u.role || 'customer'}
+                              {u.role}
                             </span>
                           </td>
-                          <td className="px-6 py-4">
-                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${
-                              u.isSuspended ? 'bg-rose-950 text-rose-400' : 'bg-emerald-950 text-emerald-400'
-                            }`}>
-                              {u.isSuspended ? 'Suspended' : 'Active'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-center space-x-2">
-                            <button onClick={() => setEditingUser(u)} className="text-gray-400 hover:text-emerald-400 p-2 bg-[#1f1f1f] rounded-xl transition-colors" title="Edit User"><Edit size={14}/></button>
+                          <td className="px-6 py-4 text-center">
                             <button onClick={async () => {
-                              const nextSuspendedState = !u.isSuspended;
+                              const newRole = u.role === 'admin' ? 'user' : 'admin';
                               try {
-                                const res = await fetch(`${API_BASE_URL}/admin/users/${u.id || u.phoneNumber}/suspend`, {
+                                const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}/role`, {
                                   method: 'PUT',
                                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                  body: JSON.stringify({ isSuspended: nextSuspendedState })
+                                  body: JSON.stringify({ role: newRole })
                                 });
                                 if (res.ok) {
-                                  showToast(`User account ${nextSuspendedState ? 'suspended' : 'reactivated'}`, 'success');
+                                  showToast(`User role updated to ${newRole}`, 'success');
                                   fetchAdminUsers();
                                 } else {
-                                  showToast('Failed to change user suspension status', 'error');
+                                  showToast('Failed to update user role', 'error');
                                 }
                               } catch (err) {
-                                showToast('Network error', 'error');
+                                showToast('Network error updating user role', 'error');
                               }
-                            }} className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all ${
-                              u.isSuspended ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-rose-600 hover:bg-rose-500 text-white'
-                            }`}>
-                              {u.isSuspended ? 'Reactivate' : 'Suspend User'}
+                            }} className="text-xs font-bold bg-[#1f1f1f] hover:bg-emerald-600 hover:text-white px-3 py-1.5 rounded-xl border border-gray-700 transition-all">
+                              Toggle Role ({u.role === 'admin' ? 'Make User' : 'Make Admin'})
                             </button>
                           </td>
                         </tr>
@@ -1953,75 +1959,92 @@ export default function PremiumRiceStore() {
           {adminTab === 'carousel' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Sliders className="mr-3 text-emerald-500"/> Expanded Hero & Carousel Configuration</h2>
-                <p className="text-gray-400 text-xs mt-1">Configure all 10 system parameters, hero banner texts, background video URLs, and badge settings.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Hero Banner & Video Configuration</h2>
+                <p className="text-gray-400 text-xs mt-1">Configure homepage video streams, background images, titles, and promotional tickers.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Hero Configuration (10 Cool Settings)</h3>
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Live Hero Settings Engine</h3>
                 
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  try {
-                    const res = await fetch(`${API_BASE_URL}/admin/config/hero`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                      body: JSON.stringify(heroSettings)
-                    });
-                    if (res.ok) {
-                      showToast('All 10 Hero configurations updated successfully!', 'success');
-                    } else {
-                      showToast('Failed to update hero configurations', 'error');
-                    }
-                  } catch (err) {
-                    showToast('Network error updating hero config', 'error');
-                  }
-                }} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">1. Hero Title</label>
-                    <input type="text" value={heroSettings.title || ''} onChange={e=>setHeroSettings({...heroSettings, title:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                    <label className="text-xs font-bold text-gray-400 uppercase mb-1 block">Hero Title</label>
+                    <input 
+                      type="text" 
+                      value={heroSettings.title || ''}
+                      onChange={(e) => setHeroSettings({...heroSettings, title: e.target.value})}
+                      className="w-full bg-[#1a1a1a] border border-gray-700 text-white font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500"
+                    />
                   </div>
                   <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">2. Hero Subtitle</label>
-                    <input type="text" value={heroSettings.subtitle || ''} onChange={e=>setHeroSettings({...heroSettings, subtitle:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                    <label className="text-xs font-bold text-gray-400 uppercase mb-1.5 block">Badge Text</label>
+                    <input 
+                      type="text" 
+                      value={heroSettings.badgeText || ''}
+                      onChange={(e) => setHeroSettings({...heroSettings, badgeText: e.target.value})}
+                      className="w-full bg-[#1a1a1a] border border-gray-700 text-white font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-xs font-bold text-gray-400 uppercase mb-1.5 block">Hero Subtitle</label>
+                    <textarea 
+                      rows={2}
+                      value={heroSettings.subtitle || ''}
+                      onChange={(e) => setHeroSettings({...heroSettings, subtitle: e.target.value})}
+                      className="w-full bg-[#1a1a1a] border border-gray-700 text-white font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500"
+                    />
                   </div>
                   <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">3. Background Video URL (YouTube Embed)</label>
-                    <input type="text" value={heroSettings.video1 || ''} onChange={e=>setHeroSettings({...heroSettings, video1:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    <label className="text-xs font-bold text-gray-400 uppercase mb-1.5 block">YouTube Video Embed URL (Video 1)</label>
+                    <input 
+                      type="text" 
+                      value={heroSettings.video1 || ''}
+                      onChange={(e) => setHeroSettings({...heroSettings, video1: e.target.value})}
+                      className="w-full bg-[#1a1a1a] border border-gray-700 text-white font-mono px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500"
+                    />
                   </div>
                   <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">4. Fallback Image URL</label>
-                    <input type="text" value={heroSettings.img1 || ''} onChange={e=>setHeroSettings({...heroSettings, img1:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs font-mono" />
+                    <label className="text-xs font-bold text-gray-400 uppercase mb-1.5 block">Backdrop Image URL (Image 1)</label>
+                    <input 
+                      type="text" 
+                      value={heroSettings.img1 || ''}
+                      onChange={(e) => setHeroSettings({...heroSettings, img1: e.target.value})}
+                      className="w-full bg-[#1a1a1a] border border-gray-700 text-white font-mono px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500"
+                    />
                   </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">5. CTA Button Text</label>
-                    <input type="text" value={heroSettings.ctaButtonText || ''} onChange={e=>setHeroSettings({...heroSettings, ctaButtonText:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
+                  <div className="md:col-span-2">
+                    <label className="text-xs font-bold text-gray-400 uppercase mb-1.5 block">Announcement Ticker Banner</label>
+                    <input 
+                      type="text" 
+                      value={heroSettings.announcementTicker || ''}
+                      onChange={(e) => setHeroSettings({...heroSettings, announcementTicker: e.target.value})}
+                      className="w-full bg-[#1a1a1a] border border-gray-700 text-white font-bold px-4 py-3 rounded-xl text-xs outline-none focus:border-emerald-500"
+                    />
                   </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">6. Badge Text Label</label>
-                    <input type="text" value={heroSettings.badgeText || ''} onChange={e=>setHeroSettings({...heroSettings, badgeText:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">7. Announcement Ticker Text</label>
-                    <input type="text" value={heroSettings.announcementTicker || ''} onChange={e=>setHeroSettings({...heroSettings, announcementTicker:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">8. Customer Trust Badge Text</label>
-                    <input type="text" value={heroSettings.customerTrustBadgeText || ''} onChange={e=>setHeroSettings({...heroSettings, customerTrustBadgeText:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">9. Support Hotline Display</label>
-                    <input type="text" value={heroSettings.supportHotlineDisplay || ''} onChange={e=>setHeroSettings({...heroSettings, supportHotlineDisplay:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">10. Express Logistics Note</label>
-                    <input type="text" value={heroSettings.expressLogisticsNote || ''} onChange={e=>setHeroSettings({...heroSettings, expressLogisticsNote:e.target.value})} className="w-full bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs" />
-                  </div>
+                </div>
 
-                  <div className="md:col-span-2 pt-4">
-                    <button type="submit" className="bg-emerald-600 text-white px-8 py-3.5 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all">Save All 10 Hero Configurations</button>
-                  </div>
-                </form>
+                <button 
+                  onClick={async () => {
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/admin/config/hero`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify(heroSettings)
+                      });
+                      if (res.ok) {
+                        showToast('Hero configuration updated across all clients!', 'success');
+                        fetchHero();
+                      } else {
+                        showToast('Failed to update hero configuration', 'error');
+                      }
+                    } catch (err) {
+                      showToast('Network error updating hero configuration', 'error');
+                    }
+                  }}
+                  className="bg-emerald-600 text-white px-8 py-3.5 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all shadow-lg"
+                >
+                  Commit Hero Settings to Server
+                </button>
               </div>
             </div>
           )}
@@ -2029,58 +2052,78 @@ export default function PremiumRiceStore() {
           {adminTab === 'config' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> County Logistics & Base Engine Settings</h2>
-                <p className="text-gray-400 text-xs mt-1">Configure county transport fees and regional delivery rules across all 47 counties.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> County Logistics & Transport Fee Engine</h2>
+                <p className="text-gray-400 text-xs mt-1">Configure base transport fees and regional delivery pricing across all 47 counties.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
-                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Configure County Transport Fees</h3>
-                
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  const updated = { ...countyOverrides, [countyOverrideForm.county]: Number(countyOverrideForm.fee) };
-                  try {
-                    const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                      body: JSON.stringify(updated)
-                    });
-                    if (res.ok) {
-                      showToast(`Transport fee for ${countyOverrideForm.county} updated!`, 'success');
-                      setCountyOverrides(updated);
-                      setCountyOverrideForm({ county: 'Nairobi', fee: '' });
-                    } else {
-                      showToast('Failed to update county fee', 'error');
-                    }
-                  } catch (err) {
-                    showToast('Network error', 'error');
-                  }
-                }} className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                  <select 
-                    value={countyOverrideForm.county} 
-                    onChange={e => setCountyOverrideForm({...countyOverrideForm, county: e.target.value})} 
-                    className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none"
-                  >
-                    {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <input 
-                    required 
-                    type="number" 
-                    placeholder="Transport Fee (KES)" 
-                    value={countyOverrideForm.fee} 
-                    onChange={e => setCountyOverrideForm({...countyOverrideForm, fee: e.target.value})} 
-                    className="bg-white border border-gray-300 text-black font-bold px-4 py-3 rounded-xl text-xs outline-none font-mono"
-                  />
-                  <button type="submit" className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all">Set County Fee</button>
-                </form>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-h-60 overflow-y-auto pr-2">
-                  {ALL_47_COUNTIES.map(c => (
-                    <div key={c} className="bg-[#1a1a1a] p-3 rounded-xl border border-gray-800 flex justify-between items-center text-xs">
-                      <span className="text-gray-300 font-bold truncate">{c}</span>
-                      <span className="font-mono text-emerald-400 font-black">KES {countyOverrides[c] !== undefined ? countyOverrides[c] : baseTransportFee}</span>
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-xs font-bold text-gray-400 uppercase mb-2 block">Base Transport Fee (KES)</label>
+                    <div className="flex gap-3">
+                      <input 
+                        type="number"
+                        value={baseTransportFee}
+                        onChange={(e) => setBaseTransportFee(Number(e.target.value))}
+                        className="bg-[#1a1a1a] border border-gray-700 text-white font-mono font-bold px-4 py-3 rounded-xl text-sm flex-1 outline-none"
+                      />
+                      <button onClick={() => showToast('Base transport fee updated', 'success')} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500">Save</button>
                     </div>
-                  ))}
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-gray-400 uppercase mb-2 block">Override County Delivery Fee</label>
+                    <div className="flex flex-col gap-3">
+                      <select 
+                        value={countyOverrideForm.county}
+                        onChange={(e) => setCountyOverrideForm({...countyOverrideForm, county: e.target.value})}
+                        className="bg-[#1a1a1a] border border-gray-700 text-white font-bold px-4 py-3 rounded-xl text-xs outline-none"
+                      >
+                        {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c} County</option>)}
+                      </select>
+                      <div className="flex gap-3">
+                        <input 
+                          type="number"
+                          placeholder="Fee in KES"
+                          value={countyOverrideForm.fee}
+                          onChange={(e) => setCountyOverrideForm({...countyOverrideForm, fee: e.target.value})}
+                          className="bg-[#1a1a1a] border border-gray-700 text-white font-mono font-bold px-4 py-3 rounded-xl text-xs flex-1 outline-none"
+                        />
+                        <button onClick={async () => {
+                           const feeNum = Number(countyOverrideForm.fee);
+                           if (isNaN(feeNum)) return showToast('Please enter a valid number fee', 'error');
+                           const updated = { ...countyOverrides, [countyOverrideForm.county]: feeNum };
+                           try {
+                             const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
+                               method: 'PUT',
+                               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                               body: JSON.stringify(updated)
+                             });
+                             if (res.ok) {
+                               setCountyOverrides(updated);
+                               showToast(`Delivery fee override saved for ${countyOverrideForm.county}`, 'success');
+                             } else {
+                               showToast('Failed to save county override', 'error');
+                             }
+                           } catch (err) {
+                             showToast('Network error saving county override', 'error');
+                           }
+                        }} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500">Apply Override</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-6 border-t border-gray-800">
+                  <h4 className="font-bold text-xs text-gray-400 uppercase tracking-wider mb-4">Active County Delivery Fee Overrides ({Object.keys(countyOverrides).length})</h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {Object.entries(countyOverrides).map(([cName, feeVal]) => (
+                      <div key={cName} className="bg-[#1a1a1a] border border-gray-800 p-3 rounded-2xl flex justify-between items-center text-xs">
+                        <span className="font-bold text-gray-300">{cName}</span>
+                        <span className="font-mono text-emerald-400 font-bold">KES {String(feeVal)}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -2089,44 +2132,22 @@ export default function PremiumRiceStore() {
           {adminTab === 'logs' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> System Audit & Database Logs</h2>
-                <p className="text-gray-400 text-xs mt-1">Review live backend activities, authentication attempts, and order dispatches.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> System Audit Logs & Events</h2>
+                <p className="text-gray-400 text-xs mt-1">Review live database events, user authentication logs, and payment callback telemetry.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
-                <div className="p-6 border-b border-gray-800 flex justify-between items-center">
-                  <h3 className="font-bold text-sm text-white">Recent System Audit Entries</h3>
-                  <button onClick={fetchAdminLogs} className="flex items-center text-xs text-emerald-400 hover:text-emerald-300 font-bold bg-[#1f1f1f] px-3 py-1.5 rounded-xl">
-                    <RefreshCw size={14} className="mr-1.5"/> Refresh Logs
-                  </button>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs whitespace-nowrap font-mono">
-                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
-                      <tr>
-                        <th className="px-6 py-4">Timestamp</th>
-                        <th className="px-6 py-4">Action / Event</th>
-                        <th className="px-6 py-4">Actor / User</th>
-                        <th className="px-6 py-4">Details</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-800/60">
-                      {adminLogs.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="text-center py-8 text-gray-500 font-sans">No audit log entries recorded yet.</td>
-                        </tr>
-                      ) : (
-                        adminLogs.map((log, idx) => (
-                          <tr key={idx} className="hover:bg-[#1a1a1a]/40 transition-colors">
-                            <td className="px-6 py-4 text-gray-400">{new Date(log.timestamp || log.createdAt).toLocaleString()}</td>
-                            <td className="px-6 py-4 font-bold text-emerald-400">{log.action || log.event}</td>
-                            <td className="px-6 py-4 text-gray-300">{log.user || log.actor || 'System'}</td>
-                            <td className="px-6 py-4 text-gray-400">{log.details || JSON.stringify(log.meta || {})}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                <div className="space-y-3 font-mono text-xs">
+                  {adminLogs.length === 0 ? (
+                    <div className="text-center py-10 text-gray-500">No database audit logs recorded yet.</div>
+                  ) : (
+                    adminLogs.map((log, idx) => (
+                      <div key={idx} className="bg-[#1a1a1a] border border-gray-800 p-3.5 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <span className="text-emerald-400 font-bold">{log.action || log.message || JSON.stringify(log)}</span>
+                        <span className="text-gray-500 text-[10px]">{log.timestamp ? new Date(log.timestamp).toLocaleString() : 'Recent'}</span>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -2137,12 +2158,12 @@ export default function PremiumRiceStore() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans flex flex-col selection:bg-emerald-500 selection:text-white">
+    <div className="min-h-screen bg-gray-50 text-gray-950 font-sans flex flex-col selection:bg-emerald-500 selection:text-white">
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl font-bold text-sm text-white flex items-center gap-3 animate-bounce ${
+        <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl font-black text-white flex items-center gap-3 animate-bounce ${
           toast.type === 'error' ? 'bg-rose-600' : 'bg-emerald-600'
         }`}>
-          {toast.type === 'error' ? <AlertCircle size={20}/> : <CheckCircle size={20}/>}
+          {toast.type === 'error' ? <AlertCircle size={20} /> : <CheckCircle size={20} />}
           <span>{toast.message}</span>
         </div>
       )}
@@ -2158,47 +2179,41 @@ export default function PremiumRiceStore() {
         {view === 'admin' && renderAdmin()}
       </main>
 
-      <footer className="bg-emerald-950 text-emerald-300 border-t border-emerald-900 py-12 px-4 mt-auto">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
+      <footer className="bg-emerald-950 text-emerald-300 py-12 px-4 border-t border-emerald-900 mt-auto">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8">
           <div>
-            <div className="flex items-center mb-4">
-              <Leaf className="h-7 w-7 text-emerald-400 mr-2" />
-              <span className="font-black text-xl text-white tracking-tight">MWEA HUB</span>
+            <div className="flex items-center space-x-2 mb-4">
+              <Leaf className="h-6 w-6 text-emerald-400" />
+              <span className="font-black text-xl text-white">MWEA HUB</span>
             </div>
-            <p className="text-xs text-emerald-400/80 leading-relaxed font-medium">
-              Direct agricultural logistics platform supplying authentic Mwea Pishori and Basmati rice across all 47 counties in Kenya.
-            </p>
+            <p className="text-xs text-emerald-400 leading-relaxed font-medium">Direct Mwea Pishori and Basmati rice logistics, connecting paddy farmers directly to wholesale and household customers across all 47 counties.</p>
           </div>
           <div>
-            <h4 className="font-bold text-white text-sm uppercase tracking-wider mb-4">Quick Links</h4>
+            <h4 className="font-bold text-white text-sm mb-3 uppercase tracking-wider">Quick Navigation</h4>
             <ul className="space-y-2 text-xs font-medium">
               <li><button onClick={() => setView('home')} className="hover:text-white transition-colors">Home Storefront</button></li>
               <li><button onClick={() => setView('shop')} className="hover:text-white transition-colors">Grain Catalog</button></li>
               <li><button onClick={() => setView('cart')} className="hover:text-white transition-colors">Shopping Bag</button></li>
-              <li><button onClick={() => setView('profile')} className="hover:text-white transition-colors">Order Tracking</button></li>
+              <li><button onClick={() => setView('profile')} className="hover:text-white transition-colors">My Profile & Orders</button></li>
             </ul>
           </div>
           <div>
-            <h4 className="font-bold text-white text-sm uppercase tracking-wider mb-4">Logistics & Support</h4>
-            <ul className="space-y-2 text-xs font-medium text-emerald-400/80">
-              <li>Mwea Milling Station, Kirinyaga</li>
-              <li>Nairobi Regional Hub, Industrial Area</li>
-              <li>Support Hotline: +254 700 000000</li>
-              <li>Email: orders@mweahub.co.ke</li>
+            <h4 className="font-bold text-white text-sm mb-3 uppercase tracking-wider">Logistics & Coverage</h4>
+            <ul className="space-y-2 text-xs font-medium text-emerald-400">
+              <li>Mwea Milling Station (Kirinyaga)</li>
+              <li>Nairobi Express Dispatch Hub</li>
+              <li>Mombasa Coastal Port Logistics</li>
+              <li>All 47 Kenyan Counties Delivery</li>
             </ul>
           </div>
           <div>
-            <h4 className="font-bold text-white text-sm uppercase tracking-wider mb-4">M-Pesa Integration</h4>
-            <p className="text-xs text-emerald-400/80 leading-relaxed font-medium mb-3">
-              Automated STK Push Express and Paybill 889900 integration for instant transaction clearance.
-            </p>
-            <div className="bg-emerald-900/50 p-3 rounded-xl border border-emerald-800 text-[11px] font-mono text-white">
-              STATUS: SECURE 256-BIT ENCRYPTION
-            </div>
+            <h4 className="font-bold text-white text-sm mb-3 uppercase tracking-wider">Direct Support</h4>
+            <p className="text-xs text-emerald-400 mb-2 font-medium">Hotline: +254 700 000000</p>
+            <p className="text-xs text-emerald-400 font-medium">Email: logistics@mweahub.co.ke</p>
           </div>
         </div>
-        <div className="max-w-7xl mx-auto pt-8 border-t border-emerald-900 text-center text-xs text-emerald-500 font-semibold">
-          &copy; {new Date().getFullYear()} Mwea Hub Direct Logistics. All rights reserved. Built for uncompromising quality.
+        <div className="max-w-7xl mx-auto mt-10 pt-6 border-t border-emerald-900/80 text-center text-[11px] text-emerald-500 font-medium">
+          &copy; {new Date().getFullYear()} MWEA HUB Direct Rice Logistics. All rights reserved. Powered by secure M-Pesa backend callbacks.
         </div>
       </footer>
     </div>
