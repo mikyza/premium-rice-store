@@ -418,13 +418,12 @@ export default function PremiumRiceStore() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
-        const data = await res.json();
-        setAdminLogs(Array.isArray(data) ? data : (data.logs || []));
+        setAdminLogs(await res.json());
       } else {
-        showToast('Error fetching payment logs from backend server', 'error');
+        showToast('Error fetching database audit logs', 'error');
       }
     } catch (err) { 
-      showToast('Network error while fetching backend payment logs', 'error'); 
+      showToast('Network error while fetching system logs', 'error'); 
     }
   };
 
@@ -1287,6 +1286,7 @@ export default function PremiumRiceStore() {
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200 pb-3 mb-3">
                       <div>
                         <span className="font-mono font-black text-emerald-950 text-base">TXN #{o.transactionId || o.id}</span>
+                        {/* Payment status strictly from backend and cleanly separated */}
                         <span className="text-xs text-gray-500 font-medium ml-3">Payment Status: <strong className="text-emerald-700 uppercase">{o.paymentStatus || 'Paid'}</strong></span>
                       </div>
                       <div className="flex items-center gap-3">
@@ -1375,26 +1375,6 @@ export default function PremiumRiceStore() {
         </div>
       );
     }
-
-    // Single unified function to handle updates safely ensuring delivery and payment don't mix up
-    const updateAdminOrder = async (orderId: number, updates: any) => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/admin/orders/${orderId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify(updates)
-        });
-        if (res.ok) {
-          showToast('Record successfully updated', 'success');
-          fetchAdminOrders();
-          fetchMyOrders();
-        } else {
-          showToast('Failed to update record', 'error');
-        }
-      } catch (err) {
-        showToast('Network error while updating', 'error');
-      }
-    };
 
     const tabsList = [
       { id: 'inventory', icon: <Package size={18}/>, label: 'Grain Catalog' },
@@ -1530,64 +1510,69 @@ export default function PremiumRiceStore() {
                         body: JSON.stringify(editingProduct)
                       });
                       if (res.ok) {
-                        showToast('Record modified successfully', 'success');
+                        showToast('Product specifications modified', 'success');
                         setEditingProduct(null);
                         fetchProducts();
                       } else {
-                        showToast('Failed to modify record', 'error');
+                        showToast('Failed to modify product record', 'error');
                       }
                     } catch (err) {
-                      showToast('Network error while updating', 'error');
+                      showToast('Network error while modifying product', 'error');
                     }
-                  }} className="w-full bg-emerald-600 text-white font-bold py-3 rounded-xl mt-4 hover:bg-emerald-500 transition-colors text-xs">
-                    Commit Changes
-                  </button>
+                  }} className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs hover:bg-emerald-500 mr-3">Save Changes</button>
                 </div>
               )}
 
-              {/* Inventory Table */}
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden mt-6">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-[#1a1a1a] text-emerald-400 font-bold uppercase text-[10px] tracking-wider">
-                     <tr>
-                        <th className="p-4">ID</th>
-                        <th className="p-4">Grain</th>
-                        <th className="p-4">Price / Cost</th>
-                        <th className="p-4">Stock</th>
-                        <th className="p-4 text-right">Actions</th>
-                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-800 text-gray-300">
-                     {products.map(p => (
-                        <tr key={p.id} className="hover:bg-[#1a1a1a]/50 transition-colors">
-                           <td className="p-4 font-mono text-gray-500">#{p.id}</td>
-                           <td className="p-4">
-                              <div className="font-bold text-white">{p.variety}</div>
-                              <div className="text-[10px] text-gray-500 uppercase tracking-wider">{p.brandName} • {p.weightKg}kg</div>
-                           </td>
-                           <td className="p-4">
-                              <div className="text-emerald-400 font-bold">Sell: KES {p.price?.toLocaleString()}</div>
-                              <div className="text-gray-500 text-xs">Cost: KES {p.costPrice?.toLocaleString() || 'N/A'}</div>
-                           </td>
-                           <td className="p-4">
-                              <span className={`px-2.5 py-1 rounded-md text-xs font-black ${p.stockQuantity > 10 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
-                                 {p.stockQuantity} Bags
-                              </span>
-                           </td>
-                           <td className="p-4 text-right space-x-2">
-                              <button onClick={() => setEditingProduct(p)} className="p-2 bg-gray-800 hover:bg-emerald-600 text-white rounded-lg transition-colors"><Edit size={14}/></button>
-                              <button onClick={async () => {
-                                 if(!confirm('Delete this grain record?')) return;
-                                 try {
-                                   await fetch(`${API_BASE_URL}/admin/products/${p.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
-                                   fetchProducts();
-                                 } catch (e) { showToast('Error deleting product', 'error'); }
-                              }} className="p-2 bg-gray-800 hover:bg-rose-600 text-white rounded-lg transition-colors"><Trash2 size={14}/></button>
-                           </td>
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs whitespace-nowrap">
+                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="px-6 py-4">ID</th>
+                        <th className="px-6 py-4">Brand & Variety</th>
+                        <th className="px-6 py-4">Buying Price</th>
+                        <th className="px-6 py-4">Selling Price</th>
+                        <th className="px-6 py-4">Stock Matrix</th>
+                        <th className="px-6 py-4 text-center">Controls</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/60">
+                      {products.map(p => (
+                        <tr key={p.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                          <td className="px-6 py-4 font-mono text-gray-500">#{p.id}</td>
+                          <td className="px-6 py-4 font-bold text-gray-200">{p.brandName} - <span className="text-gray-400 font-normal">{p.variety} ({p.weightKg}kg)</span></td>
+                          <td className="px-6 py-4 font-bold font-mono text-gray-400">KES {p.costPrice?.toLocaleString() || '---'}</td>
+                          <td className="px-6 py-4 font-bold font-mono text-emerald-400">KES {p.price?.toLocaleString()}</td>
+                          <td className="px-6 py-4">
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black border font-mono ${
+                              p.stockQuantity > 10 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                            }`}>
+                              {p.stockQuantity} BAGS LEFT
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <button onClick={() => setEditingProduct(p)} className="text-gray-400 hover:text-emerald-400 p-2 bg-[#1f1f1f] rounded-xl mr-2 transition-colors" title="Edit"><Edit size={14}/></button>
+                            <button onClick={async () => {
+                              if (confirm(`Permanently delete ${p.brandName} ${p.variety}?`)) {
+                                try {
+                                  const res = await fetch(`${API_BASE_URL}/admin/products/${p.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+                                  if (res.ok) {
+                                    showToast('Product wiped from database', 'success');
+                                    fetchProducts();
+                                  } else {
+                                    showToast('Failed to delete product', 'error');
+                                  }
+                                } catch (err) {
+                                  showToast('Network error deleting product', 'error');
+                                }
+                              }
+                            }} className="text-gray-400 hover:text-rose-500 p-2 bg-[#1f1f1f] rounded-xl transition-colors" title="Delete"><Trash2 size={14}/></button>
+                          </td>
                         </tr>
-                     ))}
-                  </tbody>
-                </table>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
@@ -1595,51 +1580,115 @@ export default function PremiumRiceStore() {
           {adminTab === 'orders' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><Package className="mr-3 text-emerald-500"/> Logistics Dashboard</h2>
-                <p className="text-gray-400 text-xs mt-1">Manage deliveries, tracking, and view account usernames independently of payment status.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><ShoppingBag className="mr-3 text-emerald-500"/> Logistics & Order Management</h2>
+                <p className="text-gray-400 text-xs mt-1">Review active orders, customer usernames, and shipping status updates.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden mt-6">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-[#1a1a1a] text-emerald-400 font-bold uppercase text-[10px] tracking-wider">
-                     <tr>
-                        <th className="p-4">Order ID</th>
-                        <th className="p-4">Account Username</th>
-                        <th className="p-4">Destination Logistics</th>
-                        <th className="p-4">Delivery Status</th>
-                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-800 text-gray-300">
-                     {adminOrders.map(o => (
-                        <tr key={o.id} className="hover:bg-[#1a1a1a]/50 transition-colors">
-                           <td className="p-4 font-mono text-gray-500">#{o.transactionId || o.id}</td>
-                           <td className="p-4 font-bold text-white">
-                             <div className="flex items-center gap-2">
-                               <UserIcon size={14} className="text-emerald-500" />
-                               {o.user?.fullName || o.user?.username || 'Guest'}
-                             </div>
-                           </td>
-                           <td className="p-4 text-xs text-gray-400">
-                             <div className="font-bold text-gray-200">{o.county}, {o.town}</div>
-                             <div>{o.location} - {formatShippingAddress(o.shippingAddress)}</div>
-                           </td>
-                           <td className="p-4">
-                             <select 
-                               value={o.status || 'pending'} 
-                               onChange={(e) => updateAdminOrder(o.id, { status: e.target.value })}
-                               className="bg-[#0a0a0a] border border-gray-700 rounded p-1.5 text-xs font-bold uppercase outline-none text-gray-300 focus:border-emerald-500"
-                             >
-                               <option value="pending">Pending</option>
-                               <option value="processing">Processing</option>
-                               <option value="shipping">Shipping</option>
-                               <option value="delivered">Delivered</option>
-                               <option value="cancelled">Cancelled</option>
-                             </select>
-                           </td>
-                        </tr>
-                     ))}
-                  </tbody>
-                </table>
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-4 flex items-center gap-3">
+                <Search size={18} className="text-gray-500 ml-2" />
+                <input 
+                  type="text" 
+                  placeholder="Filter orders by ID, Customer Username, or Phone..."
+                  value={orderSearchQuery}
+                  onChange={(e) => setOrderSearchQuery(e.target.value)}
+                  className="bg-transparent text-white font-bold text-xs w-full outline-none placeholder-gray-600"
+                />
+              </div>
+
+              <div className="space-y-4">
+                {adminOrders
+                  .filter(o => {
+                    if (!orderSearchQuery) return true;
+                    const q = orderSearchQuery.toLowerCase();
+                    return String(o.id).includes(q) || o.user?.fullName?.toLowerCase().includes(q) || o.user?.phoneNumber?.includes(q) || o.county?.toLowerCase().includes(q);
+                  })
+                  .map(o => (
+                    <div key={o.id} className="bg-[#141414] border border-gray-800 rounded-3xl p-6 shadow-xl">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-gray-800/80 pb-4 mb-4">
+                        <div>
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono font-black text-emerald-400 text-base">ORDER #{o.id}</span>
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                              o.status === 'delivered' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                            }`}>
+                              Shipping: {o.status}
+                            </span>
+                          </div>
+                          {/* Account username and phone number explicitly visible in logistics dashboard */}
+                          <p className="text-xs text-gray-300 mt-1.5 font-bold">
+                            Customer Username: <span className="text-emerald-400">{o.user?.fullName || o.customerName || 'Guest User'}</span> | Phone: <span className="text-gray-400">{o.user?.phoneNumber || o.phoneNumber || 'N/A'}</span>
+                          </p>
+                          <p className="text-[11px] text-gray-500 mt-0.5">Date: {new Date(o.createdAt).toLocaleString()}</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                           {/* Payment status strictly from backend (Heropay automatic) and NOT alterable here */}
+                           <div className="bg-[#1f1f1f] border border-gray-800 px-3 py-1.5 rounded-xl">
+                             <span className="text-[10px] text-gray-400 block uppercase font-bold">Payment Status (Heropay)</span>
+                             <span className="text-xs font-black text-emerald-400 uppercase">{o.paymentStatus || 'Paid'}</span>
+                           </div>
+
+                           <span className="text-xs text-gray-400 font-bold">Update Shipping:</span>
+                           <select 
+                             value={o.status}
+                             onChange={async (e) => {
+                               const newStatus = e.target.value;
+                               try {
+                                 const res = await fetch(`${API_BASE_URL}/admin/orders/${o.id}/status`, {
+                                   method: 'PUT',
+                                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                   body: JSON.stringify({ status: newStatus })
+                                 });
+                                 if (res.ok) {
+                                   showToast(`Order #${o.id} shipping status updated to ${newStatus}`, 'success');
+                                   fetchAdminOrders();
+                                 } else {
+                                   showToast('Failed to update order status', 'error');
+                                 }
+                               } catch (err) {
+                                 showToast('Network error updating status', 'error');
+                               }
+                             }}
+                             className="bg-[#1f1f1f] text-emerald-400 font-black text-xs border border-gray-700 rounded-xl px-3 py-2 outline-none cursor-pointer"
+                           >
+                             <option value="pending">Pending</option>
+                             <option value="processing">Processing</option>
+                             <option value="dispatched">Dispatched</option>
+                             <option value="delivered">Delivered</option>
+                             <option value="failed">Failed</option>
+                           </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80">
+                          <p className="font-bold text-gray-300 mb-2 flex items-center"><MapPin size={14} className="mr-1 text-emerald-500"/> Delivery Logistics:</p>
+                          <ul className="space-y-1 text-gray-400">
+                            <li>County: <strong className="text-white">{o.county}</strong></li>
+                            <li>Town: <strong className="text-white">{o.town}</strong></li>
+                            <li>Location: <strong className="text-white">{o.location}</strong></li>
+                            <li>Street: <strong className="text-white">{formatShippingAddress(o.shippingAddress)}</strong></li>
+                          </ul>
+                        </div>
+                        <div className="bg-[#181818] p-4 rounded-2xl border border-gray-800/80 flex flex-col justify-between">
+                          <div>
+                            <p className="font-bold text-gray-300 mb-2">Order Items ({o.items?.length || 0}):</p>
+                            <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
+                              {o.items?.map((item: any, idx: number) => (
+                                <div key={idx} className="flex justify-between text-gray-400">
+                                  <span>{item.quantity}x {item.name || item.product?.variety}</span>
+                                  <span className="font-bold text-white">KES {(item.priceAtPurchase * item.quantity).toLocaleString()}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="flex justify-between font-black text-sm text-emerald-400 border-t border-gray-800 pt-2 mt-2">
+                            <span>Grand Total Amount</span>
+                            <span>KES {o.grandTotal?.toLocaleString()}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
               </div>
             </div>
           )}
@@ -1647,132 +1696,351 @@ export default function PremiumRiceStore() {
           {adminTab === 'finances' && (
             <div className="animate-fadeIn space-y-6">
               <div>
-                <h2 className="text-2xl font-black text-white flex items-center"><BarChart2 className="mr-3 text-emerald-500"/> Financial Dashboard</h2>
-                <p className="text-gray-400 text-xs mt-1">Monitor revenue streams, view account names, numbers, payment statuses, and transaction amounts.</p>
+                <h2 className="text-2xl font-black text-white flex items-center"><BarChart2 className="mr-3 text-emerald-500"/> Financial Dashboard & Heropay Payment Logs</h2>
+                <p className="text-gray-400 text-xs mt-1">Automatic payment records directly from Heropay. View customer account names, numbers, payment statuses, and amounts.</p>
               </div>
 
-              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden mt-6">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-[#1a1a1a] text-emerald-400 font-bold uppercase text-[10px] tracking-wider">
-                     <tr>
-                        <th className="p-4">Account Name</th>
-                        <th className="p-4">Account Number</th>
-                        <th className="p-4">Payment Status</th>
-                        <th className="p-4">Amount (KES)</th>
-                        <th className="p-4">Date</th>
-                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-800 text-gray-300">
-                     {adminOrders.map(o => (
-                        <tr key={o.id} className="hover:bg-[#1a1a1a]/50 transition-colors">
-                           <td className="p-4 font-bold text-white flex items-center gap-2">
-                             <UserIcon size={14} className="text-emerald-500" />
-                             {o.user?.fullName || 'Guest User'}
-                           </td>
-                           <td className="p-4 font-mono text-gray-400">
-                             {o.phoneNumber || o.user?.phoneNumber || 'N/A'}
-                           </td>
-                           <td className="p-4">
-                             <select 
-                               value={o.paymentStatus || 'pending'} 
-                               onChange={(e) => updateAdminOrder(o.id, { paymentStatus: e.target.value })}
-                               className={`bg-[#0a0a0a] border rounded p-1.5 text-xs font-bold uppercase outline-none ${
-                                 o.paymentStatus === 'paid' ? 'border-emerald-500/50 text-emerald-400 bg-emerald-500/5' : 
-                                 o.paymentStatus === 'failed' ? 'border-rose-500/50 text-rose-400 bg-rose-500/5' : 
-                                 'border-amber-500/50 text-amber-400 bg-amber-500/5'
-                               }`}
-                             >
-                               <option value="pending">Pending</option>
-                               <option value="paid">Paid</option>
-                               <option value="failed">Failed</option>
-                             </select>
-                           </td>
-                           <td className="p-4 font-black text-emerald-400 tracking-wide">
-                             KES {o.grandTotal?.toLocaleString()}
-                           </td>
-                           <td className="p-4 text-xs text-gray-500">
-                             {new Date(o.createdAt).toLocaleDateString()}
-                           </td>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-[#141414] border border-gray-800 p-6 rounded-3xl">
+                  <p className="text-gray-400 text-xs font-bold uppercase">Total Revenue (Heropay)</p>
+                  <p className="text-2xl font-black text-emerald-400 mt-2">
+                    KES {adminOrders.reduce((sum, o) => o.paymentStatus !== 'failed' ? sum + (o.grandTotal || 0) : sum, 0).toLocaleString()}
+                  </p>
+                </div>
+                <div className="bg-[#141414] border border-gray-800 p-6 rounded-3xl">
+                  <p className="text-gray-400 text-xs font-bold uppercase">Successful Transactions</p>
+                  <p className="text-2xl font-black text-white mt-2">
+                    {adminOrders.filter(o => o.paymentStatus === 'completed' || o.paymentStatus === 'paid' || !o.paymentStatus).length}
+                  </p>
+                </div>
+                <div className="bg-[#141414] border border-gray-800 p-6 rounded-3xl">
+                  <p className="text-gray-400 text-xs font-bold uppercase">Active Orders Count</p>
+                  <p className="text-2xl font-black text-emerald-400 mt-2">{adminOrders.length}</p>
+                </div>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
+                <div className="p-5 border-b border-gray-800 flex justify-between items-center">
+                  <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                    <DollarSign size={16} className="text-emerald-400"/> Automatic Heropay Payment & Account Ledger
+                  </h3>
+                  <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full font-mono font-bold">
+                    SECURE AUTOMATIC FEED
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs whitespace-nowrap">
+                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="px-6 py-4">TXN ID / Order</th>
+                        <th className="px-6 py-4">Account Name</th>
+                        <th className="px-6 py-4">Phone Number</th>
+                        <th className="px-6 py-4">Payment Status</th>
+                        <th className="px-6 py-4">Amount (KES)</th>
+                        <th className="px-6 py-4">Date & Time</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/60">
+                      {adminOrders.map(o => (
+                        <tr key={o.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                          <td className="px-6 py-4 font-mono text-emerald-400">#{o.transactionId || o.id}</td>
+                          <td className="px-6 py-4 font-bold text-white">{o.user?.fullName || o.customerName || 'Guest User'}</td>
+                          <td className="px-6 py-4 font-mono text-gray-300">{o.user?.phoneNumber || o.phoneNumber || 'N/A'}</td>
+                          <td className="px-6 py-4">
+                            <span className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-mono">
+                              {o.paymentStatus || 'Paid (Heropay)'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 font-black font-mono text-white">KES {o.grandTotal?.toLocaleString()}</td>
+                          <td className="px-6 py-4 text-gray-400 font-mono text-[11px]">{new Date(o.createdAt).toLocaleString()}</td>
                         </tr>
-                     ))}
-                  </tbody>
-                </table>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
 
           {adminTab === 'users' && (
             <div className="animate-fadeIn space-y-6">
-               <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Clearance</h2>
-               <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden p-6 text-gray-400 text-sm">
-                 <p className="mb-4">Total registered accounts: <strong className="text-emerald-400">{adminUsers.length}</strong></p>
-                 <div className="space-y-3">
-                   {adminUsers.map(u => (
-                     <div key={u.id} className="bg-[#1a1a1a] p-4 rounded-xl flex justify-between items-center border border-gray-800/80">
-                       <div><strong className="text-white text-base">{u.fullName}</strong> <span className="text-gray-500 block text-xs mt-0.5">{u.phoneNumber}</span></div>
-                       <div className="uppercase text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-3 py-1.5 rounded-md border border-emerald-500/20">{u.role}</div>
-                     </div>
-                   ))}
-                 </div>
-               </div>
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><Users className="mr-3 text-emerald-500"/> User Accounts & Clearance</h2>
+                <p className="text-gray-400 text-xs mt-1">Manage user roles and system clearance levels.</p>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs whitespace-nowrap">
+                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="px-6 py-4">ID</th>
+                        <th className="px-6 py-4">Full Name</th>
+                        <th className="px-6 py-4">Phone Number</th>
+                        <th className="px-6 py-4">Email</th>
+                        <th className="px-6 py-4">Role Clearance</th>
+                        <th className="px-6 py-4 text-center">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/60">
+                      {adminUsers.map(u => (
+                        <tr key={u.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                          <td className="px-6 py-4 font-mono text-gray-500">#{u.id}</td>
+                          <td className="px-6 py-4 font-bold text-white">{u.fullName}</td>
+                          <td className="px-6 py-4 font-mono text-gray-300">{u.phoneNumber}</td>
+                          <td className="px-6 py-4 text-gray-400">{u.email || 'N/A'}</td>
+                          <td className="px-6 py-4">
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase ${
+                              u.role === 'admin' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                            }`}>
+                              {u.role}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <button onClick={async () => {
+                              const newRole = u.role === 'admin' ? 'customer' : 'admin';
+                              try {
+                                const res = await fetch(`${API_BASE_URL}/admin/users/${u.id}/role`, {
+                                  method: 'PUT',
+                                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                  body: JSON.stringify({ role: newRole })
+                                });
+                                if (res.ok) {
+                                  showToast(`User role updated to ${newRole}`, 'success');
+                                  fetchAdminUsers();
+                                } else {
+                                  showToast('Failed to update user role', 'error');
+                                }
+                              } catch (err) {
+                                showToast('Network error updating user role', 'error');
+                              }
+                            }} className="text-xs bg-[#1f1f1f] hover:bg-emerald-600 text-gray-300 hover:text-white px-3 py-1.5 rounded-xl font-bold transition-all">
+                              Toggle Role
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
 
           {adminTab === 'carousel' && (
             <div className="animate-fadeIn space-y-6">
-               <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Hero & Carousel Config</h2>
-               <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden p-6 text-gray-400 text-sm">
-                 Carousel and visual hero dynamic editing engine module accessible here. Add images and adjust settings for customer landing pages.
-               </div>
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><ImageIcon className="mr-3 text-emerald-500"/> Hero Banner & Carousel Configuration</h2>
+                <p className="text-gray-400 text-xs mt-1">Customize hero titles, video backdrops, badges, and carousel promotional slides.</p>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6 space-y-4">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-2">Main Hero Configuration</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Hero Main Title</label>
+                    <input 
+                      type="text" 
+                      value={heroSettings.title || ''} 
+                      onChange={e => setHeroSettings({...heroSettings, title: e.target.value})}
+                      className="w-full bg-white text-black font-bold p-3 rounded-xl text-xs outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Announcement Ticker Text</label>
+                    <input 
+                      type="text" 
+                      value={heroSettings.announcementTicker || ''} 
+                      onChange={e => setHeroSettings({...heroSettings, announcementTicker: e.target.value})}
+                      className="w-full bg-white text-black font-bold p-3 rounded-xl text-xs outline-none"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Hero Subtitle</label>
+                    <textarea 
+                      value={heroSettings.subtitle || ''} 
+                      onChange={e => setHeroSettings({...heroSettings, subtitle: e.target.value})}
+                      className="w-full bg-white text-black font-bold p-3 rounded-xl text-xs outline-none h-20"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Background Video 1 URL (YouTube Embed / MP4)</label>
+                    <input 
+                      type="text" 
+                      value={heroSettings.video1 || ''} 
+                      onChange={e => setHeroSettings({...heroSettings, video1: e.target.value})}
+                      className="w-full bg-white text-black font-bold p-3 rounded-xl text-xs font-mono outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">Background Image 1 URL</label>
+                    <input 
+                      type="text" 
+                      value={heroSettings.img1 || ''} 
+                      onChange={e => setHeroSettings({...heroSettings, img1: e.target.value})}
+                      className="w-full bg-white text-black font-bold p-3 rounded-xl text-xs font-mono outline-none"
+                    />
+                  </div>
+                </div>
+                <button onClick={async () => {
+                  try {
+                    const res = await fetch(`${API_BASE_URL}/admin/config/hero`, {
+                      method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                      body: JSON.stringify(heroSettings)
+                    });
+                    if (res.ok) {
+                      showToast('Hero configuration updated successfully!', 'success');
+                      fetchHero();
+                    } else {
+                      showToast('Failed to update hero config', 'error');
+                    }
+                  } catch (err) {
+                    showToast('Network error updating hero config', 'error');
+                  }
+                }} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-emerald-500 mt-2">
+                  Save Hero Settings
+                </button>
+              </div>
             </div>
           )}
 
           {adminTab === 'config' && (
             <div className="animate-fadeIn space-y-6">
-               <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> Logistics Configuration Engine</h2>
-               <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden p-6 text-gray-400 text-sm">
-                 County transportation override rates managed here. Current fallback flat rate: <strong className="text-white">KES {baseTransportFee}</strong>.
-               </div>
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><Settings className="mr-3 text-emerald-500"/> Counties Shipping Fee Engine</h2>
+                <p className="text-gray-400 text-xs mt-1">Configure base transport fees or set specific overrides for any of the 47 counties.</p>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl p-6">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider mb-4">Set County Shipping Fee Override</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                  <select 
+                    value={countyOverrideForm.county}
+                    onChange={e => setCountyOverrideForm({...countyOverrideForm, county: e.target.value})}
+                    className="bg-white text-black font-bold p-3 rounded-xl text-xs outline-none"
+                  >
+                    {ALL_47_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <input 
+                    type="number"
+                    placeholder="Transport Fee (KES)"
+                    value={countyOverrideForm.fee}
+                    onChange={e => setCountyOverrideForm({...countyOverrideForm, fee: e.target.value})}
+                    className="bg-white text-black font-bold p-3 rounded-xl text-xs outline-none"
+                  />
+                  <button onClick={async () => {
+                    if (!countyOverrideForm.fee) return showToast('Please enter transport fee amount', 'error');
+                    try {
+                      const updatedOverrides = { ...countyOverrides, [countyOverrideForm.county]: Number(countyOverrideForm.fee) };
+                      const res = await fetch(`${API_BASE_URL}/admin/config/counties`, {
+                        method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify(updatedOverrides)
+                      });
+                      if (res.ok) {
+                        showToast(`Shipping fee for ${countyOverrideForm.county} updated!`, 'success');
+                        setCountyOverrides(updatedOverrides);
+                      } else {
+                        showToast('Failed to update county override', 'error');
+                      }
+                    } catch (err) {
+                      showToast('Network error', 'error');
+                    }
+                  }} className="bg-emerald-600 text-white font-bold px-6 py-3 rounded-xl text-xs hover:bg-emerald-500">
+                    Save County Override
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
           {adminTab === 'logs' && (
             <div className="animate-fadeIn space-y-6">
-               <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> System Audit Logs</h2>
-               <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden p-6 text-gray-400 text-sm">
-                 Payment, authentication and database modification logs are rendered securely within this terminal.
-               </div>
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center"><Activity className="mr-3 text-emerald-500"/> System Audit & Payment Logs</h2>
+                <p className="text-gray-400 text-xs mt-1">Immutable audit trails of database operations and automatic Heropay payment callbacks.</p>
+              </div>
+
+              <div className="bg-[#141414] border border-gray-800 rounded-3xl overflow-hidden shadow-xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs whitespace-nowrap">
+                    <thead className="bg-[#1a1a1a] text-gray-400 border-b border-gray-800 font-bold uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="px-6 py-4">Log ID</th>
+                        <th className="px-6 py-4">Action Event</th>
+                        <th className="px-6 py-4">Administrator / Actor</th>
+                        <th className="px-6 py-4">Timestamp</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/60">
+                      {adminLogs.map(l => (
+                        <tr key={l.id} className="hover:bg-[#1a1a1a]/40 transition-colors">
+                          <td className="px-6 py-4 font-mono text-gray-500">#{l.id}</td>
+                          <td className="px-6 py-4 font-bold text-emerald-400">{l.action || l.message || 'System Event'}</td>
+                          <td className="px-6 py-4 text-gray-300">{l.adminName || l.user?.fullName || 'System Automated'}</td>
+                          <td className="px-6 py-4 text-gray-500 font-mono text-[11px]">{new Date(l.createdAt || Date.now()).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
         </main>
       </div>
     );
-  }; // End of renderAdmin
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col font-sans selection:bg-emerald-500 selection:text-white">
-      {renderNav()}
+    <div className="min-h-screen bg-gray-50 text-gray-900 flex flex-col font-sans selection:bg-emerald-500 selection:text-white">
       {toast && (
-        <div className={`fixed top-24 right-4 z-50 px-6 py-4 rounded-2xl font-black text-sm shadow-2xl flex items-center border border-white/20 animate-bounce ${toast.type === 'error' ? 'bg-rose-500 text-white shadow-rose-500/50' : 'bg-emerald-500 text-white shadow-emerald-500/50'}`}>
-          {toast.type === 'error' ? <AlertCircle className="h-5 w-5 mr-2" /> : <CheckCircle className="h-5 w-5 mr-2" />}
-          {toast.message}
+        <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl text-white font-bold text-sm flex items-center gap-3 animate-bounce ${
+          toast.type === 'error' ? 'bg-rose-600' : 'bg-emerald-600'
+        }`}>
+          {toast.type === 'error' ? <AlertTriangle size={18}/> : <CheckCircle size={18}/>}
+          <span>{toast.message}</span>
         </div>
       )}
-      
-      <main className="flex-grow flex flex-col">
+
+      {renderNav()}
+
+      <main className="flex-1">
         {view === 'home' && renderHome()}
         {view === 'shop' && renderShop()}
         {view === 'cart' && renderCart()}
         {view === 'login' && renderAuth()}
-        {view === 'profile' && renderProfile()}
         {view === 'admin' && renderAdmin()}
+        {view === 'profile' && renderProfile()}
       </main>
 
-      <footer className="bg-emerald-950 text-emerald-400/60 py-12 border-t border-emerald-900 mt-auto">
-        <div className="max-w-7xl mx-auto px-4 text-center">
-          <Leaf className="h-8 w-8 mx-auto mb-4 text-emerald-800" />
-          <p className="font-bold text-sm tracking-widest uppercase mb-2 text-emerald-700">MWEA HUB • Direct Rice Logistics</p>
-          <p className="text-xs">&copy; {new Date().getFullYear()} Premium Rice Store. All rights reserved.</p>
+      <footer className="bg-emerald-950 text-emerald-200 py-12 px-4 border-t border-emerald-900 mt-auto">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
+          <div>
+            <div className="flex items-center mb-4">
+              <Leaf className="h-7 w-7 text-emerald-400 mr-2" />
+              <span className="font-black text-xl text-white tracking-tight">MWEA HUB</span>
+            </div>
+            <p className="text-xs text-emerald-300/80 leading-relaxed font-medium">Direct farm-to-doorstep distribution of premium grade Mwea Pishori rice across all 47 counties in Kenya.</p>
+          </div>
+          <div>
+            <h3 className="font-black text-sm text-white uppercase tracking-wider mb-3">Quick Navigation</h3>
+            <ul className="space-y-2 text-xs font-medium">
+              <li><button onClick={() => setView('home')} className="hover:text-emerald-400 transition-colors">Home Page</button></li>
+              <li><button onClick={() => setView('shop')} className="hover:text-emerald-400 transition-colors">Grain Catalog</button></li>
+              <li><button onClick={() => setView('cart')} className="hover:text-emerald-400 transition-colors">Shopping Bag</button></li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="font-black text-sm text-white uppercase tracking-wider mb-3">Logistics Coverage</h3>
+            <p className="text-xs text-emerald-300/80 leading-relaxed font-medium">Express refrigerated and secure transit operational across Nairobi, Kirinyaga, Kiambu, Mombasa, Nakuru, and Kisumu.</p>
+          </div>
+          <div>
+            <h3 className="font-black text-sm text-white uppercase tracking-wider mb-3">Automated Payments</h3>
+            <p className="text-xs text-emerald-300/80 leading-relaxed font-medium">Fully integrated with Heropay secure payment gateway for automatic confirmation and reconciliation.</p>
+          </div>
+        </div>
+        <div className="max-w-7xl mx-auto pt-8 border-t border-emerald-900/80 text-center text-xs text-emerald-400/60 font-semibold">
+          © {new Date().getFullYear()} Mwea Hub Direct Logistics. All rights reserved.
         </div>
       </footer>
     </div>
