@@ -479,7 +479,7 @@ export default function PremiumRiceStore() {
       if (res.ok) {
         const data = await res.json();
         if (data && Object.keys(data).length > 0) {
-          setHeroSettings(prev => ({ ...prev, ...data }));
+       setHeroSettings((prev: any) => ({ ...prev, ...data }));
         }
       }
     } catch (err) {
