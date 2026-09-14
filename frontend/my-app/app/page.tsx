@@ -1,5 +1,5 @@
 "use client";
-
+import { Smartphone, Truck, /* other icons */ } from "lucide-react";
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   ShoppingCart, User as UserIcon, LogIn, Menu, X, Plus, 
