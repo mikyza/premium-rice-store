@@ -1,4 +1,3 @@
-// controllers/paymentController.js
 import { Transaction, Payment, Order } from '../db.js';
 import axios from 'axios';
 
@@ -11,59 +10,68 @@ export const initiatePayHeroPayment = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    // Call PayHero API (adjust payload based on PayHero's actual STK Push documentation)
+    // Generate a unique reference for this transaction
+    const externalReference = `RICE-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+    // PayHero API Integration Request Payload
+    // Adjust endpoint and payload format according to PayHero's official documentation
     const payheroPayload = {
       amount: amount,
       phone_number: phoneNumber,
       channel_id: process.env.PAYHERO_CHANNEL_ID,
       provider: 'm-pesa',
-      callback_url: `${process.env.BACKEND_URL}/api/payments/payhero/webhook`,
-      external_reference: `ORD-${orderId}-${Date.now()}`
+      external_reference: externalReference,
+      callback_url: 'https://premium-rice-store-7.onrender.com/api/payments/payhero/webhook'
     };
 
-    const response = await axios.post('https://api.payhero.co.ke/v2/payments', payheroPayload, {
-      auth: {
-        username: process.env.PAYHERO_API_USERNAME,
-        password: process.env.PAYHERO_API_PASSWORD
+    const payheroResponse = await axios.post(
+      'https://backend.payhero.co.ke/api/v2/payments', // Verify exact PayHero API URL
+      payheroPayload,
+      {
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${process.env.PAYHERO_API_USERNAME}:${process.env.PAYHERO_API_PASSWORD}`).toString('base64')}`,
+          'Content-Type': 'application/json'
+        }
       }
-    });
+    );
 
-    const data = response.data;
-    const checkoutRequestId = data.CheckoutRequestID || data.reference;
+    const responseData = payheroResponse.data;
+    const checkoutRequestId = responseData.CheckoutRequestID || responseData.reference || externalReference;
 
-    // Create a pending transaction matching your actual database schema
-    await Transaction.create({
-      orderId: orderId,
+    // Save initial transaction record matching your database schema
+    const transaction = await Transaction.create({
+      orderId: order.id,
       userId: order.userId,
-      transactionRef: payheroPayload.external_reference,
+      transactionRef: externalReference,
       checkoutRequestId: checkoutRequestId,
       amount: amount,
       paymentMethod: 'mpesa',
       status: 'initiated',
-      rawResponse: data
+      rawResponse: responseData
     });
 
-    // Create or link a Payment record
+    // Save initial payment record
     await Payment.create({
-      orderId: orderId,
-      externalReference: payheroPayload.external_reference,
+      orderId: order.id,
+      externalReference: externalReference,
       provider: 'm-pesa',
       amount: amount,
       phoneNumber: phoneNumber,
       status: 'PENDING',
-      rawResponse: data
+      rawResponse: responseData
     });
 
     return res.status(200).json({
       success: true,
       message: 'STK push sent successfully',
-      data
+      data: responseData
     });
+
   } catch (error) {
     console.error('PayHero Initiation Error:', error.response?.data || error.message);
-    return res.status(500).json({ 
-      success: false, 
-      error: error.response?.data || error.message 
+    return res.status(500).json({
+      success: false,
+      error: error.response?.data?.message || error.message
     });
   }
 };
