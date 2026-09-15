@@ -2362,7 +2362,7 @@ export default function PremiumRiceStore() {
                     <input 
                       type="text" 
                       value={heroSettings.badgeText} 
-                      onChange={(e) => setHeroSettings(prev => ({ ...prev, badgeText: e.target.value }))}
+                    onChange={(e) => setHeroSettings((prev: any) => ({ ...prev, badgeText: e.target.value }))}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200"
                     />
                   </div>
