@@ -2984,7 +2984,7 @@ export default function PremiumRiceStore() {
                                     {p.brandName} <span className="text-slate-400 font-normal">({p.variety})</span>
                                   </td>
                                   <td className="p-4 text-slate-300">{p.weightKg} kg</td>
-                                  <td className="p-4 font-black text-emerald-400">{formatKES(p.basePrice || p.price)}</td>
+                                <td className="p-4 font-black text-emerald-400">{formatKES(p.basePrice || p.price || 0)}</td>
                                   <td className="p-4 text-slate-400">{formatKES(p.buyingPrice || 0)}</td>
                                   <td className="p-4">
                                     <span className={`px-2.5 py-0.5 rounded-full font-bold ${p.stockQuantity <= 10 ? 'bg-rose-950 text-rose-300 border border-rose-800' : 'bg-emerald-950 text-emerald-300 border border-emerald-800'}`}>
