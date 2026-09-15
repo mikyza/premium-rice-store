@@ -1,13 +1,14 @@
 "use client";
-import { Smartphone, Truck, /* other icons */ } from "lucide-react";
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   ShoppingCart, User as UserIcon, LogIn, Menu, X, Plus, 
   Trash2, Shield, Clock, Search, Edit, Package, Activity, 
   CheckCircle, AlertCircle, Settings, Leaf, ChevronRight,
   ShoppingBag, Users, Image as ImageIcon, Video, Download,
-  MapPin, Eye, RefreshCw, LogOut, Check, AlertTriangle, Smartphone, Truck, CreditCard,
-  BarChart2, DollarSign, Award, Calendar, Lock, Unlock, TrendingUp, Filter, FileText, Percent, Layers, Globe, Sliders, Bell, ArrowRight
+  MapPin, Eye, RefreshCw, LogOut, Check, AlertTriangle, 
+  Smartphone, Truck, CreditCard, BarChart2, DollarSign, 
+  Award, Calendar, Lock, Unlock, TrendingUp, Filter, 
+  FileText, Percent, Layers, Globe, Sliders, Bell, ArrowRight
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 
