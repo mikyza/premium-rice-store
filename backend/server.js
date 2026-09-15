@@ -1,3 +1,4 @@
+
 import dns from 'dns';
 dns.setDefaultResultOrder('ipv4first');
 
@@ -697,7 +698,7 @@ async function startServer() {
         await user.save();
 
         await resend.emails.send({
-          from: 'Mwea Rice Hub <onboarding@resend.dev>',
+          from: 'Bravo <bravo@resend.dev>',
           to: user.email,
           subject: 'Your Password Reset OTP Code',
           html: `
