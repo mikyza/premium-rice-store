@@ -1437,7 +1437,7 @@ export default function PremiumRiceStore() {
           status: initialPaymentInfo.status as any,
           receipt: initialPaymentInfo.receipt,
           reason: initialPaymentInfo.reason,
-          phoneNumber: checkoutData.stkPhoneNumber || user.phoneNumber || 'N/A',
+          phoneNumber: checkoutData.stkPhoneNumber || user?.phoneNumber || 'N/A',
           amount: cartGrandTotal,
           isPolling: true
         });
