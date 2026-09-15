@@ -2428,178 +2428,139 @@ export default function PremiumRiceStore() {
 
           </div>
         )}
-
       </main>
 
       {/* REAL-TIME PAYHERO PAYMENT STATUS VERIFICATION MODAL */}
       {activePaymentModal.isOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md rounded-3xl p-8 shadow-2xl border border-emerald-100 space-y-6 text-center animate-in zoom-in-95">
+          <div className="bg-white rounded-3xl p-8 max-w-sm w-full space-y-6 text-center shadow-2xl">
             
-            {/* Modal Icon based on Payment Status */}
             {activePaymentModal.status === 'PENDING' && (
-              <div className="w-20 h-20 rounded-full bg-amber-50 text-amber-500 flex items-center justify-center mx-auto border-4 border-amber-100 animate-pulse">
-                <Clock className="w-10 h-10 animate-spin" />
+              <div className="space-y-4">
+                <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto animate-pulse">
+                  <RefreshCw className="w-8 h-8 text-amber-600 animate-spin" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-extrabold text-slate-900">Awaiting Handset Input</h3>
+                  <p className="text-sm text-slate-500 mt-2">Check your phone <strong>{activePaymentModal.phoneNumber}</strong> for the M-Pesa STK push. Enter your PIN to approve {formatKES(activePaymentModal.amount)}.</p>
+                </div>
               </div>
             )}
 
             {activePaymentModal.status === 'PAID' && (
-              <div className="w-20 h-20 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border-4 border-emerald-100">
-                <CheckCircle className="w-10 h-10" />
+              <div className="space-y-4">
+                <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">
+                  <CheckCircle className="w-8 h-8 text-emerald-600" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-extrabold text-slate-900">Payment Verified!</h3>
+                  <p className="text-sm text-slate-500 mt-2">M-Pesa Receipt: <strong>{activePaymentModal.receipt}</strong></p>
+                  <p className="text-xs text-slate-400 mt-1">Your agricultural order is now being processed.</p>
+                </div>
               </div>
             )}
 
             {activePaymentModal.status === 'FAILED' && (
-              <div className="w-20 h-20 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border-4 border-rose-100">
-                <AlertCircle className="w-10 h-10" />
+              <div className="space-y-4">
+                <div className="w-16 h-16 rounded-full bg-rose-100 flex items-center justify-center mx-auto">
+                  <AlertTriangle className="w-8 h-8 text-rose-600" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-extrabold text-slate-900">Transaction Failed</h3>
+                  <p className="text-sm text-rose-600 font-medium mt-2">{activePaymentModal.reason || 'Transaction was declined, timed out, or cancelled.'}</p>
+                </div>
               </div>
             )}
 
-            {/* Modal Headings */}
-            <div className="space-y-2">
-              <h3 className="text-2xl font-black text-slate-900">
-                {activePaymentModal.status === 'PENDING' && 'Awaiting M-Pesa PIN'}
-                {activePaymentModal.status === 'PAID' && 'Payment Verified!'}
-                {activePaymentModal.status === 'FAILED' && 'Payment Failed'}
-              </h3>
-              
-              <p className="text-xs text-slate-500">
-                {activePaymentModal.status === 'PENDING' && `STK push prompt sent to ${activePaymentModal.phoneNumber}. Please enter your M-Pesa PIN on your phone.`}
-                {activePaymentModal.status === 'PAID' && `Order #${activePaymentModal.orderId} payment confirmed via PayHero.`}
-                {activePaymentModal.status === 'FAILED' && (activePaymentModal.reason || 'Transaction was cancelled or declined on your handset.')}
-              </p>
-            </div>
-
-            {/* Transaction Card */}
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-2 text-xs">
-              <div className="flex justify-between text-slate-600">
-                <span>Order Reference:</span>
-                <span className="font-bold text-slate-900">#{activePaymentModal.orderId}</span>
-              </div>
-              <div className="flex justify-between text-slate-600">
-                <span>Amount Prompted:</span>
-                <span className="font-bold text-emerald-700">{formatKES(activePaymentModal.amount)}</span>
-              </div>
-              {activePaymentModal.receipt && (
-                <div className="flex justify-between text-emerald-800 font-extrabold border-t border-slate-200 pt-2">
-                  <span>M-Pesa Receipt:</span>
-                  <span>{activePaymentModal.receipt}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Action Buttons */}
-            <div className="space-y-2">
-              {activePaymentModal.status === 'PENDING' && (
-                <p className="text-[11px] text-amber-600 font-bold flex items-center justify-center gap-1">
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Live Polling Backend Status...
-                </p>
-              )}
-
-              {activePaymentModal.status === 'FAILED' && (
-                <button 
-                  onClick={() => handleRetryStkPush(activePaymentModal.orderId!, activePaymentModal.phoneNumber, activePaymentModal.amount)}
-                  className="w-full py-3 rounded-xl bg-emerald-600 text-white font-bold text-xs"
-                >
-                  Resend STK Push Prompt
-                </button>
-              )}
-
-              <button 
-                onClick={() => {
-                  setActivePaymentModal(prev => ({ ...prev, isOpen: false }));
-                  setView('profile');
-                }}
-                className="w-full py-3 rounded-xl bg-slate-900 text-white font-bold text-xs hover:bg-slate-800"
-              >
-                View Order History
-              </button>
-            </div>
-
+            <button 
+              onClick={() => setActivePaymentModal(prev => ({ ...prev, isOpen: false }))}
+              className="w-full py-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm transition-colors"
+            >
+              Close Verification Screen
+            </button>
           </div>
         </div>
       )}
 
-      {/* QUICK VIEW PRODUCT MODAL */}
+      {/* QUICK VIEW CATALOG MODAL */}
       {quickViewProduct && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl border border-slate-100 space-y-6 relative animate-in fade-in">
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-3xl w-full relative overflow-hidden shadow-2xl">
             <button 
-              onClick={() => setQuickViewProduct(null)}
-              className="absolute top-4 right-4 p-2 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200"
+              onClick={() => setQuickViewProduct(null)} 
+              className="absolute top-4 right-4 z-10 p-2 bg-slate-100/50 hover:bg-rose-100 hover:text-rose-600 text-slate-600 rounded-full backdrop-blur-sm transition-all"
             >
               <X className="w-5 h-5" />
             </button>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="h-64 md:h-full bg-slate-50 rounded-2xl overflow-hidden relative">
+                {flashSale.active && quickViewProduct.flashSalePrice && (
+                  <div className="absolute top-4 left-4 bg-rose-500 text-white text-[10px] font-black uppercase px-3 py-1.5 rounded-full animate-pulse shadow-md z-10">
+                    Flash Discount Active
+                  </div>
+                )}
+                <img 
+                  src={quickViewProduct.imageUrl || 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=800&q=80'} 
+                  alt={quickViewProduct.brandName} 
+                  className="w-full h-full object-cover"
+                />
+              </div>
 
-            <div className="flex flex-col sm:flex-row gap-6">
-              <img 
-                src={quickViewProduct.imageUrl || 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=600&q=80'} 
-                alt={quickViewProduct.brandName} 
-                className="w-full sm:w-48 h-48 rounded-2xl object-cover"
-              />
-
-              <div className="space-y-3 text-xs flex-1">
-                <span className="bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded-full uppercase text-[10px]">
-                  {quickViewProduct.variety}
-                </span>
-                <h3 className="text-xl font-extrabold text-slate-900">{quickViewProduct.brandName}</h3>
-                <p className="text-slate-500">Weight: <span className="font-bold text-slate-800">{quickViewProduct.weightKg} kg Sack</span></p>
-
-                <div className="pt-2">
-                  <p className="text-2xl font-black text-emerald-700">
-                    {formatKES(flashSale.active && quickViewProduct.flashSalePrice ? quickViewProduct.flashSalePrice : (quickViewProduct.basePrice || quickViewProduct.price))}
-                  </p>
+              <div className="flex flex-col justify-center space-y-6">
+                <div>
+                  <span className="text-xs font-bold text-emerald-600 uppercase tracking-widest">{quickViewProduct.variety}</span>
+                  <h3 className="text-3xl font-black text-slate-900 leading-tight mt-1">{quickViewProduct.brandName}</h3>
                 </div>
 
-                <button 
-                  onClick={() => {
-                    addToCart(quickViewProduct);
-                    setQuickViewProduct(null);
-                  }}
-                  className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm"
-                >
-                  Add to Shopping Cart
-                </button>
+                <div className="space-y-1">
+                  <div className="flex items-end gap-3">
+                    <p className="text-4xl font-black text-emerald-700">
+                      {formatKES(flashSale.active && quickViewProduct.flashSalePrice ? quickViewProduct.flashSalePrice : (quickViewProduct.basePrice || quickViewProduct.price))}
+                    </p>
+                    {flashSale.active && quickViewProduct.flashSalePrice && (
+                      <p className="text-lg font-bold text-slate-400 line-through pb-1">
+                        {formatKES(quickViewProduct.basePrice || quickViewProduct.price)}
+                      </p>
+                    )}
+                  </div>
+                  <p className="text-sm font-medium text-slate-500">Includes {quickViewProduct.weightKg}kg agricultural sack</p>
+                </div>
+
+                <div className="pt-6 border-t border-slate-100 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <Package className="w-5 h-5 text-emerald-600" />
+                    <span className="font-bold">{quickViewProduct.stockQuantity} units available</span>
+                  </div>
+                  
+                  <button 
+                    onClick={() => { addToCart(quickViewProduct); setQuickViewProduct(null); }} 
+                    className="px-8 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition-all"
+                  >
+                    <ShoppingCart className="w-5 h-5" /> Add to Cart
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* STOREFOOTER */}
-      <footer className="bg-slate-950 text-slate-400 py-12 border-t border-slate-900 text-xs">
-        <div className="container mx-auto px-4 grid grid-cols-1 md:grid-cols-4 gap-8">
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 text-white">
-              <Leaf className="w-5 h-5 text-emerald-500" />
-              <span className="font-black tracking-wider text-sm">MWEA RICE HUB</span>
-            </div>
-            <p className="text-slate-500 leading-relaxed">Kenya's premier digital distribution platform for pure aromatic Pishori and Basmati rice direct from Kirinyaga paddy fields.</p>
+      {/* FOOTER */}
+      <footer className="bg-slate-950 text-slate-400 py-12 border-t border-emerald-900/30 mt-auto">
+        <div className="container mx-auto px-4 flex flex-col items-center justify-center space-y-4 text-center">
+          <div className="flex items-center gap-2 text-white opacity-90">
+            <Leaf className="w-6 h-6 text-emerald-500" />
+            <span className="text-xl font-black tracking-widest uppercase">Mwea Rice Hub</span>
           </div>
-
-          <div>
-            <h5 className="text-white font-bold mb-3 uppercase tracking-wider text-[11px]">Grain Varieties</h5>
-            <ul className="space-y-2 text-slate-400">
-              <li>• Pure Aromatic Pishori Grade 1</li>
-              <li>• Kaisari Super Long Grain Basmati</li>
-              <li>• Nutritious Brown Whole Pishori</li>
-              <li>• Commercial Hotel Bulk 50kg Sacks</li>
-            </ul>
+          <p className="text-sm max-w-md mx-auto">Authentic aromatic agricultural Pishori grains directly sourced from the fields of Kirinyaga, delivered instantly to your doorstep.</p>
+          <div className="pt-4 flex items-center gap-6 text-xs font-bold uppercase tracking-wider text-slate-500">
+            <span>© {new Date().getFullYear()} Mwea Rice Hub</span>
+            <span className="w-1 h-1 rounded-full bg-slate-600" />
+            <span>47 County Supply</span>
+            <span className="w-1 h-1 rounded-full bg-slate-600" />
+            <span>Secure M-Pesa Checkouts</span>
           </div>
-
-          <div>
-            <h5 className="text-white font-bold mb-3 uppercase tracking-wider text-[11px]">47 County Logistics</h5>
-            <p className="text-slate-500 leading-relaxed">Integrated freight overrides covering Nairobi, Kiambu, Kirinyaga, Mombasa, Nakuru, Kisumu, and all 47 Republic of Kenya counties.</p>
-          </div>
-
-          <div>
-            <h5 className="text-white font-bold mb-3 uppercase tracking-wider text-[11px]">Payment Security</h5>
-            <p className="text-slate-500 leading-relaxed">Automated M-Pesa STK Push powered by PayHero. Real-time webhook reconciliation and audit log tracking.</p>
-          </div>
-        </div>
-
-        <div className="container mx-auto px-4 pt-8 mt-8 border-t border-slate-900 text-center text-slate-600 text-[11px]">
-          © {new Date().getFullYear()} Mwea Rice Hub & Agricultural Milling Systems. All Rights Reserved.
         </div>
       </footer>
 
@@ -2608,69 +2569,60 @@ export default function PremiumRiceStore() {
 }
 
 // ==========================================
-// 3. REUSABLE PRODUCT CARD COMPONENT
+// 3. PRODUCT CARD COMPONENT
 // ==========================================
-function ProductCard({ 
-  product, 
-  flashActive, 
-  onAddToCart, 
-  onQuickView 
-}: { 
-  product: any; 
-  flashActive: boolean; 
-  onAddToCart: () => void; 
-  onQuickView: () => void; 
-}) {
+function ProductCard({ product, flashActive, onAddToCart, onQuickView }: { product: any, flashActive: boolean, onAddToCart: () => void, onQuickView: () => void }) {
   const effectivePrice = flashActive && product.flashSalePrice ? product.flashSalePrice : (product.basePrice || product.price || 0);
+  const isDiscounted = flashActive && product.flashSalePrice && product.flashSalePrice < (product.basePrice || product.price);
 
   return (
-    <div className="bg-white rounded-3xl p-5 shadow-sm hover:shadow-xl transition-all border border-emerald-100 flex flex-col justify-between group space-y-4">
+    <div className="bg-white rounded-3xl p-4 border border-emerald-100 shadow-sm hover:shadow-xl transition-shadow group relative overflow-hidden flex flex-col h-full">
+      {isDiscounted && (
+        <div className="absolute top-4 left-4 z-10 bg-rose-500 text-white text-[10px] font-black uppercase px-2.5 py-1 rounded-full shadow-md animate-pulse">
+          Active Sale
+        </div>
+      )}
       
-      <div className="relative overflow-hidden rounded-2xl aspect-square bg-slate-50">
+      <div className="relative h-48 rounded-2xl overflow-hidden mb-4 bg-slate-50">
         <img 
           src={product.imageUrl || 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=600&q=80'} 
-          alt={product.brandName} 
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+          alt={product.brandName}
+          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
         />
-
-        {flashActive && product.flashSalePrice && (
-          <span className="absolute top-3 left-3 bg-rose-600 text-white font-black text-[10px] px-2.5 py-1 rounded-full uppercase shadow-md">
-            Flash Deal
-          </span>
-        )}
-
         <button 
           onClick={onQuickView}
-          className="absolute bottom-3 right-3 p-2 bg-white/90 backdrop-blur-md rounded-xl text-slate-700 hover:text-emerald-600 shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
-          title="Quick Preview"
+          className="absolute inset-0 bg-slate-900/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm"
         >
-          <Eye className="w-4 h-4" />
+          <span className="bg-white text-slate-900 px-4 py-2 rounded-full font-bold text-xs flex items-center gap-1.5 shadow-xl transform translate-y-4 group-hover:translate-y-0 transition-transform">
+            <Eye className="w-4 h-4" /> Quick View
+          </span>
         </button>
       </div>
-
-      <div className="space-y-2">
-        <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">{product.variety || 'Aromatic Rice'}</span>
-        <h4 className="font-extrabold text-slate-900 text-base line-clamp-1">{product.brandName}</h4>
-        <p className="text-xs text-slate-500">{product.weightKg} kg Packaged Sack</p>
-
-        <div className="flex items-center justify-between pt-2">
+      
+      <div className="flex-1 flex flex-col">
+        <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-1">{product.variety}</p>
+        <h4 className="font-extrabold text-slate-900 text-lg leading-tight mb-2 line-clamp-2">{product.brandName}</h4>
+        
+        <div className="mt-auto pt-4 flex items-end justify-between border-t border-slate-100">
           <div>
-            <p className="text-lg font-black text-emerald-700">{formatKES(effectivePrice)}</p>
-            {flashActive && product.flashSalePrice && (
-              <p className="text-[10px] text-slate-400 line-through">{formatKES(product.basePrice)}</p>
-            )}
+            <p className="text-xs text-slate-500 font-medium mb-0.5">{product.weightKg} kg Sack</p>
+            <div className="flex items-center gap-2">
+              <p className="text-lg font-black text-emerald-700">{formatKES(effectivePrice)}</p>
+              {isDiscounted && (
+                <p className="text-[10px] font-bold text-slate-400 line-through">{formatKES(product.basePrice || product.price)}</p>
+              )}
+            </div>
           </div>
-
+          
           <button 
             onClick={onAddToCart}
-            className="p-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-md shadow-emerald-600/20"
+            className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white flex items-center justify-center transition-colors shadow-sm"
             title="Add to Cart"
           >
-            <ShoppingCart className="w-4 h-4" />
+            <Plus className="w-5 h-5" />
           </button>
         </div>
       </div>
-
     </div>
   );
 }
