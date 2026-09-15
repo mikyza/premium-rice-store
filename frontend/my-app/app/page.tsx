@@ -2372,7 +2372,7 @@ export default function PremiumRiceStore() {
                     <input 
                       type="text" 
                       value={heroSettings.ctaButtonText} 
-                      onChange={(e) => setHeroSettings(prev => ({ ...prev, ctaButtonText: e.target.value }))}
+                   onChange={(e) => setHeroSettings((prev: any) => ({ ...prev, ctaButtonText: e.target.value }))}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200"
                     />
                   </div>
@@ -2382,7 +2382,7 @@ export default function PremiumRiceStore() {
                     <input 
                       type="text" 
                       value={heroSettings.video1} 
-                      onChange={(e) => setHeroSettings(prev => ({ ...prev, video1: e.target.value }))}
+                   onChange={(e) => setHeroSettings((prev: any) => ({ ...prev, video1: e.target.value }))}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200"
                     />
                   </div>
@@ -2392,7 +2392,7 @@ export default function PremiumRiceStore() {
                     <input 
                       type="text" 
                       value={heroSettings.img1} 
-                      onChange={(e) => setHeroSettings(prev => ({ ...prev, img1: e.target.value }))}
+                   onChange={(e) => setHeroSettings((prev: any) => ({ ...prev, img1: e.target.value }))}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200"
                     />
                   </div>
@@ -2402,7 +2402,7 @@ export default function PremiumRiceStore() {
                     <input 
                       type="text" 
                       value={heroSettings.announcementTicker} 
-                      onChange={(e) => setHeroSettings(prev => ({ ...prev, announcementTicker: e.target.value }))}
+                     onChange={(e) => setHeroSettings((prev: any) => ({ ...prev, announcementTicker: e.target.value }))}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200"
                     />
                   </div>
@@ -2412,7 +2412,7 @@ export default function PremiumRiceStore() {
                     <input 
                       type="number" 
                       value={heroSettings.overlayOpacity} 
-                      onChange={(e) => setHeroSettings(prev => ({ ...prev, overlayOpacity: e.target.value }))}
+                     onChange={(e) => setHeroSettings((prev: any) => ({ ...prev, overlayOpacity: e.target.value }))}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200"
                     />
                   </div>
