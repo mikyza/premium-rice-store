@@ -2342,7 +2342,7 @@ export default function PremiumRiceStore() {
                     <input 
                       type="text" 
                       value={heroSettings.title} 
-                      onChange={(e) => setHeroSettings(prev => ({ ...prev, title: e.target.value }))}
+                    onChange={(e) => setHeroSettings((prev: any) => ({ ...prev, title: e.target.value }))}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200"
                     />
                   </div>
