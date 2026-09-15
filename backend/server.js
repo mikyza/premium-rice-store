@@ -1,4 +1,3 @@
-
 import dns from 'dns';
 dns.setDefaultResultOrder('ipv4first');
 
@@ -32,8 +31,46 @@ const hostname = process.env.HOSTNAME || 'localhost';
 const port = parseInt(process.env.PORT || '5000', 10);
 const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
 
-// Resend Email Client Initialization
-const resend = new Resend(process.env.RESEND_API_KEY || 're_dR7G9AZb_MQdHKVHqAj44JSQF6gxZmEab');
+// Brevo & Resend Email Configuration (Key loaded strictly from process.env)
+const BREVO_API_KEY = process.env.BREVO_API_KEY;
+const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || process.env.SENDER_EMAIL || 'noreply@mwearicehub.com';
+const BREVO_SENDER_NAME = process.env.BREVO_SENDER_NAME || process.env.SENDER_NAME || 'Mwea Rice Hub';
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// Helper function to send email OTP via Brevo API v3
+const sendBrevoOtpEmail = async (toEmail, toName, otpCode) => {
+  if (!process.env.BREVO_API_KEY) {
+    throw new Error('BREVO_API_KEY is not defined in system environment variables');
+  }
+
+  return await axios.post(
+    'https://api.brevo.com/v3/smtp/email',
+    {
+      sender: { name: BREVO_SENDER_NAME, email: BREVO_SENDER_EMAIL },
+      to: [{ email: toEmail, name: toName || 'Valued Customer' }],
+      subject: 'Your Password Reset OTP Code',
+      htmlContent: `
+        <div style="font-family: Arial, sans-serif; padding: 24px; color: #333; max-width: 600px; margin: auto; background: #f9f9f9; border-radius: 8px;">
+          <h2 style="color: #2e7d32;">Password Reset OTP</h2>
+          <p>Hello ${toName || 'Valued Customer'},</p>
+          <p>You requested a password reset for your Mwea Rice Hub account. Use the 6-digit OTP code below to proceed:</p>
+          <div style="background: #e8f5e9; color: #2e7d32; font-size: 32px; font-weight: bold; text-align: center; padding: 16px; border-radius: 6px; letter-spacing: 6px; margin: 20px 0;">
+            ${otpCode}
+          </div>
+          <p style="font-size: 13px; color: #666;">This code is valid for 10 minutes. If you did not request this, please ignore this email.</p>
+        </div>
+      `
+    },
+    {
+      headers: {
+        'accept': 'application/json',
+        'api-key': process.env.BREVO_API_KEY,
+        'content-type': 'application/json'
+      }
+    }
+  );
+};
 
 // Pay Hero Credentials Configuration
 const getPayHeroAuthHeader = () => {
@@ -674,7 +711,7 @@ async function startServer() {
       }
     });
 
-    // --- FORGOT PASSWORD (OTP GENERATION & EMAIL VIA RESEND) ---
+    // --- FORGOT PASSWORD (OTP GENERATION & EMAIL VIA BREVO) ---
     expressApp.post('/api/user/forgot-password', async (req, res) => {
       try {
         const { email } = req.body || {};
@@ -697,27 +734,13 @@ async function startServer() {
         user.resetTokenExpires = tokenExpiration;
         await user.save();
 
-        await resend.emails.send({
-          from: 'Bravo <bravo@resend.dev>',
-          to: user.email,
-          subject: 'Your Password Reset OTP Code',
-          html: `
-            <div style="font-family: Arial, sans-serif; padding: 24px; color: #333; max-width: 600px; margin: auto; background: #f9f9f9; border-radius: 8px;">
-              <h2 style="color: #2e7d32;">Password Reset OTP</h2>
-              <p>Hello ${user.fullName || 'Valued Customer'},</p>
-              <p>You requested a password reset for your Mwea Rice Hub account. Use the 6-digit OTP code below to proceed:</p>
-              <div style="background: #e8f5e9; color: #2e7d32; font-size: 32px; font-weight: bold; text-align: center; padding: 16px; border-radius: 6px; letter-spacing: 6px; margin: 20px 0;">
-                ${otpCode}
-              </div>
-              <p style="font-size: 13px; color: #666;">This code is valid for 10 minutes. If you did not request this, please ignore this email.</p>
-            </div>
-          `
-        });
+        // Send OTP via Brevo API endpoint
+        await sendBrevoOtpEmail(user.email, user.fullName, otpCode);
 
-        console.log(`📧 Password reset OTP sent to ${user.email}`);
+        console.log(`📧 Password reset OTP sent to ${user.email} via Brevo`);
         res.status(200).json({ message: 'If an account with that email exists, a password reset OTP has been sent.' });
       } catch (err) {
-        console.error('❌ Forgot Password OTP Error:', err);
+        console.error('❌ Forgot Password OTP Error via Brevo:', err.response?.data || err.message);
         res.status(500).json({ error: 'Failed to dispatch password reset OTP email' });
       }
     });
@@ -1027,7 +1050,6 @@ async function startServer() {
           return res.status(400).json({ error: 'Phone number parameter is required for STK push' });
         }
 
-        // Updated for Render Production URL
         const hostUrl = process.env.BASE_URL || 'https://premium-rice-store-7.onrender.com';
         const callbackEndpoint = `${hostUrl}/api/payments/payhero/callback`;
 
@@ -1191,7 +1213,6 @@ async function startServer() {
 
         if (paymentMethod === 'mpesa_stk') {
           const targetPhone = mpesaPhoneNumber || req.user.phoneNumber;
-          // Updated for Render Production URL
           const hostUrl = process.env.BASE_URL || 'https://premium-rice-store-7.onrender.com';
           const callbackEndpoint = `${hostUrl}/api/payments/payhero/callback`;
 
