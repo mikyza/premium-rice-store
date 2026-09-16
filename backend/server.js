@@ -36,7 +36,8 @@ const BREVO_API_KEY = process.env.BREVO_API_KEY;
 const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || process.env.SENDER_EMAIL || 'noreply@mwearicehub.com';
 const BREVO_SENDER_NAME = process.env.BREVO_SENDER_NAME || process.env.SENDER_NAME || 'Mwea Rice Hub';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+import { Resend } from 'resend';
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 // Helper function to send email OTP via Brevo API v3
 const sendBrevoOtpEmail = async (toEmail, toName, otpCode) => {
