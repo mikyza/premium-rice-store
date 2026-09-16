@@ -14,7 +14,7 @@ import fs from 'fs';
 import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
-import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 import { handlePayHeroWebhook } from './controllers/webhookController.js';
 import { initiatePayHeroPayment } from './controllers/paymentController.js';
 
@@ -31,46 +31,46 @@ const hostname = process.env.HOSTNAME || 'localhost';
 const port = parseInt(process.env.PORT || '5000', 10);
 const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
 
-// Brevo & Resend Email Configuration (Key loaded strictly from process.env)
-const BREVO_API_KEY = process.env.BREVO_API_KEY;
-const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || process.env.SENDER_EMAIL || 'noreply@mwearicehub.com';
-const BREVO_SENDER_NAME = process.env.BREVO_SENDER_NAME || process.env.SENDER_NAME || 'Mwea Rice Hub';
+// ==========================================
+// EMAIL CONFIGURATION (Nodemailer SMTP)
+// ==========================================
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.SMTP_PORT || '587', 10),
+  secure: process.env.SMTP_PORT === '465', // true for 465, false for 587
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
+const EMAIL_FROM = process.env.EMAIL_FROM || process.env.EMAIL_USER || 'noreply@mwearicehub.com';
+const SENDER_NAME = 'Mwea Rice Hub';
 
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-
-// Helper function to send email OTP via Brevo API v3
-const sendBrevoOtpEmail = async (toEmail, toName, otpCode) => {
-  if (!process.env.BREVO_API_KEY) {
-    throw new Error('BREVO_API_KEY is not defined in system environment variables');
+// Helper function to send email OTP via Nodemailer
+const sendOtpEmail = async (toEmail, toName, otpCode) => {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.warn('WARNING: SMTP Email credentials are not defined in system environment variables');
   }
 
-  return await axios.post(
-    'https://api.brevo.com/v3/smtp/email',
-    {
-      sender: { name: BREVO_SENDER_NAME, email: BREVO_SENDER_EMAIL },
-      to: [{ email: toEmail, name: toName || 'Valued Customer' }],
-      subject: 'Your Password Reset OTP Code',
-      htmlContent: `
-        <div style="font-family: Arial, sans-serif; padding: 24px; color: #333; max-width: 600px; margin: auto; background: #f9f9f9; border-radius: 8px;">
-          <h2 style="color: #2e7d32;">Password Reset OTP</h2>
-          <p>Hello ${toName || 'Valued Customer'},</p>
-          <p>You requested a password reset for your Mwea Rice Hub account. Use the 6-digit OTP code below to proceed:</p>
-          <div style="background: #e8f5e9; color: #2e7d32; font-size: 32px; font-weight: bold; text-align: center; padding: 16px; border-radius: 6px; letter-spacing: 6px; margin: 20px 0;">
-            ${otpCode}
-          </div>
-          <p style="font-size: 13px; color: #666;">This code is valid for 10 minutes. If you did not request this, please ignore this email.</p>
+  const mailOptions = {
+    from: `"${SENDER_NAME}" <${EMAIL_FROM}>`,
+    to: toEmail,
+    subject: 'Your Password Reset OTP Code',
+    html: `
+      <div style="font-family: Arial, sans-serif; padding: 24px; color: #333; max-width: 600px; margin: auto; background: #f9f9f9; border-radius: 8px;">
+        <h2 style="color: #2e7d32;">Password Reset OTP</h2>
+        <p>Hello ${toName || 'Valued Customer'},</p>
+        <p>You requested a password reset for your Mwea Rice Hub account. Use the 6-digit OTP code below to proceed:</p>
+        <div style="background: #e8f5e9; color: #2e7d32; font-size: 32px; font-weight: bold; text-align: center; padding: 16px; border-radius: 6px; letter-spacing: 6px; margin: 20px 0;">
+          ${otpCode}
         </div>
-      `
-    },
-    {
-      headers: {
-        'accept': 'application/json',
-        'api-key': process.env.BREVO_API_KEY,
-        'content-type': 'application/json'
-      }
-    }
-  );
+        <p style="font-size: 13px; color: #666;">This code is valid for 10 minutes. If you did not request this, please ignore this email.</p>
+      </div>
+    `
+  };
+
+  return await transporter.sendMail(mailOptions);
 };
 
 // Pay Hero Credentials Configuration
@@ -712,7 +712,7 @@ async function startServer() {
       }
     });
 
-    // --- FORGOT PASSWORD (OTP GENERATION & EMAIL VIA BREVO) ---
+    // --- FORGOT PASSWORD (OTP GENERATION & EMAIL VIA SMTP) ---
     expressApp.post('/api/user/forgot-password', async (req, res) => {
       try {
         const { email } = req.body || {};
@@ -735,13 +735,13 @@ async function startServer() {
         user.resetTokenExpires = tokenExpiration;
         await user.save();
 
-        // Send OTP via Brevo API endpoint
-        await sendBrevoOtpEmail(user.email, user.fullName, otpCode);
+        // Send OTP via Nodemailer SMTP endpoint
+        await sendOtpEmail(user.email, user.fullName, otpCode);
 
-        console.log(`📧 Password reset OTP sent to ${user.email} via Brevo`);
+        console.log(`📧 Password reset OTP sent to ${user.email} via SMTP`);
         res.status(200).json({ message: 'If an account with that email exists, a password reset OTP has been sent.' });
       } catch (err) {
-        console.error('❌ Forgot Password OTP Error via Brevo:', err.response?.data || err.message);
+        console.error('❌ Forgot Password OTP Error via SMTP:', err.message);
         res.status(500).json({ error: 'Failed to dispatch password reset OTP email' });
       }
     });
