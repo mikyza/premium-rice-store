@@ -44,23 +44,25 @@ const sendBrevoOtpEmail = async (toEmail, toName, otpCode) => {
     throw new Error('BREVO_API_KEY is not defined in system environment variables');
   }
 
+  const htmlBody = [
+    '<div style="font-family: Arial, sans-serif; padding: 24px; color: #333; max-width: 600px; margin: auto; background: #f9f9f9; border-radius: 8px;">',
+    '  <h2 style="color: #2e7d32;">Password Reset OTP</h2>',
+    '  <p>Hello ' + (toName || 'Valued Customer') + ',</p>',
+    '  <p>You requested a password reset for your Mwea Rice Hub account. Use the 6-digit OTP code below to proceed:</p>',
+    '  <div style="background: #e8f5e9; color: #2e7d32; font-size: 32px; font-weight: bold; text-align: center; padding: 16px; border-radius: 6px; letter-spacing: 6px; margin: 20px 0;">',
+    '    ' + otpCode,
+    '  </div>',
+    '  <p style="font-size: 13px; color: #666;">This code is valid for 10 minutes. If you did not request this, please ignore this email.</p>',
+    '</div>'
+  ].join('\n');
+
   return await axios.post(
     'https://api.brevo.com/v3/smtp/email',
     {
       sender: { name: BREVO_SENDER_NAME, email: BREVO_SENDER_EMAIL },
       to: [{ email: toEmail, name: toName || 'Valued Customer' }],
       subject: 'Your Password Reset OTP Code',
-      htmlContent: `
-        <div style="font-family: Arial, sans-serif; padding: 24px; color: #333; max-width: 600px; margin: auto; background: #f9f9f9; border-radius: 8px;">
-          <h2 style="color: #2e7d32;">Password Reset OTP</h2>
-          <p>Hello ${toName || 'Valued Customer'},</p>
-          <p>You requested a password reset for your Mwea Rice Hub account. Use the 6-digit OTP code below to proceed:</p>
-          <div style="background: #e8f5e9; color: #2e7d32; font-size: 32px; font-weight: bold; text-align: center; padding: 16px; border-radius: 6px; letter-spacing: 6px; margin: 20px 0;">
-            ${otpCode}
-          </div>
-          <p style="font-size: 13px; color: #666;">This code is valid for 10 minutes. If you did not request this, please ignore this email.</p>
-        </div>
-      `
+      htmlContent: htmlBody
     },
     {
       headers: {
@@ -71,7 +73,6 @@ const sendBrevoOtpEmail = async (toEmail, toName, otpCode) => {
     }
   );
 };
-
 // Pay Hero Credentials Configuration
 const getPayHeroAuthHeader = () => {
   if (process.env.PAYHERO_BASIC_AUTH) {
