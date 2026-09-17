@@ -97,7 +97,7 @@ export interface AuditLog {
   performedByName: string;
   performedByEmail?: string;
   module: string;
-  details?: string;
+  details?: any;
   ipAddress?: string;
   timestamp: string;
 }
@@ -169,10 +169,10 @@ export interface ToastMessage {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL 
   ? `${process.env.NEXT_PUBLIC_API_URL}/api` 
-  : 'https://premium-rice-store-7.onrender.com/api';
+  : 'http://localhost:5000/api';
 
 const SOCKET_URL = process.env.NEXT_PUBLIC_API_URL 
-  || 'https://premium-rice-store-7.onrender.com';
+  || 'http://localhost:5000';
 
 const ALL_47_COUNTIES = [
   "Mombasa", "Kwale", "Kilifi", "Tana River", "Lamu", "Taita-Taveta", "Garissa", "Wajir", "Mandera", "Marsabit", 
@@ -287,7 +287,6 @@ const formatCountdownMs = (ms: number) => {
 
 // ============================================================================
 // 4. CUSTOM FINANCIAL GROWTH CHART COMPONENT (SVG-BASED)
-// Dynamic graph showing real monthly growth from database with empty month visualizers
 // ============================================================================
 
 interface FinancialGrowthChartProps {
@@ -307,7 +306,6 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
 }) => {
   const [metric, setMetric] = useState<'revenue' | 'profit' | 'kg'>('revenue');
 
-  // Normalize 12 months array ensuring all 12 months (Jan - Dec) exist even if empty
   const fullYearMonths = useMemo(() => {
     const list: FinancialMonth[] = [];
     for (let i = 0; i < 12; i++) {
@@ -330,11 +328,10 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
     return list;
   }, [monthlyData, selectedYear]);
 
-  // Compute maximum values for SVG height scaling
   const maxValue = useMemo(() => {
     let max = 0;
     fullYearMonths.forEach(m => {
-      const val = metric === 'revenue' ? m.totalRevenue : metric === 'profit' ? m.netProfit : m.totalKgSold;
+      const val = metric === 'revenue' ? Number(m.totalRevenue || 0) : metric === 'profit' ? Number(m.netProfit || 0) : Number(m.totalKgSold || 0);
       if (val > max) max = val;
     });
     return max > 0 ? max * 1.15 : 10000;
@@ -347,10 +344,9 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
   const graphWidth = svgWidth - paddingX * 2;
   const graphHeight = svgHeight - paddingY * 2;
 
-  // Generate SVG Points for Line / Area Chart
   const points = useMemo(() => {
     return fullYearMonths.map((m, idx) => {
-      const val = metric === 'revenue' ? m.totalRevenue : metric === 'profit' ? m.netProfit : m.totalKgSold;
+      const val = metric === 'revenue' ? Number(m.totalRevenue || 0) : metric === 'profit' ? Number(m.netProfit || 0) : Number(m.totalKgSold || 0);
       const x = paddingX + (idx / 11) * graphWidth;
       const y = svgHeight - paddingY - (val / maxValue) * graphHeight;
       return { x, y, val, month: m.monthName, orders: m.orderCount, data: m };
@@ -372,7 +368,6 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
   return (
     <div className="bg-slate-900 text-slate-100 rounded-3xl p-6 border border-emerald-900/60 shadow-2xl space-y-6">
       
-      {/* Top Controls & Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
         <div>
           <div className="flex items-center gap-2">
@@ -385,7 +380,6 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Year Switcher Dropdown */}
           <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700 text-xs font-bold">
             <Calendar className="w-4 h-4 text-emerald-400" />
             <span className="text-slate-300">Select Year:</span>
@@ -400,7 +394,6 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
             </select>
           </div>
 
-          {/* Metric Selector Pills */}
           <div className="flex items-center bg-slate-800/80 p-1 rounded-xl border border-slate-700 text-xs font-bold">
             <button 
               onClick={() => setMetric('revenue')}
@@ -424,7 +417,6 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
         </div>
       </div>
 
-      {/* SVG Chart Graphics */}
       <div className="relative w-full overflow-x-auto">
         {isLoading ? (
           <div className="h-64 flex items-center justify-center text-slate-400 gap-3">
@@ -449,7 +441,6 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                 </linearGradient>
               </defs>
 
-              {/* Horizontal Grid lines */}
               {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
                 const yVal = svgHeight - paddingY - ratio * graphHeight;
                 const gridVal = Math.round(ratio * maxValue);
@@ -478,13 +469,11 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                 );
               })}
 
-              {/* Shaded Area Fill */}
               <path 
                 d={areaD} 
                 fill={metric === 'revenue' ? "url(#emeraldGrad)" : metric === 'profit' ? "url(#tealGrad)" : "url(#amberGrad)"} 
               />
 
-              {/* Chart Line */}
               <path 
                 d={pathD} 
                 fill="none" 
@@ -494,13 +483,11 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                 strokeLinejoin="round" 
               />
 
-              {/* Month Data Points & Empty Indicators */}
               {points.map((p, idx) => {
                 const isEmpty = p.val === 0;
 
                 return (
                   <g key={idx} className="group cursor-pointer">
-                    {/* Vertical guideline */}
                     <line 
                       x1={p.x} 
                       y1={paddingY} 
@@ -511,9 +498,7 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                       className="group-hover:stroke-slate-500 transition-colors"
                     />
 
-                    {/* Data Point Marker */}
                     {isEmpty ? (
-                      /* Empty Month Visual Tag */
                       <g>
                         <circle 
                           cx={p.x} 
@@ -535,7 +520,6 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                         </text>
                       </g>
                     ) : (
-                      /* Active Month Data Marker */
                       <circle 
                         cx={p.x} 
                         cy={p.y} 
@@ -547,7 +531,6 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                       />
                     )}
 
-                    {/* X-Axis Month Name Label */}
                     <text 
                       x={p.x} 
                       y={svgHeight - paddingY + 20} 
@@ -559,7 +542,6 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                       {p.month}
                     </text>
 
-                    {/* Hover Tooltip Popup */}
                     <g className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                       <rect 
                         x={p.x - 65} 
@@ -586,7 +568,6 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
         )}
       </div>
 
-      {/* Monthly Data Matrix Table (Highlights Zero Value / Empty Months) */}
       <div className="pt-4 border-t border-slate-800">
         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">
           Monthly Ledger Breakdown ({selectedYear})
@@ -594,7 +575,7 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {fullYearMonths.map((m) => {
-            const isEmpty = m.totalRevenue === 0;
+            const isEmpty = Number(m.totalRevenue || 0) === 0;
 
             return (
               <div 
@@ -640,7 +621,6 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
 
 // ============================================================================
 // 5. REUSABLE PRODUCT CARD COMPONENT
-// Prioritizes phone screen priority (2 items per row on small devices, 4 on desktop)
 // ============================================================================
 
 interface ProductCardProps {
@@ -665,7 +645,6 @@ const ProductCard: React.FC<ProductCardProps> = ({
   return (
     <div className="group relative bg-white rounded-3xl p-3 sm:p-4 border border-emerald-100 shadow-sm hover:shadow-xl hover:border-emerald-300 transition-all duration-300 flex flex-col justify-between">
       
-      {/* Top Badges & Image Frame */}
       <div className="relative aspect-square w-full rounded-2xl overflow-hidden bg-emerald-50/50 mb-3">
         <img 
           src={product.imageUrl || 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=600&q=80'} 
@@ -674,7 +653,6 @@ const ProductCard: React.FC<ProductCardProps> = ({
           loading="lazy"
         />
 
-        {/* Dynamic Badges */}
         <div className="absolute top-2 left-2 flex flex-col gap-1 items-start z-10">
           <span className="bg-emerald-900/90 text-emerald-200 font-black text-[10px] px-2 py-0.5 rounded-full backdrop-blur-md uppercase tracking-wider shadow-sm">
             {product.weightKg}kg Sack
@@ -692,7 +670,6 @@ const ProductCard: React.FC<ProductCardProps> = ({
           </div>
         )}
 
-        {/* Quick View Button Overlay */}
         <button 
           onClick={onQuickView}
           className="absolute inset-x-3 bottom-3 py-2 rounded-xl bg-white/95 text-slate-800 text-xs font-extrabold shadow-lg opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center gap-1.5 backdrop-blur-sm"
@@ -702,7 +679,6 @@ const ProductCard: React.FC<ProductCardProps> = ({
         </button>
       </div>
 
-      {/* Product Information */}
       <div className="space-y-1.5 flex-1 flex flex-col justify-between">
         <div>
           <div className="flex items-center justify-between gap-1 text-[11px] text-emerald-700 font-bold">
@@ -715,7 +691,6 @@ const ProductCard: React.FC<ProductCardProps> = ({
           </h3>
         </div>
 
-        {/* Pricing & Stock Indicator */}
         <div className="pt-2 border-t border-slate-100">
           <div className="flex items-baseline gap-2">
             <span className="text-base sm:text-lg font-black text-emerald-800">
@@ -728,7 +703,6 @@ const ProductCard: React.FC<ProductCardProps> = ({
             )}
           </div>
 
-          {/* Stock Availability */}
           <div className="flex items-center justify-between text-[11px] mt-1">
             {isOutOfStock ? (
               <span className="text-rose-600 font-bold flex items-center gap-1">
@@ -746,7 +720,6 @@ const ProductCard: React.FC<ProductCardProps> = ({
           </div>
         </div>
 
-        {/* Add To Cart CTA Button */}
         <button 
           onClick={onAddToCart}
           disabled={isOutOfStock}
@@ -766,18 +739,15 @@ const ProductCard: React.FC<ProductCardProps> = ({
 // ============================================================================
 
 export default function PremiumRiceStore() {
-  // ROUTING & VIEW STATES
   const [view, setView] = useState<'home' | 'shop' | 'cart' | 'login' | 'admin' | 'profile'>('home');
   const [user, setUser] = useState<UserAccount | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // CATALOG & STORE DATA STATES
   const [products, setProducts] = useState<Product[]>([]);
   const [carousel, setCarousel] = useState<any[]>([]);
   
-  // HERO BACKDROP CONFIGURATION (10 EXPLICIT SETTINGS FOR FULL CONTROL)
   const [heroSettings, setHeroSettings] = useState<HeroSettings>({
     title: 'Direct From Mwea Paddy Fields',
     subtitle: '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep across Kenya.',
@@ -811,7 +781,6 @@ export default function PremiumRiceStore() {
   const [countyOverrides, setCountyOverrides] = useState<{ [key: string]: number }>({});
   const [socket, setSocket] = useState<Socket | null>(null);
 
-  // REAL-TIME PAYHERO PAYMENT STATUS MODAL STATE
   const [activePaymentModal, setActivePaymentModal] = useState<{
     isOpen: boolean;
     orderId: string | number | null;
@@ -832,11 +801,9 @@ export default function PremiumRiceStore() {
     isPolling: false
   });
 
-  // CLICKABLE ADDRESS & PAYMENT DETAILS MODAL STATES
   const [viewAddressModal, setViewAddressModal] = useState<Order | null>(null);
   const [viewPaymentDetailsModal, setViewPaymentDetailsModal] = useState<Order | null>(null);
 
-  // REGIONAL CHECKOUT DATA STATE
   const [checkoutData, setCheckoutData] = useState({
     county: 'Nairobi',
     town: 'Westlands',
@@ -848,13 +815,11 @@ export default function PremiumRiceStore() {
   });
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   
-  // AUTH FORM STATES
   const [isLogin, setIsLogin] = useState(true);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [resetStep, setResetStep] = useState<'request' | 'reset'>('request');
   const [formData, setFormData] = useState({ phoneNumber: '', email: '', password: '', fullName: '', resetToken: '', newPassword: '' });
   
-  // ADMIN PANEL NAVIGATION & DATA STATES
   const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'finances' | 'users' | 'config' | 'carousel' | 'logs'>('inventory');
   const [newProduct, setNewProduct] = useState({ 
     brandName: '', variety: '', weightKg: '', basePrice: '', buyingPrice: '', flashSalePrice: '', stockQuantity: '', imageUrl: '', description: '', isOrganic: false 
@@ -869,7 +834,6 @@ export default function PremiumRiceStore() {
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [logSearchQuery, setLogSearchQuery] = useState('');
   
-  // CATALOG FILTERING STATES
   const [shopSearch, setShopSearch] = useState('');
   const [selectedVariety, setSelectedVariety] = useState<string>('All');
   const [selectedWeight, setSelectedWeight] = useState<string>('All');
@@ -879,7 +843,6 @@ export default function PremiumRiceStore() {
   const [editingUser, setEditingUser] = useState<UserAccount | null>(null);
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
 
-  // TOAST NOTIFICATION DISPATCHER
   const showToast = (message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts(prev => [...prev, { id, message, type }]);
@@ -892,7 +855,6 @@ export default function PremiumRiceStore() {
     return u ? `mwea_hub_cart_${u.id || u.phoneNumber}` : 'mwea_hub_cart_guest';
   };
 
-  // LOCAL STORAGE CART SYNCHRONIZATION
   useEffect(() => {
     try {
       const storageKey = getAccountCartKey(user);
@@ -922,7 +884,6 @@ export default function PremiumRiceStore() {
     showToast('Cart cleared successfully.', 'info');
   };
 
-  // HERO BACKDROP MEDIA ROTATION TIMER
   useEffect(() => {
     const mediaArray = [
       { type: 'video', url: heroSettings?.video1 },
@@ -942,7 +903,6 @@ export default function PremiumRiceStore() {
     return () => clearTimeout(timeoutId);
   }, [activeHeroIndex, heroSettings]);
 
-  // CASCADE REGIONAL LOGISTICS SELECTION WHEN COUNTY CHANGES
   useEffect(() => {
     const currentData = REGIONAL_LOGISTICS_DATA[checkoutData.county] || DEFAULT_REGIONAL_LOGISTICS;
     setCheckoutData(prev => ({
@@ -960,7 +920,6 @@ export default function PremiumRiceStore() {
     }
   }, [user]);
 
-  // INITIAL SESSION RECOVERY & WEBSOCKET SETUP
   useEffect(() => {
     try {
       const savedToken = localStorage.getItem('token');
@@ -1051,7 +1010,6 @@ export default function PremiumRiceStore() {
     };
   }, []);
 
-  // LOAD USER DATA & ADMIN RECORDS ON LOGIN
   useEffect(() => {
     if (token && user) {
       fetchMyOrders();
@@ -1064,7 +1022,6 @@ export default function PremiumRiceStore() {
     }
   }, [token, user]);
 
-  // REAL-TIME PAYHERO PAYMENT POLLING ENGINE
   useEffect(() => {
     let pollInterval: NodeJS.Timeout | null = null;
 
@@ -1116,10 +1073,6 @@ export default function PremiumRiceStore() {
       if (pollInterval) clearInterval(pollInterval);
     };
   }, [activePaymentModal.isOpen, activePaymentModal.orderId, activePaymentModal.status, token]);
-
-  // ============================================================================
-  // 7. API FETCHERS & DISPATCHERS
-  // ============================================================================
 
   const fetchProducts = async () => {
     try {
@@ -1246,7 +1199,6 @@ export default function PremiumRiceStore() {
     }
   };
 
-  // CART CALCULATIONS
   const addToCart = (product: Product, qty: number = 1) => {
     setCart(prevCart => {
       const existing = prevCart.find(item => item.productId === product.id);
@@ -1302,7 +1254,6 @@ export default function PremiumRiceStore() {
     return Number((totalCartWeightKg * 0.2).toFixed(2));
   }, [totalCartWeightKg]);
 
-  // AUTH HANDLERS
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const endpoint = isLogin ? '/user/login' : '/user/signup';
@@ -1384,7 +1335,6 @@ export default function PremiumRiceStore() {
     showToast('Logged out successfully.', 'info');
   };
 
-  // ORDER CREATION & STK PUSH INITIATION
   const handlePlaceOrder = async () => {
     if (!token) {
       showToast('Please login to finalize your order.', 'error');
@@ -1456,7 +1406,7 @@ export default function PremiumRiceStore() {
       }
     } catch (err: any) {
       showToast(err.message || 'Server error while processing order', 'error');
-    } finally {
+    } fontFinally {
       setIsCheckingOut(false);
     }
   };
@@ -1494,7 +1444,6 @@ export default function PremiumRiceStore() {
     }
   };
 
-  // ADMIN OPERATIONS
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token) return;
@@ -1612,7 +1561,6 @@ export default function PremiumRiceStore() {
     }
   };
 
-  // ADMIN USER MANAGEMENT HANDLERS (EDIT, SUSPEND, DELETE)
   const handleSaveUserEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || !editingUser) return;
@@ -1738,7 +1686,6 @@ export default function PremiumRiceStore() {
     }
   };
 
-  // CATALOG FILTER LOGIC
   const filteredProducts = useMemo(() => {
     return products.filter(p => {
       const matchesSearch = p.brandName?.toLowerCase().includes(shopSearch.toLowerCase()) ||
@@ -1828,7 +1775,6 @@ export default function PremiumRiceStore() {
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-emerald-100 shadow-sm">
         <div className="container mx-auto px-4 h-20 flex items-center justify-between">
           
-          {/* Brand Logo */}
           <button onClick={() => setView('home')} className="flex items-center gap-3 text-left group">
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-700 via-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-lg shadow-emerald-700/20 group-hover:scale-105 transition-transform">
               <Leaf className="w-6 h-6" />
@@ -1841,7 +1787,6 @@ export default function PremiumRiceStore() {
             </div>
           </button>
 
-          {/* Desktop Navigation Links */}
           <nav className="hidden md:flex items-center gap-8 font-extrabold text-xs tracking-wide">
             <button 
               onClick={() => setView('home')} 
@@ -1873,10 +1818,7 @@ export default function PremiumRiceStore() {
             )}
           </nav>
 
-          {/* Desktop User Menu & Cart Trigger */}
           <div className="flex items-center gap-3">
-            
-            {/* Cart Trigger Button */}
             <button 
               onClick={() => setView('cart')} 
               className="relative p-2.5 rounded-2xl bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition-all border border-emerald-200/50 flex items-center justify-center cursor-pointer"
@@ -1890,7 +1832,6 @@ export default function PremiumRiceStore() {
               )}
             </button>
 
-            {/* User Account Capsule */}
             {user ? (
               <div className="hidden md:flex items-center gap-3 border-l border-slate-200 pl-4">
                 <div className="text-right">
@@ -1914,7 +1855,6 @@ export default function PremiumRiceStore() {
               </button>
             )}
 
-            {/* Mobile Menu Toggle Button */}
             <button 
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)} 
               className="md:hidden p-2.5 rounded-2xl text-slate-700 hover:bg-slate-100"
@@ -1924,7 +1864,6 @@ export default function PremiumRiceStore() {
           </div>
         </div>
 
-        {/* Mobile Navigation Drawer */}
         {mobileMenuOpen && (
           <div className="md:hidden bg-white border-b border-emerald-100 px-4 py-6 flex flex-col gap-3 animate-in slide-in-from-top-2">
             <button onClick={() => { setView('home'); setMobileMenuOpen(false); }} className="text-left font-bold py-2.5 text-slate-700 border-b border-slate-100 flex items-center justify-between">
@@ -1963,22 +1902,18 @@ export default function PremiumRiceStore() {
       {/* MAIN VIEW CONTENT AREA */}
       <main className="flex-1">
 
-        {/* =================================================================== */}
-        {/* VIEW: HOME PAGE                                                     */}
-        {/* =================================================================== */}
+        {/* VIEW: HOME PAGE */}
         {view === 'home' && (
           <div className="space-y-12 md:space-y-16">
             
-            {/* HERO ROTATING BACKDROP BANNER */}
             <section className="relative w-full overflow-hidden bg-slate-950 text-white" style={{ minHeight: heroSettings.bannerHeight || '65vh' }}>
               
-              {/* Media Renderer */}
               <div className="absolute inset-0 z-0 opacity-55">
                 {activeMedia?.type === 'video' ? (
                   <iframe 
                     src={activeMedia.url} 
                     className="w-full h-full object-cover scale-125 pointer-events-none" 
-                    allow="autoplay; muted; loop"
+                    allow="autoplay; fullscreen; encrypted-media"
                     title="Hero Video Background"
                   />
                 ) : (
@@ -1994,26 +1929,21 @@ export default function PremiumRiceStore() {
                 />
               </div>
 
-              {/* Hero Content Overlay */}
               <div className="relative z-10 container mx-auto px-4 h-full py-16 md:py-24 flex flex-col justify-center max-w-4xl space-y-6">
                 
-                {/* Badge Label */}
                 <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/20 backdrop-blur-md border border-emerald-400/30 text-emerald-300 font-bold text-xs uppercase tracking-wider w-fit">
                   <Leaf className="w-3.5 h-3.5 text-emerald-400" />
                   <span>{heroSettings.badgeText}</span>
                 </div>
 
-                {/* Main Heading */}
                 <h2 className="text-3xl sm:text-5xl md:text-6xl font-black tracking-tight text-white leading-tight">
                   {heroSettings.title}
                 </h2>
 
-                {/* Subtitle */}
                 <p className="text-base md:text-xl text-slate-300 font-normal leading-relaxed max-w-2xl">
                   {heroSettings.subtitle}
                 </p>
 
-                {/* Call to Actions */}
                 <div className="flex flex-wrap items-center gap-4 pt-2">
                   <button 
                     onClick={() => setView('shop')} 
@@ -2033,7 +1963,6 @@ export default function PremiumRiceStore() {
                   )}
                 </div>
 
-                {/* Slide Indicators */}
                 <div className="flex items-center gap-2 pt-6">
                   {heroMediaList.map((_, idx) => (
                     <button 
@@ -2047,7 +1976,6 @@ export default function PremiumRiceStore() {
               </div>
             </section>
 
-            {/* FLASH HARVEST SALE COUNTDOWN SECTION */}
             {flashSale.active && (
               <section className="container mx-auto px-4">
                 <div className="bg-gradient-to-r from-amber-600 via-rose-600 to-red-700 rounded-3xl p-6 md:p-8 text-white shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center justify-between gap-6">
@@ -2070,8 +1998,6 @@ export default function PremiumRiceStore() {
               </section>
             )}
 
-            {/* FEATURED PRODUCTS GRID SECTION */}
-            {/* PHONE PRIORITY: 2 products per row on small devices (grid-cols-2), 4 on laptops (lg:grid-cols-4) */}
             <section className="container mx-auto px-4 space-y-6">
               <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-emerald-100 pb-4">
                 <div>
@@ -2087,7 +2013,6 @@ export default function PremiumRiceStore() {
                 </button>
               </div>
 
-              {/* GRID: grid-cols-2 on small devices, lg:grid-cols-4 on laptops */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
                 {products.slice(0, 4).map((product) => (
                   <ProductCard 
@@ -2101,7 +2026,6 @@ export default function PremiumRiceStore() {
               </div>
             </section>
 
-            {/* STORE VALUE PROPOSITIONS */}
             <section className="bg-emerald-950 text-white py-14">
               <div className="container mx-auto px-4 grid grid-cols-1 md:grid-cols-3 gap-8 text-center md:text-left">
                 <div className="bg-emerald-900/40 p-8 rounded-3xl border border-emerald-800/60 space-y-3">
@@ -2133,22 +2057,15 @@ export default function PremiumRiceStore() {
           </div>
         )}
 
-        {/* =================================================================== */}
-        {/* VIEW: GRAIN CATALOG / SHOP                                          */}
-        {/* =================================================================== */}
+        {/* VIEW: GRAIN CATALOG / SHOP */}
         {view === 'shop' && (
           <div className="container mx-auto px-4 py-8 space-y-8">
-            
-            {/* Page Header */}
             <div className="space-y-1">
               <h2 className="text-2xl sm:text-3xl font-black text-slate-900">Mwea Agricultural Grain Store</h2>
               <p className="text-slate-500 text-xs sm:text-sm">Select from premium long-grain aromatic rice varieties packaged in 5kg, 10kg, 25kg, and 50kg sacks.</p>
             </div>
 
-            {/* Catalog Filter Controls */}
             <div className="bg-white p-5 rounded-3xl shadow-sm border border-emerald-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              
-              {/* Search Bar */}
               <div className="relative">
                 <Search className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-400" />
                 <input 
@@ -2160,7 +2077,6 @@ export default function PremiumRiceStore() {
                 />
               </div>
 
-              {/* Rice Variety Filter */}
               <div>
                 <select 
                   value={selectedVariety}
@@ -2174,7 +2090,6 @@ export default function PremiumRiceStore() {
                 </select>
               </div>
 
-              {/* Weight Filter */}
               <div>
                 <select 
                   value={selectedWeight}
@@ -2188,7 +2103,6 @@ export default function PremiumRiceStore() {
                 </select>
               </div>
 
-              {/* Price Range Filter Slider */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-bold text-slate-600">
                   <span>Max Price:</span>
@@ -2207,8 +2121,6 @@ export default function PremiumRiceStore() {
 
             </div>
 
-            {/* CATALOG GRID */}
-            {/* PHONE PRIORITY: 2 products per row on small devices (grid-cols-2), 4 on laptops (lg:grid-cols-4) */}
             {filteredProducts.length === 0 ? (
               <div className="bg-white rounded-3xl p-12 text-center space-y-4 border border-slate-100 max-w-md mx-auto">
                 <Package className="w-12 h-12 text-slate-300 mx-auto" />
@@ -2237,9 +2149,7 @@ export default function PremiumRiceStore() {
           </div>
         )}
 
-        {/* =================================================================== */}
-        {/* VIEW: SHOPPING CART & REGIONAL CHECKOUT                             */}
-        {/* =================================================================== */}
+        {/* VIEW: SHOPPING CART & REGIONAL CHECKOUT */}
         {view === 'cart' && (
           <div className="container mx-auto px-4 py-8 space-y-8">
             <h2 className="text-2xl sm:text-3xl font-black text-slate-900">Your Agricultural Order Cart</h2>
@@ -2263,7 +2173,6 @@ export default function PremiumRiceStore() {
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 
-                {/* Cart Line Items List */}
                 <div className="lg:col-span-2 space-y-4">
                   <div className="bg-white rounded-3xl p-6 shadow-sm border border-emerald-100 space-y-4">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-4">
@@ -2293,7 +2202,6 @@ export default function PremiumRiceStore() {
                               </div>
                             </div>
 
-                            {/* Quantity Adjusters */}
                             <div className="flex items-center justify-between sm:justify-end gap-3">
                               <div className="flex items-center border border-slate-200 rounded-xl overflow-hidden bg-slate-50">
                                 <button 
@@ -2325,10 +2233,8 @@ export default function PremiumRiceStore() {
                   </div>
                 </div>
 
-                {/* Regional Freight Logistics & M-Pesa STK Checkout Summary */}
                 <div className="space-y-6">
                   
-                  {/* Delivery Location Selection (47 Counties) */}
                   <div className="bg-white rounded-3xl p-6 shadow-sm border border-emerald-100 space-y-4">
                     <h3 className="font-extrabold text-slate-900 text-sm sm:text-base flex items-center gap-2">
                       <MapPin className="w-5 h-5 text-emerald-600" /> Regional Freight Logistics
@@ -2403,7 +2309,6 @@ export default function PremiumRiceStore() {
                     </div>
                   </div>
 
-                  {/* Payment Method & Checkout Trigger */}
                   <div className="bg-white rounded-3xl p-6 shadow-sm border border-emerald-100 space-y-4">
                     <h3 className="font-extrabold text-slate-900 text-sm sm:text-base">M-Pesa STK Push Payment</h3>
 
@@ -2431,7 +2336,6 @@ export default function PremiumRiceStore() {
                       </div>
                     </div>
 
-                    {/* Price Breakdown */}
                     <div className="border-t border-slate-100 pt-4 space-y-2 text-xs">
                       <div className="flex justify-between text-slate-600 font-semibold">
                         <span>Grain Subtotal:</span>
@@ -2455,7 +2359,6 @@ export default function PremiumRiceStore() {
                       </div>
                     </div>
 
-                    {/* Submit Order Button */}
                     <button 
                       onClick={handlePlaceOrder}
                       disabled={isCheckingOut}
@@ -2483,13 +2386,10 @@ export default function PremiumRiceStore() {
           </div>
         )}
 
-        {/* =================================================================== */}
-        {/* VIEW: USER PROFILE & ORDERS HISTORY                                */}
-        {/* =================================================================== */}
+        {/* VIEW: USER PROFILE & ORDERS HISTORY */}
         {view === 'profile' && user && (
           <div className="container mx-auto px-4 py-8 space-y-8">
             
-            {/* User Profile Header */}
             <div className="bg-gradient-to-r from-emerald-950 to-teal-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl flex flex-col md:flex-row items-center justify-between gap-6">
               <div className="space-y-1 text-center md:text-left">
                 <span className="bg-emerald-500/30 px-3 py-1 rounded-full text-[10px] font-black text-emerald-300 uppercase tracking-wider">
@@ -2506,7 +2406,6 @@ export default function PremiumRiceStore() {
               </div>
             </div>
 
-            {/* My Orders History */}
             <div className="space-y-4">
               <h3 className="text-xl sm:text-2xl font-black text-slate-900">Your Grain Purchase Orders</h3>
 
@@ -2523,14 +2422,12 @@ export default function PremiumRiceStore() {
                     return (
                       <div key={order.id} className="bg-white rounded-3xl p-6 shadow-sm border border-emerald-100 space-y-4">
                         
-                        {/* Order Banner Bar */}
                         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4">
                           <div>
                             <span className="text-xs font-black text-emerald-800">ORDER #{order.id}</span>
                             <p className="text-[10px] text-slate-400 font-semibold">{new Date(order.createdAt).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</p>
                           </div>
 
-                          {/* CLICKABLE PAYMENT STATUS BADGE */}
                           <div className="flex items-center gap-2">
                             <button 
                               onClick={() => setViewPaymentDetailsModal(order)}
@@ -2550,7 +2447,6 @@ export default function PremiumRiceStore() {
                               <Eye className="w-3 h-3 ml-0.5 opacity-70" />
                             </button>
 
-                            {/* Retry STK Push */}
                             {payInfo.status !== 'PAID' && (
                               <button 
                                 onClick={() => handleRetryStkPush(order.id, user.phoneNumber, order.grandTotal)}
@@ -2562,7 +2458,6 @@ export default function PremiumRiceStore() {
                           </div>
                         </div>
 
-                        {/* Order Details Grid */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                           <div className="space-y-1.5">
                             <p className="font-bold text-slate-700">Items Sourced:</p>
@@ -2575,7 +2470,6 @@ export default function PremiumRiceStore() {
                             </ul>
                           </div>
 
-                          {/* CLICKABLE FREIGHT SHIPPING ADDRESS BLOCK */}
                           <div 
                             onClick={() => setViewAddressModal(order)}
                             className="space-y-1 bg-slate-50 p-4 rounded-2xl border border-slate-100 cursor-pointer hover:bg-slate-100/80 transition-colors group relative"
@@ -2615,9 +2509,7 @@ export default function PremiumRiceStore() {
           </div>
         )}
 
-        {/* =================================================================== */}
-        {/* VIEW: LOGIN / SIGNUP / FORGOT PASSWORD                              */}
-        {/* =================================================================== */}
+        {/* VIEW: LOGIN / SIGNUP / FORGOT PASSWORD */}
         {view === 'login' && (
           <div className="container mx-auto px-4 py-12 max-w-md">
             <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-xl border border-emerald-100 space-y-6">
@@ -2771,15 +2663,11 @@ export default function PremiumRiceStore() {
           </div>
         )}
 
-        {/* =================================================================== */}
-        {/* VIEW: ADMINISTRATIVE DASHBOARD CONSOLE                             */}
-        {/* DARK THEMED WITH TWO-PANEL ARCHITECTURE                             */}
-        {/* =================================================================== */}
+        {/* VIEW: ADMINISTRATIVE DASHBOARD CONSOLE */}
         {view === 'admin' && user?.role === 'admin' && (
           <div className="min-h-[85vh] bg-slate-950 text-slate-100 p-4 sm:p-6 lg:p-8">
             <div className="container mx-auto space-y-6">
               
-              {/* ADMIN CONSOLE HEADER */}
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
                 <div>
                   <div className="flex items-center gap-2">
@@ -2802,10 +2690,8 @@ export default function PremiumRiceStore() {
                 </div>
               </div>
 
-              {/* TWO-PANEL ARCHITECTURE WITH STICKY SIDEBAR NAVIGATION */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 
-                {/* PANEL 1: STICKY DARK SIDEBAR NAVIGATION & QUICK CONTROL (3 Columns) */}
                 <div className="lg:col-span-3 bg-slate-900/90 rounded-3xl p-5 border border-slate-800 space-y-6 lg:sticky lg:top-24 lg:self-start z-30">
                   <div className="space-y-1">
                     <p className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Navigation Panel</p>
@@ -2845,7 +2731,6 @@ export default function PremiumRiceStore() {
                     </nav>
                   </div>
 
-                  {/* System Live Metrics Capsule */}
                   <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800/80 space-y-2">
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Live Store Stats</p>
                     <div className="space-y-1 text-xs">
@@ -2865,14 +2750,12 @@ export default function PremiumRiceStore() {
                   </div>
                 </div>
 
-                {/* PANEL 2: MAIN WORKSPACE PANEL (9 Columns) */}
                 <div className="lg:col-span-9 space-y-6">
 
                   {/* SUB-PANEL: INVENTORY CATALOG & ALL PRODUCTS EDITING */}
                   {adminTab === 'inventory' && (
                     <div className="space-y-6">
                       
-                      {/* Add Product Form */}
                       <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800 space-y-4">
                         <h3 className="text-lg font-black text-white flex items-center gap-2">
                           <Plus className="w-5 h-5 text-emerald-400" /> Add New Grain Product
@@ -2980,7 +2863,6 @@ export default function PremiumRiceStore() {
                         </form>
                       </div>
 
-                      {/* Grain Catalog Table with Capability to Edit ALL Products */}
                       <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
                         <div className="p-4 border-b border-slate-800 flex justify-between items-center">
                           <h4 className="font-extrabold text-sm text-white">Full Product Inventory ({products.length})</h4>
@@ -3093,7 +2975,6 @@ export default function PremiumRiceStore() {
                                         <p className="text-[10px] text-slate-400">{order.User?.phoneNumber || 'N/A'}</p>
                                       </td>
 
-                                      {/* CLICKABLE SHIPPING ADDRESS IN ADMIN TABLE */}
                                       <td className="p-4 max-w-xs truncate text-slate-300">
                                         <button 
                                           onClick={() => setViewAddressModal(order)}
@@ -3107,7 +2988,6 @@ export default function PremiumRiceStore() {
 
                                       <td className="p-4 font-black text-emerald-400">{formatKES(order.grandTotal)}</td>
 
-                                      {/* CLICKABLE PAYMENT TAG IN ADMIN TABLE */}
                                       <td className="p-4">
                                         <button 
                                           onClick={() => setViewPaymentDetailsModal(order)}
@@ -3158,7 +3038,6 @@ export default function PremiumRiceStore() {
                   {adminTab === 'finances' && (
                     <div className="space-y-6">
                       
-                      {/* SUMMARY METRICS CARDS PLACED ON TOP ABOVE THE GRAPH */}
                       {financialData?.summary && (
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                           <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-1">
@@ -3180,7 +3059,6 @@ export default function PremiumRiceStore() {
                         </div>
                       )}
 
-                      {/* FINANCIAL GROWTH SVG CHART */}
                       <FinancialGrowthChart 
                         monthlyData={financialData?.monthlyBreakdown || []}
                         selectedYear={financeYear}
@@ -3194,7 +3072,7 @@ export default function PremiumRiceStore() {
                     </div>
                   )}
 
-                  {/* SUB-PANEL: USER CLEARANCE (DISPLAY ALL USERS, EDIT, SUSPEND, DELETE) */}
+                  {/* SUB-PANEL: USER CLEARANCE */}
                   {adminTab === 'users' && (
                     <div className="space-y-6">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 p-4 rounded-2xl border border-slate-800">
@@ -3259,7 +3137,6 @@ export default function PremiumRiceStore() {
                                       )}
                                     </td>
                                     <td className="p-4 text-right space-x-2">
-                                      {/* Edit Detail */}
                                       <button 
                                         onClick={() => setEditingUser(u)} 
                                         className="p-1.5 text-slate-400 hover:text-emerald-400 cursor-pointer"
@@ -3268,7 +3145,6 @@ export default function PremiumRiceStore() {
                                         <Edit className="w-4 h-4" />
                                       </button>
 
-                                      {/* Suspend / Reactivate */}
                                       <button 
                                         onClick={() => handleToggleUserSuspension(u.id, u.isSuspended || false)} 
                                         className={`p-1.5 cursor-pointer ${u.isSuspended ? 'text-emerald-400 hover:text-emerald-300' : 'text-amber-400 hover:text-amber-300'}`}
@@ -3277,7 +3153,6 @@ export default function PremiumRiceStore() {
                                         {u.isSuspended ? <UserCheck className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
                                       </button>
 
-                                      {/* Delete Account */}
                                       <button 
                                         onClick={() => handleDeleteUserAccount(u.id)} 
                                         className="p-1.5 text-slate-500 hover:text-rose-400 cursor-pointer"
@@ -3335,7 +3210,6 @@ export default function PremiumRiceStore() {
                         </form>
                       </div>
 
-                      {/* Overrides List */}
                       <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800 space-y-3">
                         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Active Freight Rates Overview</h4>
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -3356,7 +3230,7 @@ export default function PremiumRiceStore() {
                     </div>
                   )}
 
-                  {/* SUB-PANEL: HERO BACKDROP CONFIGURATION (10 EXPLICIT SETTINGS) */}
+                  {/* SUB-PANEL: HERO BACKDROP CONFIGURATION */}
                   {adminTab === 'carousel' && (
                     <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800 space-y-6">
                       <h3 className="text-lg font-black text-white flex items-center gap-2">
@@ -3508,7 +3382,9 @@ export default function PremiumRiceStore() {
                                       {log.module}
                                     </span>
                                   </td>
-                                  <td className="p-4 text-slate-400 max-w-xs truncate">{log.details || '-'}</td>
+                                  <td className="p-4 text-slate-400 max-w-xs truncate">
+                                    {typeof log.details === 'object' ? JSON.stringify(log.details) : (log.details || '-')}
+                                  </td>
                                 </tr>
                               ))}
                             </tbody>
@@ -3528,9 +3404,7 @@ export default function PremiumRiceStore() {
 
       </main>
 
-      {/* =================================================================== */}
-      {/* MODAL 1: PAYHERO REAL-TIME PAYMENT VERIFICATION OVERLAY             */}
-      {/* =================================================================== */}
+      {/* MODAL 1: PAYHERO REAL-TIME PAYMENT VERIFICATION OVERLAY */}
       {activePaymentModal.isOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-emerald-100 text-center space-y-6 animate-in zoom-in-95">
@@ -3605,9 +3479,7 @@ export default function PremiumRiceStore() {
         </div>
       )}
 
-      {/* =================================================================== */}
-      {/* MODAL 2: CLICKABLE FREIGHT SHIPPING ADDRESS DETAILS MODAL          */}
-      {/* =================================================================== */}
+      {/* MODAL 2: CLICKABLE FREIGHT SHIPPING ADDRESS DETAILS MODAL */}
       {viewAddressModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-emerald-100 space-y-6 relative animate-in zoom-in-95">
@@ -3655,7 +3527,7 @@ export default function PremiumRiceStore() {
 
                 <div className="pt-2 border-t border-emerald-100/80">
                   <span className="text-[10px] font-bold uppercase text-slate-400">Street / Landmark</span>
-                  <p className="font-bold text-slate-900">{viewAddressModal.streetAddress || viewAddressModal.shippingAddress || 'Not Specified'}</p>
+                  <p className="font-bold text-slate-900">{viewAddressModal.streetAddress || formatShippingAddress(viewAddressModal.shippingAddress)}</p>
                 </div>
               </div>
 
@@ -3676,9 +3548,7 @@ export default function PremiumRiceStore() {
         </div>
       )}
 
-      {/* =================================================================== */}
-      {/* MODAL 3: CLICKABLE PAYMENT STATUS & REAL-TIME AUDIT LOGS MODAL       */}
-      {/* =================================================================== */}
+      {/* MODAL 3: CLICKABLE PAYMENT STATUS & REAL-TIME AUDIT LOGS MODAL */}
       {viewPaymentDetailsModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-emerald-100 space-y-6 relative animate-in zoom-in-95">
@@ -3716,7 +3586,6 @@ export default function PremiumRiceStore() {
 
               return (
                 <div className="space-y-4 text-xs">
-                  {/* Status Pill */}
                   <div className="flex items-center justify-between p-4 rounded-2xl border bg-slate-50">
                     <span className="font-extrabold text-slate-700">Payment Tag:</span>
                     <span className={`px-3 py-1 rounded-full font-black uppercase text-xs flex items-center gap-1.5 ${
@@ -3802,9 +3671,7 @@ export default function PremiumRiceStore() {
         </div>
       )}
 
-      {/* =================================================================== */}
-      {/* MODAL 4: ADMIN PRODUCT EDIT MODAL (ALL PRODUCTS EDITABLE)           */}
-      {/* =================================================================== */}
+      {/* MODAL 4: ADMIN PRODUCT EDIT MODAL */}
       {editingProduct && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 text-slate-100 rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-800 space-y-6 max-h-[90vh] overflow-y-auto">
@@ -3907,9 +3774,7 @@ export default function PremiumRiceStore() {
         </div>
       )}
 
-      {/* =================================================================== */}
-      {/* MODAL 5: ADMIN USER ACCOUNT EDIT MODAL                              */}
-      {/* =================================================================== */}
+      {/* MODAL 5: ADMIN USER ACCOUNT EDIT MODAL */}
       {editingUser && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 text-slate-100 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-slate-800 space-y-6">
@@ -3984,9 +3849,7 @@ export default function PremiumRiceStore() {
         </div>
       )}
 
-      {/* =================================================================== */}
-      {/* MODAL 6: QUICK VIEW PRODUCT DETAILS MODAL                           */}
-      {/* =================================================================== */}
+      {/* MODAL 6: QUICK VIEW PRODUCT DETAILS MODAL */}
       {quickViewProduct && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-emerald-100 space-y-6 relative animate-in zoom-in-95">
@@ -4034,7 +3897,7 @@ export default function PremiumRiceStore() {
         </div>
       )}
 
-      {/* MOBILE PHONE PRIORITY BOTTOM QUICK UX NAVBAR */}
+      {/* MOBILE PHONE PRIORITY BOTTOM QUICK NAVBAR */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-lg border-t border-emerald-100 px-6 py-2 flex items-center justify-around text-[10px] font-bold text-slate-600 shadow-2xl">
         <button onClick={() => setView('home')} className={`flex flex-col items-center gap-1 cursor-pointer ${view === 'home' ? 'text-emerald-700 font-black' : ''}`}>
           <Leaf className="w-5 h-5" />
