@@ -27,7 +27,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = process.env.HOSTNAME || 'localhost';
+const hostname = process.env.HOSTNAME || '0.0.0.0';
 const port = parseInt(process.env.PORT || '5000', 10);
 const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
 
@@ -325,6 +325,16 @@ async function startServer() {
     expressApp.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
     expressApp.use('/images', express.static(path.join(__dirname, 'public', 'images')));
 
+    // --- RENDER KEEP ALIVE MECHANISM ---
+    const RENDER_EXTERNAL_URL = process.env.BASE_URL || 'https://premium-rice-store-7.onrender.com';
+    expressApp.get('/api/ping', (req, res) => res.status(200).send('Pong'));
+    
+    setInterval(() => {
+      axios.get(`${RENDER_EXTERNAL_URL}/api/ping`)
+        .then(() => console.log('🔄 Render Keep-Alive: Ping successful, preventing sleep.'))
+        .catch(err => console.error('⚠️ Render Keep-Alive: Ping failed', err.message));
+    }, 14 * 60 * 1000); // Trigger ping every 14 minutes
+
     await SystemConfig.findOrCreate({ where: { key: 'transport_fee' }, defaults: { value: 250 } });
     await SystemConfig.findOrCreate({ where: { key: 'black_friday' }, defaults: { value: { active: false, endTime: null } } });
     
@@ -354,58 +364,31 @@ async function startServer() {
     };
     await SystemConfig.findOrCreate({ where: { key: 'county_overrides' }, defaults: { value: all47Counties } });
 
-    const kenyaLogisticsHierarchy = {
-      "Kirinyaga": {
-        "Mwea": {
-          "Wamumu": ["Wamumu Primary Area", "Paddy Field Block A", "Rice Mill Zone"],
-          "Mutithi": ["Mutithi Center", "Kandongu Market", "Kiura Junction"]
-        },
-        "Kerugoya": {
-          "Central": ["Hospital Road", "Town Plaza", "Stadium Area"],
-          "Kaguyu": ["Kaguyu Market", "Upper Hill"]
-        }
-      },
-      "Nairobi": {
-        "Nairobi Central": {
-          "CBD": ["Kenyatta Avenue", "Moi Avenue", "Haile Selassie Ave"],
-          "Ngara": ["Ngara Market", "Chambers Road"]
-        },
-        "Westlands": {
-          "Parklands": ["1st Parklands", "Limuru Road", "City Park"],
-          "Kitisuru": ["Getathuru", "Nyari Estate"]
-        },
-        "Kasarani": {
-          "Roysambu": ["TRM Drive", "Zimmerman", "Lumumba Drive"],
-          "Ruaraka": ["Baba Dogo", "Utalii Area"]
-        }
-      },
-      "Kiambu": {
-        "Thika": {
-          "Township": ["Commercial Street", "Section 9", "Gatuanyaga"],
-          "Juja": ["JKUAT Gate A", "Highpoint", "Kalimoni"]
-        },
-        "Kiambu Town": {
-          "Town Center": ["Indian Bazaar", "Kambui"],
-          "Ndumberi": ["Ndumberi Market", "Kirigiti"]
-        }
-      },
-      "Mombasa": {
-        "Nyali": {
-          "Mswambweni": ["Links Road", "Beach Way Drive"],
-          "Kongowea": ["Kongowea Market Area", "Karama Road"]
-        },
-        "Mvita": {
-          "CBD": ["Nkrumah Road", "Digo Road", "Treasury Square"]
-        }
-      },
-      "Nakuru": {
-        "Nakuru Town East": {
-          "Freehold": ["Freehold Market", "Kenyatta Lane"],
-          "Section 58": ["Hyrax Hill Area", "Phase 2"]
-        }
+    // --- DYNAMIC LOCATIONS LOAD FROM JSON ---
+    let realLocationsHierarchy = {};
+    try {
+      const locationsPath = path.join(__dirname, 'kenya_locations.json');
+      if (fs.existsSync(locationsPath)) {
+        realLocationsHierarchy = JSON.parse(fs.readFileSync(locationsPath, 'utf8'));
+        console.log('✅ Loaded real locations hierarchy from kenya_locations.json');
+      } else {
+        console.warn('⚠️ kenya_locations.json not found in root. Reverting to empty locations object until generated.');
       }
-    };
-    await SystemConfig.findOrCreate({ where: { key: 'logistics_hierarchy' }, defaults: { value: kenyaLogisticsHierarchy } });
+    } catch (err) {
+      console.error('❌ Failed to parse kenya_locations.json:', err.message);
+    }
+
+    const [locConfig, locCreated] = await SystemConfig.findOrCreate({ 
+      where: { key: 'logistics_hierarchy' }, 
+      defaults: { value: realLocationsHierarchy } 
+    });
+    
+    // Force DB update to reflect generated JSON content if the key already existed
+    if (!locCreated) {
+      locConfig.value = realLocationsHierarchy;
+      locConfig.changed('value', true);
+      await locConfig.save();
+    }
 
     // --- EXPANDED 10-FIELD HERO CONFIGURATION DEFAULT ---
     await SystemConfig.findOrCreate({
@@ -573,10 +556,7 @@ async function startServer() {
     // 6. PUBLIC REST API CONTROLLERS & PAYMENTS
     // ==========================================
 
-    // 1. Route called by your frontend checkout page to start M-Pesa STK push
     expressApp.post('/api/payments/payhero/initiate', initiatePayHeroPayment);
-
-    // 2. Route called automatically by PayHero servers when the transaction completes/fails
     expressApp.post('/api/payments/payhero/webhook', handlePayHeroWebhook);
 
     expressApp.post('/api/user/signup', async (req, res) => {
@@ -646,7 +626,6 @@ async function startServer() {
       }
     });
 
-    // --- USER PROFILE SELF-MANAGEMENT & EDIT USER DETAILS ---
     expressApp.get('/api/user/profile', authenticateToken, async (req, res) => {
       try {
         const user = await User.findByPk(req.user.id, { attributes: { exclude: ['password', 'resetToken', 'resetTokenExpires'] } });
@@ -697,7 +676,6 @@ async function startServer() {
       }
     });
 
-    // --- USER SELF ACCOUNT SUSPENSION ---
     expressApp.post('/api/user/suspend', authenticateToken, async (req, res) => {
       try {
         const user = await User.findByPk(req.user.id);
@@ -712,7 +690,6 @@ async function startServer() {
       }
     });
 
-    // --- FORGOT PASSWORD (OTP GENERATION & EMAIL VIA SMTP) ---
     expressApp.post('/api/user/forgot-password', async (req, res) => {
       try {
         const { email } = req.body || {};
@@ -735,7 +712,6 @@ async function startServer() {
         user.resetTokenExpires = tokenExpiration;
         await user.save();
 
-        // Send OTP via Nodemailer SMTP endpoint
         await sendOtpEmail(user.email, user.fullName, otpCode);
 
         console.log(`📧 Password reset OTP sent to ${user.email} via SMTP`);
@@ -746,7 +722,6 @@ async function startServer() {
       }
     });
 
-    // --- RESET PASSWORD WITH OTP ---
     expressApp.post('/api/user/reset-password', async (req, res) => {
       try {
         const { email, otp, token, newPassword } = req.body || {};
@@ -786,7 +761,6 @@ async function startServer() {
       }
     });
 
-    // --- USER REWARD POINTS TRACKING ---
     expressApp.get('/api/user/points', authenticateToken, async (req, res) => {
       try {
         const user = await User.findByPk(req.user.id, { attributes: ['id', 'fullName', 'rewardPoints'] });
@@ -799,9 +773,6 @@ async function startServer() {
       }
     });
 
-    // ==========================================
-    // USER PERSISTENT CART MANAGEMENT APIs
-    // ==========================================
     expressApp.get('/api/cart', authenticateToken, async (req, res) => {
       try {
         const items = await Cart.findAll({
@@ -1021,7 +992,6 @@ async function startServer() {
       }
     });
 
-    // --- GET SINGLE ORDER BY ID (WITH FULL USER & PAYMENT DETAILS) ---
     expressApp.get('/api/orders/:id', authenticateToken, async (req, res) => {
       try {
         const order = await Order.findByPk(req.params.id, {
@@ -1039,7 +1009,6 @@ async function startServer() {
       }
     });
 
-    // --- DIRECT M-PESA STK PUSH ROUTE ---
     const handleStkPushRequest = async (req, res) => {
       try {
         const { phoneNumber, phone, amount, orderId, external_reference } = req.body || {};
@@ -1092,7 +1061,6 @@ async function startServer() {
     expressApp.post('/api/payments/stk-push', handleStkPushRequest);
     expressApp.post('/api/payment/stkpush', handleStkPushRequest);
 
-    // --- CREATE ORDER, CALCULATE WEIGHT/POINTS & TRIGGER STK PUSH ---
     expressApp.post('/api/orders/create', authenticateToken, async (req, res) => {
       try {
         const { 
@@ -1206,7 +1174,6 @@ async function startServer() {
           status: 'pending' 
         });
 
-        // Automatically clear user cart in DB after placing order
         await Cart.destroy({ where: { userId: req.user.id } });
 
         let stkInitiated = false;
@@ -1260,7 +1227,6 @@ async function startServer() {
       }
     });
 
-    // --- PAY HERO REAL-TIME PAYMENT CHECKING & LIVE TRACKING API ---
     const handlePayHeroStatusCheck = async (req, res) => {
       try {
         const order = await Order.findByPk(req.params.orderId);
@@ -1338,7 +1304,6 @@ async function startServer() {
     expressApp.get('/api/payments/payhero/status/:orderId', authenticateToken, handlePayHeroStatusCheck);
     expressApp.get('/api/payment-status/:orderId', authenticateToken, handlePayHeroStatusCheck);
 
-    // --- PAY HERO REAL-TIME PAYMENT CALLBACK / WEBHOOK ---
     expressApp.post('/api/payments/payhero/callback', async (req, res) => {
       try {
         console.log('🔔 Pay Hero Callback Notification Received:', JSON.stringify(req.body, null, 2));
@@ -1372,7 +1337,6 @@ async function startServer() {
                 rawCallback: body
               };
 
-              // Credit 0.2 points per kg bought to user
               const totalKg = order.totalWeightKg || 0;
               const points = Number((totalKg * 0.2).toFixed(2));
               const user = await User.findByPk(order.userId);
@@ -1418,11 +1382,6 @@ async function startServer() {
       }
     });
 
-    // ==========================================
-    // 7. SECURE ADMINISTRATIVE ENGINE & ANALYTICS
-    // ==========================================
-    
-    // --- ADMIN FINANCIAL DASHBOARD ROUTE (ONLY RECEIVED MONEY & CATEGORY PROFIT CALCULATIONS) ---
     expressApp.get('/api/admin/analytics/finances', authenticateToken, requireAdmin, async (req, res) => {
       try {
         const selectedYear = Number(req.query.year || new Date().getFullYear());
@@ -1445,10 +1404,7 @@ async function startServer() {
         let totalPointsAwarded = 0;
 
         const yearsSet = new Set([new Date().getFullYear()]);
-
-        // Category & Rice Variety Sales Map
         const categorySalesMap = {};
-
         const monthlyStats = Array.from({ length: 12 }, (_, i) => ({
           monthIndex: i,
           month: new Date(2000, i, 1).toLocaleString('en-US', { month: 'short' }),
@@ -1463,7 +1419,6 @@ async function startServer() {
           const orderYear = createdAt.getFullYear();
           yearsSet.add(orderYear);
 
-          // RECEIVED MONEY CONDITION: ONLY SUCCEEDED/PAID TRANSACTIONS
           const isPaid = order.paymentDetails && (order.paymentDetails.isPaid === true || order.paymentDetails.paidTag === 'PAID' || order.status === 'paid' || order.status === 'completed' || order.status === 'delivered');
 
           if (isPaid) {
@@ -1490,7 +1445,6 @@ async function startServer() {
                 orderRevenueFromItems += itemRevenue;
                 orderCost += itemCost;
 
-                // Category aggregation
                 const catName = (prod && prod.variety) ? prod.variety : (item.variety || prod?.brandName || 'Standard Rice');
                 if (!categorySalesMap[catName]) {
                   categorySalesMap[catName] = {
@@ -1560,7 +1514,6 @@ async function startServer() {
       }
     });
 
-    // --- ADMIN UPDATE MONTHLY BUYING PRICE PER PRODUCT ---
     expressApp.put('/api/admin/products/:id/buying-price', authenticateToken, requireAdmin, async (req, res) => {
       try {
         const { buyingPrice } = req.body || {};
@@ -1594,10 +1547,9 @@ async function startServer() {
       }
     });
 
-    // --- BATCH UPDATE BUYING PRICES FOR ALL PRODUCTS ---
     expressApp.post('/api/admin/products/buying-prices/batch', authenticateToken, requireAdmin, async (req, res) => {
       try {
-        const { updates } = req.body || {}; // Array of { id, buyingPrice }
+        const { updates } = req.body || {};
         if (!Array.isArray(updates)) {
           return res.status(400).json({ error: 'Updates must be an array of objects containing id and buyingPrice' });
         }
@@ -1729,7 +1681,6 @@ async function startServer() {
     expressApp.delete('/api/admin/products/:id/destroy', authenticateToken, requireAdmin, deleteProductHandler);
     expressApp.delete('/api/admin/laptops/:id/destroy', authenticateToken, requireAdmin, deleteProductHandler);
 
-    // --- GET ADMIN ORDERS WITH FULL USER DETAILS, SHIPPING DETAILS & CATEGORY FILTERING ---
     expressApp.get('/api/admin/orders', authenticateToken, requireAdmin, async (req, res) => {
       try {
         const { search, category } = req.query;
@@ -1759,7 +1710,6 @@ async function startServer() {
           order: [['createdAt', 'DESC']]
         });
 
-        // Dynamic Filtering for Pending Transactions vs Completed Transactions
         const formattedOrders = orders.map(order => {
           const o = order.toJSON();
           const isPaid = o.paymentDetails && (o.paymentDetails.isPaid === true || o.paymentDetails.paidTag === 'PAID' || o.status === 'paid');
@@ -1769,7 +1719,6 @@ async function startServer() {
             ...o,
             isPaid,
             isDelivered,
-            // Tag category: "pending_shipping" (paid, awaiting delivery) vs "delivered" (completed)
             transactionCategory: isPaid ? (isDelivered ? 'completed' : 'pending_shipping') : 'unpaid',
             userName: o.User ? o.User.fullName : 'Guest/N/A',
             userPhone: o.User ? o.User.phoneNumber : 'N/A',
@@ -1790,7 +1739,6 @@ async function startServer() {
       }
     });
 
-    // --- SPECIALIZED ENDPOINT: ALL PENDING SHIPPING TRANSACTIONS ---
     expressApp.get('/api/admin/orders/pending-transactions', authenticateToken, requireAdmin, async (req, res) => {
       try {
         const orders = await Order.findAll({
@@ -1881,7 +1829,6 @@ async function startServer() {
       } catch (err) { res.status(500).json({ error: err.message }); }
     });
 
-    // --- ADMIN MANUAL PAYMENT STATUS OVERRIDE ---
     expressApp.put('/api/admin/orders/:id/payment-status', authenticateToken, requireAdmin, async (req, res) => {
       try {
         const { isPaid, paidTag, mpesaReceipt, failureReason, method } = req.body || {};
@@ -1957,281 +1904,21 @@ async function startServer() {
 
     expressApp.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
       try {
-        const targetUserRecord = await User.findByPk(req.params.id);
-        if (!targetUserRecord) return res.status(404).json({ error: 'User not found' });
-        if (targetUserRecord.id === req.user.id) return res.status(403).json({ error: 'Cannot delete current active session admin' });
-
-        await targetUserRecord.destroy();
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'DELETE_USER',
-          targetType: 'user',
-          targetId: req.params.id,
-          ipAddress: req.ip
-        });
-
-        res.json({ message: 'User permanently deleted' });
+        await User.destroy({ where: { id: req.params.id } });
+        res.json({ message: 'User deleted successfully' });
       } catch (err) { res.status(500).json({ error: err.message }); }
     });
 
-    expressApp.post('/api/admin/config/carousel', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { slides } = req.body || {};
-        if (!Array.isArray(slides)) {
-          return res.status(400).json({ error: 'Slides validation failed: input must be an array' });
-        }
-
-        const processedSlides = slides.map(slide => ({
-          ...slide,
-          duration: slide.duration || (slide.type === 'video' ? 5 : 4)
-        }));
-
-        let config = await SystemConfig.findOne({ where: { key: 'homepage_carousel' } });
-        if (!config) {
-          config = await SystemConfig.create({ key: 'homepage_carousel', value: processedSlides });
-        } else {
-          config.value = processedSlides;
-          config.changed('value', true);
-          await config.save();
-        }
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'UPDATE_CAROUSEL_CONFIG',
-          targetType: 'config',
-          changes: { slides: processedSlides },
-          ipAddress: req.ip
-        });
-
-        io.emit('carouselUpdated', config.value);
-        res.json({ message: 'Homepage carousel configuration synchronized successfully', slides: config.value });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
+    // --- FINALLY BIND AND LISTEN ---
+    server.listen(port, hostname, () => {
+      console.log(`🚀 Unified API Engine running and listening on http://${hostname}:${port}`);
     });
 
-    // --- EXPANDED HERO BACKDROP CONFIGURATION API (SUPPORTING 10 CONFIGURATIONS) ---
-    expressApp.post('/api/admin/config/hero', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { 
-          type, 
-          url, 
-          title, 
-          subtitle, 
-          badgeText,
-          buttonText,
-          buttonLink,
-          secondaryButtonText,
-          secondaryButtonLink,
-          overlayOpacity,
-          alignment,
-          autoPlay,
-          videoDuration, 
-          imageDuration 
-        } = req.body || {};
-        
-        let config = await SystemConfig.findOne({ where: { key: 'hero_settings' } });
-        
-        const newSettings = { 
-          type: type || 'video', 
-          url: url || '', 
-          title: title || 'Direct From Mwea Paddy Fields', 
-          subtitle: subtitle || '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.', 
-          badgeText: badgeText || '🌾 100% Authentic Mwea Harvest',
-          buttonText: buttonText || 'Shop Fresh Harvest Now',
-          buttonLink: buttonLink || '/catalog',
-          secondaryButtonText: secondaryButtonText || 'View Flash Deals',
-          secondaryButtonLink: secondaryButtonLink || '#flash-sales',
-          overlayOpacity: overlayOpacity !== undefined ? Number(overlayOpacity) : 0.4,
-          alignment: alignment || 'center',
-          autoPlay: autoPlay !== undefined ? Boolean(autoPlay) : true,
-          videoDuration: Number(videoDuration || 5),
-          imageDuration: Number(imageDuration || 4)
-        };
-
-        if (!config) {
-          config = await SystemConfig.create({ key: 'hero_settings', value: newSettings });
-        } else {
-          config.value = newSettings;
-          config.changed('value', true);
-          await config.save();
-        }
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'UPDATE_HERO_BACKDROP',
-          targetType: 'config',
-          changes: newSettings,
-          ipAddress: req.ip
-        });
-
-        io.emit('heroUpdated', config.value);
-        res.json({ message: 'Storefront hero backdrop synchronized successfully with 10 configurations', hero: config.value });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.post('/api/admin/config/payment-methods', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { paybillNumber, paybillAccount, tillNumber, stkEnabled } = req.body || {};
-        let config = await SystemConfig.findOne({ where: { key: 'mpesa_config' } });
-        
-        const updatedMpesaConfig = {
-          paybillNumber: paybillNumber || '522522',
-          paybillAccount: paybillAccount || 'MWEARICE',
-          tillNumber: tillNumber || '889900',
-          stkEnabled: stkEnabled !== undefined ? Boolean(stkEnabled) : true
-        };
-
-        if (!config) {
-          config = await SystemConfig.create({ key: 'mpesa_config', value: updatedMpesaConfig });
-        } else {
-          config.value = updatedMpesaConfig;
-          config.changed('value', true);
-          await config.save();
-        }
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'UPDATE_MPESA_CONFIG',
-          targetType: 'config',
-          changes: updatedMpesaConfig,
-          ipAddress: req.ip
-        });
-
-        res.json({ message: 'M-Pesa payment configuration synchronized successfully', config: config.value });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    expressApp.post('/api/admin/config/transport', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { amount } = req.body || {};
-        const previousConfig = await SystemConfig.findOne({ where: { key: 'transport_fee' } });
-        
-        let updatedConfig;
-        if (previousConfig) {
-          previousConfig.value = Number(amount);
-          updatedConfig = await previousConfig.save();
-        } else {
-          updatedConfig = await SystemConfig.create({ key: 'transport_fee', value: Number(amount) });
-        }
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'UPDATE_TRANSPORT_FEE',
-          targetType: 'config',
-          changes: { newAmount: amount },
-          ipAddress: req.ip
-        });
-
-        res.json({ message: 'Transport fee updated', config: updatedConfig });
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    });
-
-    expressApp.post('/api/admin/config/black-friday', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { active, durationHours } = req.body || {}; 
-        const currentBfConfig = await SystemConfig.findOne({ where: { key: 'black_friday' } });
-
-        if (active) {
-          const computedExpirationStamp = new Date(Date.now() + ((durationHours || 24) * 60 * 60 * 1000));
-          flashSaleState.active = true;
-          flashSaleState.endTime = computedExpirationStamp.toISOString();
-          
-          if (currentBfConfig) {
-            currentBfConfig.value = { active: true, endTime: flashSaleState.endTime };
-            currentBfConfig.changed('value', true);
-            await currentBfConfig.save();
-          }
-
-          startFlashSaleCountdown(io);
-          io.emit('blackFridayStarted', { active: true, endTime: flashSaleState.endTime });
-        } else {
-          if (flashSaleState.countdownIntervalId) clearInterval(flashSaleState.countdownIntervalId);
-          flashSaleState.active = false;
-          flashSaleState.endTime = null;
-
-          if (currentBfConfig) {
-            currentBfConfig.value = { active: false, endTime: null };
-            currentBfConfig.changed('value', true);
-            await currentBfConfig.save();
-          }
-          io.emit('blackFridayEnded', { active: false });
-        }
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'TOGGLE_FLASH_HARVEST_SALE',
-          targetType: 'config',
-          changes: { active, durationHours },
-          ipAddress: req.ip
-        });
-
-        res.json({ message: 'Flash Harvest Sale configuration updated', engineState: flashSaleState });
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    });
-
-    expressApp.post('/api/admin/config/counties', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { county, fee } = req.body || {};
-        let config = await SystemConfig.findOne({ where: { key: 'county_overrides' } });
-        
-        let currentOverrides = config && config.value ? config.value : {};
-        currentOverrides[county] = Number(fee);
-
-        if (!config) {
-          config = await SystemConfig.create({ key: 'county_overrides', value: currentOverrides });
-        } else {
-          config.value = currentOverrides;
-          config.changed('value', true);
-          await config.save();
-        }
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'UPDATE_COUNTY_OVERRIDE',
-          targetType: 'config',
-          changes: { county, fee },
-          ipAddress: req.ip
-        });
-
-        res.json({ message: `Regional override updated for ${county}`, overrides: config.value });
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    });
-
-    expressApp.get('/api/admin/logs', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const logs = await AdminLog.findAll({
-          include: [{ model: User, as: 'Admin', attributes: ['fullName'] }],
-          order: [['createdAt', 'DESC']],
-          limit: 150 
-        });
-        res.json(logs);
-      } catch (err) { res.status(500).json({ error: err.message }); }
-    });
-
-    // ==========================================
-    // 8. DEFAULT FALLBACK ROUTE
-    // ==========================================
-    expressApp.get('/', (req, res) => {
-      res.json({ status: 'Online', message: '🌾 Premium Rice & Grain API Architecture is running seamlessly with Pay Hero Kenya.' });
-    });
-
-    server.listen(port, () => {
-      console.log(`\n=============================================================`);
-      console.log(`🌾 Premium Rice & Grain Standalone API Architecture Is Live`);
-      console.log(`📡 Serving REST API, WebSockets & Pay Hero Callbacks on port ${port}`);
-      console.log(`=============================================================\n`);
-    });
-
-  } catch (fatalInitCrashErr) {
-    console.error('❌ Root System Initialization Core Failure encountered:', fatalInitCrashErr);
+  } catch (error) {
+    console.error('❌ CRITICAL ERROR BOOTING SERVER:', error);
     process.exit(1);
   }
 }
 
+// Fire the engines!
 startServer();
