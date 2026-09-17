@@ -260,7 +260,7 @@ const formatShippingAddress = (addr: any) => {
 };
 
 const extractPaymentInfo = (order: any) => {
-  if (!order) return { status: 'PENDING', isPaid: false, receipt: null, reason: null, method: 'M-Pesa STK' };
+  if (!order) return { status: 'PENDING', isPaid: false, receipt: null, reason: null, method: 'M-Pesa STK', paidAt: null };
   
   const pd = order.paymentDetails || {};
   const isPaid = pd.isPaid === true || pd.paidTag === 'PAID' || order.status === 'paid' || order.status === 'completed' || order.status === 'delivered';
@@ -392,7 +392,7 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
             <select 
               value={selectedYear}
               onChange={(e) => onYearChange(Number(e.target.value))}
-              className="bg-slate-900 text-emerald-400 font-extrabold px-2 py-1 rounded-lg border border-emerald-500/30 focus:outline-none"
+              className="bg-slate-900 text-emerald-400 font-extrabold px-2 py-1 rounded-lg border border-emerald-500/30 focus:outline-none cursor-pointer"
             >
               {(availableYears && availableYears.length > 0 ? availableYears : [2024, 2025, 2026, 2027]).map(y => (
                 <option key={y} value={y}>{y}</option>
@@ -750,7 +750,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
         <button 
           onClick={onAddToCart}
           disabled={isOutOfStock}
-          className="w-full mt-3 py-2.5 px-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-extrabold text-xs sm:text-sm transition-all shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 active:scale-95"
+          className="w-full mt-3 py-2.5 px-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-extrabold text-xs sm:text-sm transition-all shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
         >
           <ShoppingCart className="w-4 h-4" />
           <span>{isOutOfStock ? 'Sold Out' : 'Add To Cart'}</span>
@@ -831,6 +831,10 @@ export default function PremiumRiceStore() {
     amount: 0,
     isPolling: false
   });
+
+  // CLICKABLE ADDRESS & PAYMENT DETAILS MODAL STATES
+  const [viewAddressModal, setViewAddressModal] = useState<Order | null>(null);
+  const [viewPaymentDetailsModal, setViewPaymentDetailsModal] = useState<Order | null>(null);
 
   // REGIONAL CHECKOUT DATA STATE
   const [checkoutData, setCheckoutData] = useState({
@@ -1875,7 +1879,7 @@ export default function PremiumRiceStore() {
             {/* Cart Trigger Button */}
             <button 
               onClick={() => setView('cart')} 
-              className="relative p-2.5 rounded-2xl bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition-all border border-emerald-200/50 flex items-center justify-center"
+              className="relative p-2.5 rounded-2xl bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition-all border border-emerald-200/50 flex items-center justify-center cursor-pointer"
               aria-label="Shopping Cart"
             >
               <ShoppingCart className="w-5 h-5 text-emerald-700" />
@@ -2013,7 +2017,7 @@ export default function PremiumRiceStore() {
                 <div className="flex flex-wrap items-center gap-4 pt-2">
                   <button 
                     onClick={() => setView('shop')} 
-                    className="px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold text-sm sm:text-base transition-all shadow-xl shadow-emerald-950/50 flex items-center gap-3 transform hover:-translate-y-0.5 active:scale-95"
+                    className="px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold text-sm sm:text-base transition-all shadow-xl shadow-emerald-950/50 flex items-center gap-3 transform hover:-translate-y-0.5 active:scale-95 cursor-pointer"
                   >
                     <span>{heroSettings.ctaButtonText}</span>
                     <ChevronRight className="w-5 h-5" />
@@ -2022,7 +2026,7 @@ export default function PremiumRiceStore() {
                   {user && (
                     <button 
                       onClick={() => setView('profile')} 
-                      className="px-8 py-4 rounded-2xl bg-white/10 hover:bg-white/20 backdrop-blur-md text-white font-bold text-sm sm:text-base transition-all border border-white/20"
+                      className="px-8 py-4 rounded-2xl bg-white/10 hover:bg-white/20 backdrop-blur-md text-white font-bold text-sm sm:text-base transition-all border border-white/20 cursor-pointer"
                     >
                       {heroSettings.secondaryButtonText}
                     </button>
@@ -2076,7 +2080,7 @@ export default function PremiumRiceStore() {
                 </div>
                 <button 
                   onClick={() => setView('shop')} 
-                  className="text-emerald-700 hover:text-emerald-800 font-extrabold text-xs sm:text-sm flex items-center gap-1 group"
+                  className="text-emerald-700 hover:text-emerald-800 font-extrabold text-xs sm:text-sm flex items-center gap-1 group cursor-pointer"
                 >
                   <span>Explore Full Catalog ({products.length})</span>
                   <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
@@ -2161,7 +2165,7 @@ export default function PremiumRiceStore() {
                 <select 
                   value={selectedVariety}
                   onChange={(e) => setSelectedVariety(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-2xl border border-slate-200 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                  className="w-full px-4 py-2.5 rounded-2xl border border-slate-200 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white cursor-pointer"
                 >
                   <option value="All">All Varieties</option>
                   {varietiesList.filter(v => v !== 'All').map(v => (
@@ -2175,7 +2179,7 @@ export default function PremiumRiceStore() {
                 <select 
                   value={selectedWeight}
                   onChange={(e) => setSelectedWeight(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-2xl border border-slate-200 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                  className="w-full px-4 py-2.5 rounded-2xl border border-slate-200 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white cursor-pointer"
                 >
                   <option value="All">All Weight Sacks</option>
                   {weightsList.filter(w => w !== 'All').map(w => (
@@ -2197,7 +2201,7 @@ export default function PremiumRiceStore() {
                   step="250"
                   value={maxPriceFilter}
                   onChange={(e) => setMaxPriceFilter(Number(e.target.value))}
-                  className="w-full accent-emerald-600"
+                  className="w-full accent-emerald-600 cursor-pointer"
                 />
               </div>
 
@@ -2212,7 +2216,7 @@ export default function PremiumRiceStore() {
                 <p className="text-xs text-slate-500">Try adjusting your search query or filter settings.</p>
                 <button 
                   onClick={() => { setShopSearch(''); setSelectedVariety('All'); setSelectedWeight('All'); setMaxPriceFilter(15000); }}
-                  className="px-6 py-2.5 rounded-2xl bg-emerald-600 text-white font-bold text-xs"
+                  className="px-6 py-2.5 rounded-2xl bg-emerald-600 text-white font-bold text-xs cursor-pointer"
                 >
                   Reset All Filters
                 </button>
@@ -2251,7 +2255,7 @@ export default function PremiumRiceStore() {
                 </div>
                 <button 
                   onClick={() => setView('shop')}
-                  className="px-8 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-md shadow-emerald-600/20"
+                  className="px-8 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-md shadow-emerald-600/20 cursor-pointer"
                 >
                   Explore Grain Catalog
                 </button>
@@ -2264,7 +2268,7 @@ export default function PremiumRiceStore() {
                   <div className="bg-white rounded-3xl p-6 shadow-sm border border-emerald-100 space-y-4">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                       <span className="font-bold text-slate-700 text-sm">{cart.length} Product Line Items</span>
-                      <button onClick={clearCart} className="text-xs font-bold text-rose-600 hover:underline flex items-center gap-1">
+                      <button onClick={clearCart} className="text-xs font-bold text-rose-600 hover:underline flex items-center gap-1 cursor-pointer">
                         <Trash2 className="w-3.5 h-3.5" /> Clear Cart
                       </button>
                     </div>
@@ -2294,14 +2298,14 @@ export default function PremiumRiceStore() {
                               <div className="flex items-center border border-slate-200 rounded-xl overflow-hidden bg-slate-50">
                                 <button 
                                   onClick={() => updateCartQuantity(item.productId, item.quantity - 1)}
-                                  className="px-3 py-1 text-slate-600 hover:bg-slate-200 font-bold"
+                                  className="px-3 py-1 text-slate-600 hover:bg-slate-200 font-bold cursor-pointer"
                                 >
                                   -
                                 </button>
                                 <span className="px-3 py-1 font-bold text-xs text-slate-800">{item.quantity}</span>
                                 <button 
                                   onClick={() => updateCartQuantity(item.productId, item.quantity + 1)}
-                                  className="px-3 py-1 text-slate-600 hover:bg-slate-200 font-bold"
+                                  className="px-3 py-1 text-slate-600 hover:bg-slate-200 font-bold cursor-pointer"
                                 >
                                   +
                                 </button>
@@ -2309,7 +2313,7 @@ export default function PremiumRiceStore() {
 
                               <button 
                                 onClick={() => removeFromCart(item.productId)}
-                                className="p-2 text-slate-400 hover:text-rose-600 transition-colors"
+                                className="p-2 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
@@ -2336,7 +2340,7 @@ export default function PremiumRiceStore() {
                         <select 
                           value={checkoutData.county}
                           onChange={(e) => setCheckoutData(prev => ({ ...prev, county: e.target.value }))}
-                          className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-bold bg-white focus:ring-2 focus:ring-emerald-500"
+                          className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-bold bg-white focus:ring-2 focus:ring-emerald-500 cursor-pointer"
                         >
                           {ALL_47_COUNTIES.map(c => (
                             <option key={c} value={c}>{c}</option>
@@ -2350,7 +2354,7 @@ export default function PremiumRiceStore() {
                           <select 
                             value={checkoutData.town}
                             onChange={(e) => setCheckoutData(prev => ({ ...prev, town: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-medium bg-white"
+                            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-medium bg-white cursor-pointer"
                           >
                             {(REGIONAL_LOGISTICS_DATA[checkoutData.county]?.towns || DEFAULT_REGIONAL_LOGISTICS.towns).map(t => (
                               <option key={t} value={t}>{t}</option>
@@ -2362,7 +2366,7 @@ export default function PremiumRiceStore() {
                           <select 
                             value={checkoutData.location}
                             onChange={(e) => setCheckoutData(prev => ({ ...prev, location: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-medium bg-white"
+                            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-medium bg-white cursor-pointer"
                           >
                             {(REGIONAL_LOGISTICS_DATA[checkoutData.county]?.locations || DEFAULT_REGIONAL_LOGISTICS.locations).map(l => (
                               <option key={l} value={l}>{l}</option>
@@ -2377,7 +2381,7 @@ export default function PremiumRiceStore() {
                           <select 
                             value={checkoutData.sublocation}
                             onChange={(e) => setCheckoutData(prev => ({ ...prev, sublocation: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-medium bg-white"
+                            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-medium bg-white cursor-pointer"
                           >
                             {(REGIONAL_LOGISTICS_DATA[checkoutData.county]?.sublocations || DEFAULT_REGIONAL_LOGISTICS.sublocations).map(s => (
                               <option key={s} value={s}>{s}</option>
@@ -2455,7 +2459,7 @@ export default function PremiumRiceStore() {
                     <button 
                       onClick={handlePlaceOrder}
                       disabled={isCheckingOut}
-                      className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-sm transition-all shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2 disabled:opacity-50"
+                      className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-sm transition-all shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
                     >
                       {isCheckingOut ? (
                         <>
@@ -2526,26 +2530,31 @@ export default function PremiumRiceStore() {
                             <p className="text-[10px] text-slate-400 font-semibold">{new Date(order.createdAt).toLocaleDateString('en-KE', { dateStyle: 'medium' })}</p>
                           </div>
 
-                          {/* PAYMENT STATUS BADGE */}
+                          {/* CLICKABLE PAYMENT STATUS BADGE */}
                           <div className="flex items-center gap-2">
-                            <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 ${
-                              payInfo.status === 'PAID' 
-                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
-                                : payInfo.status === 'FAILED'
-                                ? 'bg-rose-100 text-rose-800 border border-rose-300'
-                                : 'bg-amber-100 text-amber-800 border border-amber-300'
-                            }`}>
+                            <button 
+                              onClick={() => setViewPaymentDetailsModal(order)}
+                              className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 cursor-pointer ${
+                                payInfo.status === 'PAID' 
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200' 
+                                  : payInfo.status === 'FAILED'
+                                  ? 'bg-rose-100 text-rose-800 border border-rose-300 hover:bg-rose-200'
+                                  : 'bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200'
+                              }`}
+                              title="Click to view full payment status details and failure logs"
+                            >
                               {payInfo.status === 'PAID' && <CheckCircle className="w-3.5 h-3.5" />}
                               {payInfo.status === 'FAILED' && <AlertTriangle className="w-3.5 h-3.5" />}
                               {payInfo.status === 'PENDING' && <Clock className="w-3.5 h-3.5 animate-spin" />}
                               <span>Payment: {payInfo.status}</span>
-                            </span>
+                              <Eye className="w-3 h-3 ml-0.5 opacity-70" />
+                            </button>
 
                             {/* Retry STK Push */}
                             {payInfo.status !== 'PAID' && (
                               <button 
                                 onClick={() => handleRetryStkPush(order.id, user.phoneNumber, order.grandTotal)}
-                                className="px-3 py-1 rounded-full bg-emerald-600 text-white font-bold text-[10px] hover:bg-emerald-700 shadow-sm"
+                                className="px-3 py-1 rounded-full bg-emerald-600 text-white font-bold text-[10px] hover:bg-emerald-700 shadow-sm cursor-pointer"
                               >
                                 Retry STK Push
                               </button>
@@ -2566,9 +2575,24 @@ export default function PremiumRiceStore() {
                             </ul>
                           </div>
 
-                          <div className="space-y-1 bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                            <p className="font-bold text-slate-700">Freight Delivery Address:</p>
-                            <p className="text-slate-600">{formatShippingAddress(order.shippingAddress || order.county)}</p>
+                          {/* CLICKABLE FREIGHT SHIPPING ADDRESS BLOCK */}
+                          <div 
+                            onClick={() => setViewAddressModal(order)}
+                            className="space-y-1 bg-slate-50 p-4 rounded-2xl border border-slate-100 cursor-pointer hover:bg-slate-100/80 transition-colors group relative"
+                            title="Click to view detailed county, town, and sublocation breakdown"
+                          >
+                            <div className="flex items-center justify-between">
+                              <p className="font-bold text-slate-700 flex items-center gap-1">
+                                <MapPin className="w-3.5 h-3.5 text-emerald-600" /> Freight Delivery Address:
+                              </p>
+                              <span className="text-[10px] font-bold text-emerald-600 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+                                View Location <Eye className="w-3 h-3" />
+                              </span>
+                            </div>
+                            
+                            <p className="text-slate-600 font-medium underline decoration-dotted underline-offset-4">
+                              {formatShippingAddress(order.shippingAddress || order.county)}
+                            </p>
                             
                             <div className="pt-2 border-t border-slate-200 mt-2 space-y-0.5">
                               {payInfo.receipt && (
@@ -2660,7 +2684,7 @@ export default function PremiumRiceStore() {
 
                   <button 
                     type="submit"
-                    className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-md shadow-emerald-600/20"
+                    className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-md shadow-emerald-600/20 cursor-pointer"
                   >
                     {resetStep === 'request' ? 'Send OTP Code' : 'Update Password'}
                   </button>
@@ -2668,7 +2692,7 @@ export default function PremiumRiceStore() {
                   <button 
                     type="button" 
                     onClick={() => setIsForgotPassword(false)} 
-                    className="w-full text-center text-xs font-bold text-slate-500 hover:text-emerald-600"
+                    className="w-full text-center text-xs font-bold text-slate-500 hover:text-emerald-600 cursor-pointer"
                   >
                     Back to Login
                   </button>
@@ -2717,7 +2741,7 @@ export default function PremiumRiceStore() {
                       <button 
                         type="button"
                         onClick={() => setIsForgotPassword(true)}
-                        className="text-emerald-600 font-bold hover:underline"
+                        className="text-emerald-600 font-bold hover:underline cursor-pointer"
                       >
                         Forgot Password?
                       </button>
@@ -2726,7 +2750,7 @@ export default function PremiumRiceStore() {
 
                   <button 
                     type="submit"
-                    className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-md shadow-emerald-600/20"
+                    className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-md shadow-emerald-600/20 cursor-pointer"
                   >
                     {isLogin ? 'Sign In' : 'Register Account'}
                   </button>
@@ -2735,7 +2759,7 @@ export default function PremiumRiceStore() {
                     <button 
                       type="button"
                       onClick={() => setIsLogin(!isLogin)}
-                      className="text-xs font-bold text-slate-600 hover:text-emerald-600"
+                      className="text-xs font-bold text-slate-600 hover:text-emerald-600 cursor-pointer"
                     >
                       {isLogin ? "Don't have an account? Sign Up" : "Already registered? Sign In"}
                     </button>
@@ -2768,7 +2792,7 @@ export default function PremiumRiceStore() {
                 <div className="flex items-center gap-3">
                   <button 
                     onClick={() => handleToggleFlashSale(!flashSale.active, 24)}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
                       flashSale.active ? 'bg-rose-600 text-white animate-pulse' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                     }`}
                   >
@@ -2778,11 +2802,11 @@ export default function PremiumRiceStore() {
                 </div>
               </div>
 
-              {/* TWO-PANEL ARCHITECTURE */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* TWO-PANEL ARCHITECTURE WITH STICKY SIDEBAR NAVIGATION */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 
-                {/* PANEL 1: DARK SIDEBAR NAVIGATION & QUICK CONTROL (3 Columns) */}
-                <div className="lg:col-span-3 bg-slate-900/90 rounded-3xl p-5 border border-slate-800 space-y-6 h-fit">
+                {/* PANEL 1: STICKY DARK SIDEBAR NAVIGATION & QUICK CONTROL (3 Columns) */}
+                <div className="lg:col-span-3 bg-slate-900/90 rounded-3xl p-5 border border-slate-800 space-y-6 lg:sticky lg:top-24 lg:self-start z-30">
                   <div className="space-y-1">
                     <p className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Navigation Panel</p>
                     <nav className="space-y-1.5">
@@ -2802,7 +2826,7 @@ export default function PremiumRiceStore() {
                           <button 
                             key={tab.id}
                             onClick={() => setAdminTab(tab.id as any)}
-                            className={`w-full p-3 rounded-2xl text-left transition-all flex items-center gap-3 ${
+                            className={`w-full p-3 rounded-2xl text-left transition-all flex items-center gap-3 cursor-pointer ${
                               isActive 
                                 ? 'bg-gradient-to-r from-emerald-800 to-teal-800 text-white font-extrabold shadow-lg border border-emerald-600/40' 
                                 : 'text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
@@ -2949,7 +2973,7 @@ export default function PremiumRiceStore() {
                           </div>
 
                           <div className="sm:col-span-2 lg:col-span-4 text-right">
-                            <button type="submit" className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs">
+                            <button type="submit" className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs cursor-pointer">
                               Create Catalog Entry
                             </button>
                           </div>
@@ -2984,7 +3008,7 @@ export default function PremiumRiceStore() {
                                     {p.brandName} <span className="text-slate-400 font-normal">({p.variety})</span>
                                   </td>
                                   <td className="p-4 text-slate-300">{p.weightKg} kg</td>
-                                <td className="p-4 font-black text-emerald-400">{formatKES(p.basePrice || p.price || 0)}</td>
+                                  <td className="p-4 font-black text-emerald-400">{formatKES(p.basePrice || p.price || 0)}</td>
                                   <td className="p-4 text-slate-400">{formatKES(p.buyingPrice || 0)}</td>
                                   <td className="p-4">
                                     <span className={`px-2.5 py-0.5 rounded-full font-bold ${p.stockQuantity <= 10 ? 'bg-rose-950 text-rose-300 border border-rose-800' : 'bg-emerald-950 text-emerald-300 border border-emerald-800'}`}>
@@ -2994,13 +3018,13 @@ export default function PremiumRiceStore() {
                                   <td className="p-4 text-right space-x-2">
                                     <button 
                                       onClick={() => setEditingProduct(p)} 
-                                      className="px-3 py-1.5 rounded-lg bg-emerald-900/60 hover:bg-emerald-800 text-emerald-300 font-bold border border-emerald-700/50"
+                                      className="px-3 py-1.5 rounded-lg bg-emerald-900/60 hover:bg-emerald-800 text-emerald-300 font-bold border border-emerald-700/50 cursor-pointer"
                                     >
                                       Edit Product
                                     </button>
                                     <button 
                                       onClick={() => handleDeleteProduct(p.id)} 
-                                      className="p-1.5 text-slate-500 hover:text-rose-400"
+                                      className="p-1.5 text-slate-500 hover:text-rose-400 cursor-pointer"
                                       title="Delete"
                                     >
                                       <Trash2 className="w-4 h-4" />
@@ -3068,20 +3092,40 @@ export default function PremiumRiceStore() {
                                         <p className="font-bold text-slate-200">{order.User?.fullName || 'Guest Customer'}</p>
                                         <p className="text-[10px] text-slate-400">{order.User?.phoneNumber || 'N/A'}</p>
                                       </td>
-                                      <td className="p-4 max-w-xs truncate text-slate-300">{formatShippingAddress(order.shippingAddress || order.county)}</td>
-                                      <td className="p-4 font-black text-emerald-400">{formatKES(order.grandTotal)}</td>
-                                      <td className="p-4">
-                                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${
-                                          payInfo.status === 'PAID' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'
-                                        }`}>
-                                          {payInfo.status} {payInfo.receipt ? `(${payInfo.receipt})` : ''}
-                                        </span>
+
+                                      {/* CLICKABLE SHIPPING ADDRESS IN ADMIN TABLE */}
+                                      <td className="p-4 max-w-xs truncate text-slate-300">
+                                        <button 
+                                          onClick={() => setViewAddressModal(order)}
+                                          className="text-left hover:text-emerald-400 font-medium underline decoration-dotted underline-offset-2 flex items-center gap-1 cursor-pointer"
+                                          title="Click to view full county, town, and sublocation breakdown"
+                                        >
+                                          <MapPin className="w-3 h-3 text-emerald-500 shrink-0" />
+                                          <span className="truncate">{formatShippingAddress(order.shippingAddress || order.county)}</span>
+                                        </button>
                                       </td>
+
+                                      <td className="p-4 font-black text-emerald-400">{formatKES(order.grandTotal)}</td>
+
+                                      {/* CLICKABLE PAYMENT TAG IN ADMIN TABLE */}
+                                      <td className="p-4">
+                                        <button 
+                                          onClick={() => setViewPaymentDetailsModal(order)}
+                                          className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1 cursor-pointer hover:scale-105 transition-transform ${
+                                            payInfo.status === 'PAID' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'
+                                          }`}
+                                          title="Click to view payment logs, failure reasons & dates"
+                                        >
+                                          <span>{payInfo.status} {payInfo.receipt ? `(${payInfo.receipt})` : ''}</span>
+                                          <Eye className="w-3 h-3 text-slate-400" />
+                                        </button>
+                                      </td>
+
                                       <td className="p-4">
                                         <select 
                                           value={order.status}
                                           onChange={(e) => handleUpdateOrderStatus(order.id, e.target.value)}
-                                          className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs font-bold text-white"
+                                          className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs font-bold text-white cursor-pointer"
                                         >
                                           <option value="pending">Pending</option>
                                           <option value="processing">Processing</option>
@@ -3094,7 +3138,7 @@ export default function PremiumRiceStore() {
                                         {payInfo.status !== 'PAID' && (
                                           <button 
                                             onClick={() => handleManualPaymentOverride(order.id, true, 'PAID')}
-                                            className="px-2.5 py-1 rounded-md bg-emerald-700 text-white font-bold text-[10px]"
+                                            className="px-2.5 py-1 rounded-md bg-emerald-700 text-white font-bold text-[10px] cursor-pointer"
                                           >
                                             Override Paid
                                           </button>
@@ -3113,17 +3157,8 @@ export default function PremiumRiceStore() {
                   {/* SUB-PANEL: FINANCIAL ENGINE & REAL DATABASE GRAPH */}
                   {adminTab === 'finances' && (
                     <div className="space-y-6">
-                      <FinancialGrowthChart 
-                        monthlyData={financialData?.monthlyBreakdown || []}
-                        selectedYear={financeYear}
-                        availableYears={financialData?.availableYears || [2024, 2025, 2026, 2027]}
-                        onYearChange={(y) => {
-                          setFinanceYear(y);
-                          fetchFinancialAnalytics(y);
-                        }}
-                      />
-
-                      {/* Summary Metrics */}
+                      
+                      {/* SUMMARY METRICS CARDS PLACED ON TOP ABOVE THE GRAPH */}
                       {financialData?.summary && (
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                           <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-1">
@@ -3144,6 +3179,18 @@ export default function PremiumRiceStore() {
                           </div>
                         </div>
                       )}
+
+                      {/* FINANCIAL GROWTH SVG CHART */}
+                      <FinancialGrowthChart 
+                        monthlyData={financialData?.monthlyBreakdown || []}
+                        selectedYear={financeYear}
+                        availableYears={financialData?.availableYears || [2024, 2025, 2026, 2027]}
+                        onYearChange={(y) => {
+                          setFinanceYear(y);
+                          fetchFinancialAnalytics(y);
+                        }}
+                      />
+
                     </div>
                   )}
 
@@ -3215,7 +3262,7 @@ export default function PremiumRiceStore() {
                                       {/* Edit Detail */}
                                       <button 
                                         onClick={() => setEditingUser(u)} 
-                                        className="p-1.5 text-slate-400 hover:text-emerald-400"
+                                        className="p-1.5 text-slate-400 hover:text-emerald-400 cursor-pointer"
                                         title="Edit User Details"
                                       >
                                         <Edit className="w-4 h-4" />
@@ -3224,7 +3271,7 @@ export default function PremiumRiceStore() {
                                       {/* Suspend / Reactivate */}
                                       <button 
                                         onClick={() => handleToggleUserSuspension(u.id, u.isSuspended || false)} 
-                                        className={`p-1.5 ${u.isSuspended ? 'text-emerald-400 hover:text-emerald-300' : 'text-amber-400 hover:text-amber-300'}`}
+                                        className={`p-1.5 cursor-pointer ${u.isSuspended ? 'text-emerald-400 hover:text-emerald-300' : 'text-amber-400 hover:text-amber-300'}`}
                                         title={u.isSuspended ? 'Reactivate Account' : 'Suspend Account'}
                                       >
                                         {u.isSuspended ? <UserCheck className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
@@ -3233,7 +3280,7 @@ export default function PremiumRiceStore() {
                                       {/* Delete Account */}
                                       <button 
                                         onClick={() => handleDeleteUserAccount(u.id)} 
-                                        className="p-1.5 text-slate-500 hover:text-rose-400"
+                                        className="p-1.5 text-slate-500 hover:text-rose-400 cursor-pointer"
                                         title="Delete Account"
                                       >
                                         <Trash2 className="w-4 h-4" />
@@ -3262,7 +3309,7 @@ export default function PremiumRiceStore() {
                             <select 
                               value={countyOverrideForm.county}
                               onChange={(e) => setCountyOverrideForm(prev => ({ ...prev, county: e.target.value }))}
-                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold"
+                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold cursor-pointer"
                             >
                               {ALL_47_COUNTIES.map(c => (
                                 <option key={c} value={c}>{c}</option>
@@ -3282,7 +3329,7 @@ export default function PremiumRiceStore() {
                             />
                           </div>
 
-                          <button type="submit" className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs">
+                          <button type="submit" className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs cursor-pointer">
                             Save County Freight Rate
                           </button>
                         </form>
@@ -3418,7 +3465,7 @@ export default function PremiumRiceStore() {
                         </div>
 
                         <div className="sm:col-span-2 text-right pt-2">
-                          <button type="submit" className="px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-lg">
+                          <button type="submit" className="px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-lg cursor-pointer">
                             Save & Synchronize Hero Setup
                           </button>
                         </div>
@@ -3521,7 +3568,7 @@ export default function PremiumRiceStore() {
                     setActivePaymentModal(prev => ({ ...prev, isOpen: false }));
                     setView('profile');
                   }}
-                  className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md"
+                  className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md cursor-pointer"
                 >
                   View Order Status in Profile
                 </button>
@@ -3540,13 +3587,13 @@ export default function PremiumRiceStore() {
                 <div className="flex gap-2">
                   <button 
                     onClick={() => handleRetryStkPush(activePaymentModal.orderId!, activePaymentModal.phoneNumber, activePaymentModal.amount)}
-                    className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                    className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer"
                   >
                     Resend STK Push
                   </button>
                   <button 
                     onClick={() => setActivePaymentModal(prev => ({ ...prev, isOpen: false }))}
-                    className="py-3 px-4 rounded-xl bg-slate-100 text-slate-600 font-bold text-xs"
+                    className="py-3 px-4 rounded-xl bg-slate-100 text-slate-600 font-bold text-xs cursor-pointer"
                   >
                     Dismiss
                   </button>
@@ -3559,14 +3606,211 @@ export default function PremiumRiceStore() {
       )}
 
       {/* =================================================================== */}
-      {/* MODAL 2: ADMIN PRODUCT EDIT MODAL (ALL PRODUCTS EDITABLE)           */}
+      {/* MODAL 2: CLICKABLE FREIGHT SHIPPING ADDRESS DETAILS MODAL          */}
+      {/* =================================================================== */}
+      {viewAddressModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-emerald-100 space-y-6 relative animate-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-2">
+                <div className="p-2.5 rounded-2xl bg-emerald-50 text-emerald-700">
+                  <MapPin className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Freight Delivery Location</h3>
+                  <p className="text-[10px] font-bold text-slate-400">Order #{viewAddressModal.id} Address Details</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setViewAddressModal(null)}
+                className="p-2 rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-100 space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-slate-400">County</span>
+                    <p className="font-extrabold text-slate-900 text-sm">{viewAddressModal.county || 'Not Specified'}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-slate-400">Town / District</span>
+                    <p className="font-extrabold text-slate-900 text-sm">{viewAddressModal.town || 'Not Specified'}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-emerald-100/80">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-slate-400">Location</span>
+                    <p className="font-bold text-slate-800">{viewAddressModal.location || 'Not Specified'}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-slate-400">Sublocation</span>
+                    <p className="font-bold text-slate-800">{viewAddressModal.sublocation || 'Not Specified'}</p>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-emerald-100/80">
+                  <span className="text-[10px] font-bold uppercase text-slate-400">Street / Landmark</span>
+                  <p className="font-bold text-slate-900">{viewAddressModal.streetAddress || viewAddressModal.shippingAddress || 'Not Specified'}</p>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase">Customer Information</span>
+                <p className="font-black text-slate-900">{viewAddressModal.User?.fullName || 'Valued Customer'}</p>
+                <p className="text-slate-600 font-mono text-[11px]">{viewAddressModal.User?.phoneNumber || viewAddressModal.mpesaPhoneNumber || 'N/A'}</p>
+              </div>
+            </div>
+
+            <button 
+              onClick={() => setViewAddressModal(null)}
+              className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md cursor-pointer"
+            >
+              Close Location Details
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* MODAL 3: CLICKABLE PAYMENT STATUS & REAL-TIME AUDIT LOGS MODAL       */}
+      {/* =================================================================== */}
+      {viewPaymentDetailsModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-emerald-100 space-y-6 relative animate-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-2">
+                <div className={`p-2.5 rounded-2xl ${
+                  extractPaymentInfo(viewPaymentDetailsModal).status === 'PAID' ? 'bg-emerald-50 text-emerald-700' :
+                  extractPaymentInfo(viewPaymentDetailsModal).status === 'FAILED' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
+                }`}>
+                  <CreditCard className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Payment Status Logs</h3>
+                  <p className="text-[10px] font-bold text-slate-400">Order #{viewPaymentDetailsModal.id} Real-time Audit</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setViewPaymentDetailsModal(null)}
+                className="p-2 rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {(() => {
+              const payInfo = extractPaymentInfo(viewPaymentDetailsModal);
+              const orderDate = new Date(viewPaymentDetailsModal.createdAt).toLocaleString('en-KE', { 
+                dateStyle: 'medium', 
+                timeStyle: 'medium' 
+              });
+              const paidDate = payInfo.paidAt ? new Date(payInfo.paidAt).toLocaleString('en-KE', { 
+                dateStyle: 'medium', 
+                timeStyle: 'medium' 
+              }) : null;
+
+              return (
+                <div className="space-y-4 text-xs">
+                  {/* Status Pill */}
+                  <div className="flex items-center justify-between p-4 rounded-2xl border bg-slate-50">
+                    <span className="font-extrabold text-slate-700">Payment Tag:</span>
+                    <span className={`px-3 py-1 rounded-full font-black uppercase text-xs flex items-center gap-1.5 ${
+                      payInfo.status === 'PAID' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
+                      payInfo.status === 'FAILED' ? 'bg-rose-100 text-rose-800 border border-rose-300' : 'bg-amber-100 text-amber-800 border border-amber-300'
+                    }`}>
+                      {payInfo.status === 'PAID' && <CheckCircle className="w-4 h-4" />}
+                      {payInfo.status === 'FAILED' && <AlertTriangle className="w-4 h-4" />}
+                      {payInfo.status === 'PENDING' && <Clock className="w-4 h-4 animate-spin" />}
+                      {payInfo.status}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                    <div className="flex justify-between items-center text-slate-600 font-medium">
+                      <span>Payment Method:</span>
+                      <span className="font-bold text-slate-900">{payInfo.method}</span>
+                    </div>
+                    
+                    <div className="flex justify-between items-center text-slate-600 font-medium pt-2 border-t border-slate-200/60">
+                      <span>M-Pesa Phone:</span>
+                      <span className="font-mono font-bold text-slate-900">{viewPaymentDetailsModal.mpesaPhoneNumber || viewPaymentDetailsModal.User?.phoneNumber || 'N/A'}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center text-slate-600 font-medium pt-2 border-t border-slate-200/60">
+                      <span>Total Amount:</span>
+                      <span className="font-extrabold text-emerald-700 text-sm">{formatKES(viewPaymentDetailsModal.grandTotal)}</span>
+                    </div>
+
+                    {payInfo.receipt && (
+                      <div className="flex justify-between items-center text-slate-600 font-medium pt-2 border-t border-slate-200/60">
+                        <span>M-Pesa Receipt Code:</span>
+                        <span className="font-mono font-black text-emerald-800 text-sm">{payInfo.receipt}</span>
+                      </div>
+                    )}
+
+                    {payInfo.reason && (
+                      <div className="pt-2 border-t border-slate-200/60 text-rose-600 space-y-1">
+                        <span className="font-bold uppercase text-[10px]">Reason for Failed Payment:</span>
+                        <p className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 font-semibold text-[11px] leading-relaxed">
+                          {payInfo.reason}
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="pt-2 border-t border-slate-200/60 space-y-1 text-slate-500 text-[11px]">
+                      <div className="flex justify-between">
+                        <span>Order Created Log:</span>
+                        <span className="font-mono font-bold text-slate-800">{orderDate}</span>
+                      </div>
+                      {paidDate && (
+                        <div className="flex justify-between text-emerald-700">
+                          <span>Payment Confirmation Log:</span>
+                          <span className="font-mono font-bold">{paidDate}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {payInfo.status !== 'PAID' && (
+                    <button 
+                      onClick={() => {
+                        const phone = viewPaymentDetailsModal.mpesaPhoneNumber || viewPaymentDetailsModal.User?.phoneNumber || '';
+                        setViewPaymentDetailsModal(null);
+                        handleRetryStkPush(viewPaymentDetailsModal.id, phone, viewPaymentDetailsModal.grandTotal);
+                      }}
+                      className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <RefreshCw className="w-4 h-4" /> Resend M-Pesa STK Push Prompt
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+
+            <button 
+              onClick={() => setViewPaymentDetailsModal(null)}
+              className="w-full py-3 rounded-2xl bg-slate-100 text-slate-700 hover:bg-slate-200 font-extrabold text-xs cursor-pointer"
+            >
+              Close Payment Details
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* MODAL 4: ADMIN PRODUCT EDIT MODAL (ALL PRODUCTS EDITABLE)           */}
       {/* =================================================================== */}
       {editingProduct && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 text-slate-100 rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-800 space-y-6 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <h3 className="text-lg font-black text-white">Edit Catalog Item #{editingProduct.id}</h3>
-              <button onClick={() => setEditingProduct(null)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setEditingProduct(null)} className="text-slate-400 hover:text-white cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -3655,7 +3899,7 @@ export default function PremiumRiceStore() {
                 />
               </div>
 
-              <button type="submit" className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md">
+              <button type="submit" className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md cursor-pointer">
                 Save Product Changes
               </button>
             </form>
@@ -3664,14 +3908,14 @@ export default function PremiumRiceStore() {
       )}
 
       {/* =================================================================== */}
-      {/* MODAL 3: ADMIN USER ACCOUNT EDIT MODAL                              */}
+      {/* MODAL 5: ADMIN USER ACCOUNT EDIT MODAL                              */}
       {/* =================================================================== */}
       {editingUser && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 text-slate-100 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-slate-800 space-y-6">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <h3 className="text-lg font-black text-white">Edit User Account #{editingUser.id}</h3>
-              <button onClick={() => setEditingUser(null)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setEditingUser(null)} className="text-slate-400 hover:text-white cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -3713,7 +3957,7 @@ export default function PremiumRiceStore() {
                   <select 
                     value={editingUser.role} 
                     onChange={(e) => setEditingUser(prev => prev ? { ...prev, role: e.target.value as any } : null)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold cursor-pointer"
                   >
                     <option value="customer">Customer</option>
                     <option value="admin">Admin</option>
@@ -3732,7 +3976,7 @@ export default function PremiumRiceStore() {
                 </div>
               </div>
 
-              <button type="submit" className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md">
+              <button type="submit" className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md cursor-pointer">
                 Save User Details
               </button>
             </form>
@@ -3741,14 +3985,14 @@ export default function PremiumRiceStore() {
       )}
 
       {/* =================================================================== */}
-      {/* MODAL 4: QUICK VIEW PRODUCT DETAILS MODAL                           */}
+      {/* MODAL 6: QUICK VIEW PRODUCT DETAILS MODAL                           */}
       {/* =================================================================== */}
       {quickViewProduct && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-emerald-100 space-y-6 relative animate-in zoom-in-95">
             <button 
               onClick={() => setQuickViewProduct(null)} 
-              className="absolute top-4 right-4 p-2 rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200"
+              className="absolute top-4 right-4 p-2 rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -3780,7 +4024,7 @@ export default function PremiumRiceStore() {
                     addToCart(quickViewProduct);
                     setQuickViewProduct(null);
                   }}
-                  className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md flex items-center justify-center gap-2"
+                  className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <ShoppingCart className="w-4 h-4" /> Add To Cart
                 </button>
@@ -3792,17 +4036,17 @@ export default function PremiumRiceStore() {
 
       {/* MOBILE PHONE PRIORITY BOTTOM QUICK UX NAVBAR */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-lg border-t border-emerald-100 px-6 py-2 flex items-center justify-around text-[10px] font-bold text-slate-600 shadow-2xl">
-        <button onClick={() => setView('home')} className={`flex flex-col items-center gap-1 ${view === 'home' ? 'text-emerald-700 font-black' : ''}`}>
+        <button onClick={() => setView('home')} className={`flex flex-col items-center gap-1 cursor-pointer ${view === 'home' ? 'text-emerald-700 font-black' : ''}`}>
           <Leaf className="w-5 h-5" />
           <span>Home</span>
         </button>
 
-        <button onClick={() => setView('shop')} className={`flex flex-col items-center gap-1 ${view === 'shop' ? 'text-emerald-700 font-black' : ''}`}>
+        <button onClick={() => setView('shop')} className={`flex flex-col items-center gap-1 cursor-pointer ${view === 'shop' ? 'text-emerald-700 font-black' : ''}`}>
           <Package className="w-5 h-5" />
           <span>Catalog</span>
         </button>
 
-        <button onClick={() => setView('cart')} className={`relative flex flex-col items-center gap-1 ${view === 'cart' ? 'text-emerald-700 font-black' : ''}`}>
+        <button onClick={() => setView('cart')} className={`relative flex flex-col items-center gap-1 cursor-pointer ${view === 'cart' ? 'text-emerald-700 font-black' : ''}`}>
           <ShoppingCart className="w-5 h-5" />
           <span>Cart</span>
           {cart.length > 0 && (
@@ -3812,7 +4056,7 @@ export default function PremiumRiceStore() {
           )}
         </button>
 
-        <button onClick={() => setView(user ? 'profile' : 'login')} className={`flex flex-col items-center gap-1 ${view === 'profile' || view === 'login' ? 'text-emerald-700 font-black' : ''}`}>
+        <button onClick={() => setView(user ? 'profile' : 'login')} className={`flex flex-col items-center gap-1 cursor-pointer ${view === 'profile' || view === 'login' ? 'text-emerald-700 font-black' : ''}`}>
           <UserIcon className="w-5 h-5" />
           <span>{user ? 'Account' : 'Login'}</span>
         </button>
@@ -3834,9 +4078,9 @@ export default function PremiumRiceStore() {
           <div className="space-y-2">
             <p className="font-bold text-white uppercase tracking-wider text-[11px]">Navigation</p>
             <ul className="space-y-1.5 text-slate-400">
-              <li><button onClick={() => setView('home')} className="hover:text-emerald-400">Home Storefront</button></li>
-              <li><button onClick={() => setView('shop')} className="hover:text-emerald-400">Grain Catalog</button></li>
-              <li><button onClick={() => setView('cart')} className="hover:text-emerald-400">Shopping Cart</button></li>
+              <li><button onClick={() => setView('home')} className="hover:text-emerald-400 cursor-pointer">Home Storefront</button></li>
+              <li><button onClick={() => setView('shop')} className="hover:text-emerald-400 cursor-pointer">Grain Catalog</button></li>
+              <li><button onClick={() => setView('cart')} className="hover:text-emerald-400 cursor-pointer">Shopping Cart</button></li>
             </ul>
           </div>
 
