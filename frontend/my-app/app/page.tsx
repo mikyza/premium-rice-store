@@ -192,287 +192,876 @@ export const ALL_47_COUNTIES = [
 export type County = typeof ALL_47_COUNTIES[number];
 
 export const REGIONAL_LOGISTICS_DATA: Record<County, LogisticsData> = {
-  "Mombasa": {
-    towns: ["Nyali", "Mvita", "Kisauni", "Likoni", "Changamwe", "Jomvu"],
-    locations: ["Bamburi", "Tudor", "Ganjoni", "Port Reitz", "Kongowea", "Shanzu", "Buxton"],
-    sublocations: ["Mkomani", "Tononoka", "Mikindani", "Bamburi Mtambo", "Nyali Beach", "Magaoni", "Chaani"],
-    streets: ["Moi Avenue Mombasa", "Nkrumah Road", "Links Road", "Malindi Road", "Mama Ngina Drive", "Digo Road", "Nyerere Avenue"]
+"Mombasa": {
+    towns: [
+      "Nyali", "Mvita", "Kisauni", "Likoni", "Changamwe", "Jomvu", 
+      "Bamburi", "Tudor", "Kongowea", "Mikindani", "Shanzu", "Mtongwe", "Miritini"
+    ],
+    locations: [
+      "Old Town", "Tudor", "Ganjoni", "Tononoka", "Shimanzi", "Port Reitz", 
+      "Chaani", "Kipevu", "Jomvu Kuu", "Magongo", "Miritini", "Bamburi", 
+      "Mkomani", "Ziwa La Ng'ombe", "Majengo", "Mtongwe", "Likoni Central", "Bofu", "Shika Adabu"
+    ],
+    sublocations: [
+      "Bondeni", "Sparki", "Buxton", "Tudor Four", "Saba Saba", "Bombolulu", 
+      "Kisauni Stage", "Mwembe Tayari", "Kongowea Market", "Nyali Beach", "English Point", 
+      "Frere Town", "Utange", "Mtambo", "Barsheba", "Kiembeni", "Mwakirunge", 
+      "Kwa Jomvu", "Mikindani Estate", "Chaani West", "Shelly Beach", "Mtongwe Jetty"
+    ],
+    streets: [
+      "Moi Avenue", "Nkrumah Road", "Nyerere Avenue", "Digo Road", 
+      "Abdel Nasser Road", "Links Road", "Malindi Road (A7)", "Mama Ngina Drive", 
+      "Archbishop Makarios Road", "Fidel Castro Street", "Treasury Square Road", 
+      "Ronald Ngala Road", "Mbaraki Road", "Changamwe-Port Reitz Road", 
+      "Airport Road", "Magongo Road", "Jomvu-Miritini Highway", "Likoni Ferry Approach Road"
+    ]
   },
   "Kwale": {
-    towns: ["Ukunda", "Diani", "Msambweni", "Lunga Lunga", "Kinango", "Kwale Town"],
-    locations: ["Gombato", "Pongwe", "Tiwi", "Ramisi", "Mwereni", "Vanga"],
-    sublocations: ["Diani Complex", "Bongwe", "Kwale Central", "Mwavumbo", "Dzombo"],
-    streets: ["Diani Beach Road", "Lunga Lunga Highway", "Kwale-Ukunda Road", "Hospital Road"]
+    towns: [
+      "Ukunda", "Diani", "Kwale Town", "Msambweni", "Lunga Lunga", "Kinango", 
+      "Tiwi", "Shimoni", "Vanga", "Samburu", "Majoreni", "Taru", "Mackinnon Road"
+    ],
+    locations: [
+      "Pongwe/Kikoneni", "Dzombo", "Mwereni", "Vanga", "Tiwi", "Kubo South", 
+      "Kubo North", "Ndavaya", "Puma", "Kinango", "Kasemeni", "Mwavumbo", 
+      "Samburu East", "Mackinnon Road", "Ramisi", "Gombato Bongwe", "Ukunda Ward"
+    ],
+    sublocations: [
+      "Diani Beach", "Bongwe", "Bofa", "Kwale Central", "Mwavumbo", "Dzombo", 
+      "Shimba Hills Area", "Gazi", "Bodo", "Kibuyuni", "Funzi", "Wasini Island", 
+      "Lunga Lunga Border", "Perani", "Kikoneni", "Mrima", "Kanana", "Matuga", 
+      "Vuga", "Kombani", "Waa", "Golini", "Mazeras", "Taru Center"
+    ],
+    streets: [
+      "Likoni-Lunga Lunga Highway (A14)", "Diani Beach Road", "Kwale-Ukunda Road (C106)", 
+      "Samburu-Kwale Road", "Lunga Lunga-Vanga Road", "Shimoni Road", 
+      "Kombani-Kwale Highway", "Hospital Road Kwale", "Diani Beach Bypass Road"
+    ]
   },
   "Kilifi": {
-    towns: ["Kilifi Town", "Malindi", "Mtwapa", "Watamu", "Mariakani", "Kaloleni"],
-    locations: ["Tezo", "Gede", "Sokoni", "Takaungu", "Rabai", "Mambrui"],
-    sublocations: ["Mtwapa Creek", "Kibarani", "Watamu Beach Sub", "Mnarani", "Chonyi"],
-    streets: ["Mombasa-Malindi Highway", "Mtwapa Mall Road", "Mariakani Highway", "Lamamu Road"]
+    towns: [
+      "Kilifi Town", "Malindi", "Mtwapa", "Watamu", "Mariakani", "Kaloleni", 
+      "Vipingo", "Gongoni", "Mazeras", "Bamba", "Ganze", "Marafa"
+    ],
+    locations: [
+      "Tezo", "Sokoni", "Kibarani", "Dabaso", "Matsangoni", "Watamu", "Gede", 
+      "Kakuyuni", "Jilore", "Malindi Town", "Shella", "Marafa", "Magarini", 
+      "Gongoni", "Mambrui", "Rabai", "Mwawesa", "Ruruma", "Kaloleni", "Kayafungo", 
+      "Mwanamwingi", "Bamba", "Ganze", "Sokoke", "Jaribuni", "Junju", "Mtwapa", "Vipingo"
+    ],
+    sublocations: [
+      "Mnarani", "Mtwapa Creek", "Kibarani", "Watamu Village", "Chonyi", "Kilifi CBD", 
+      "Maweni", "Kanamai", "Majengo Mtwapa", "Kikambala", "Chasimba", "Dzitsoni", 
+      "Vitengeni", "Hell's Kitchen Sub", "Gongoni Salt Works", "Muyeye", "Sabaki", 
+      "Kibokoni Malindi", "Kisumu Ndogo Malindi", "Casuarina", "Jacaranda"
+    ],
+    streets: [
+      "Mombas-Malindi Highway (A7)", "Malindi-Garissa Road (C112)", "Mariakani-Kaloleni Road", 
+      "Mtwapa Mall Link Road", "Lamu Road Malindi", "Casuarina Road", "Watamu Road", 
+      "Kilifi Creek Bridge Approach", "Bamba-Kilifi Road", "Mariakani Highway"
+    ]
   },
   "Tana River": {
-    towns: ["Hola", "Garsen", "Bura", "Madogo"],
-    locations: ["Wayu", "Chewani", "Kipini", "Wenje", "Nia"],
-    sublocations: ["Hola Central", "Garsen South", "Bura Stage", "Madogo Border"],
-    streets: ["Garissa-Garsen Road", "Hola Market Street", "River Road Hola"]
+    towns: [
+      "Hola", "Garsen", "Bura", "Madogo", "Kipini", "Bangale", "Wenje", "Tarasaa"
+    ],
+    locations: [
+      "Chewani", "Wayu", "Mikinduni", "Bura", "Bangale", "Madogo", "Hirimani", 
+      "Saka", "Kipini East", "Kipini West", "Salama", "Garsen Central", 
+      "Garsen South", "Garsen North", "Mwina", "Ngao"
+    ],
+    sublocations: [
+      "Hola Central", "Laza", "Zubaki", "Bura Stage", "Madogo Border", "Garsen South", 
+      "Kipini Center", "Masalani Bridge Approach", "Nanighi", "Chara", "Ngao Sub", 
+      "Matomba", "Wenje Center", "Kilelengwani"
+    ],
+    streets: [
+      "Garissa-Garsen Road (A3/B8)", "Garsen-Witu-Lamu Highway (C112)", 
+      "Hola Market Street", "River Road Hola", "Bura-Hola Road", "Madogo Junction"
+    ]
   },
   "Lamu": {
-    towns: ["Lamu Town", "Mpeketoni", "Amu", "Kiunga", "Witu"],
-    locations: ["Shela", "Matondoni", "Ipren", "Hongwe", "Bahari"],
-    sublocations: ["Shela Village", "Mpeketoni Center", "Lamu Fort Area", "Manda Island"],
-    streets: ["Lamu Seafront", "Mpeketoni Main Road", "Shela Beach Walk"]
+    towns: [
+      "Lamu Town", "Mpeketoni", "Witu", "Kiunga", "Faza", "Pate", "Shela", "Matondoni", "Kizingitini"
+    ],
+    locations: [
+      "Shela", "Manda", "Matondoni", "Hindi", "Mokowe", "Hongwe", "Bahari", 
+      "Mapenya", "Witu", "Kiunga", "Faza", "Basuba", "Kiwayu"
+    ],
+    sublocations: [
+      "Shela Village", "Amu Old Town", "Lamu Fort Area", "Manda Island", 
+      "Mpeketoni Center", "Mokowe Jetty", "Hindi Center", "Lake Kenyatta Area", 
+      "Katsakairu", "Bargoni", "Ishakani", "Kiangwe", "Kizingitini Village", "Pate Island Sub"
+    ],
+    streets: [
+      "Lamu Seafront (Harbour Road)", "Shela Beach Walk", "Mpeketoni Main Road", 
+      "Mokowe Jetty Road", "Witu-Lamu Highway (C112)", "Hindi-Kiunga Road"
+    ]
   },
   "Taita-Taveta": {
-    towns: ["Voi", "Taveta", "Wundanyi", "Mwatate"],
-    locations: ["Kaloleni Voi", "Mbololo", "Chala", "Bura Taita", "Werugha"],
-    sublocations: ["Voi CBD", "Taveta Border", "Wundanyi Stage", "Mwatate Junction"],
-    streets: ["Nairobi-Mombasa Highway (Voi)", "Taveta Road", "Voi Main Market Street"]
+    towns: [
+      "Voi", "Taveta", "Wundanyi", "Mwatate", "Maungu", "Taveta Border", "Mackinnon Road", "Bura Taita"
+    ],
+    locations: [
+      "Kaloleni", "Ngolia", "Sagalla", "Marter", "Mbololo", "Bura", "Mwawatate", 
+      "Chavia", "Wusi/Kishamba", "Werugha", "Wundanyi/Mbale", "Mgange", "Chala", 
+      "Mahoo", "Bomani", "Mboghoni", "Mata"
+    ],
+    sublocations: [
+      "Voi CBD", "Ikanga", "Mwakingali", "Kariakor Voi", "Mwatate Junction", 
+      "Wundanyi Stage", "Taveta Border", "Kimorigho", "Eldoro", "Chala Center", 
+      "Taveta Market", "Kishushe", "Bura Mission", "Demwa", "Mbale", "Ronge Juu"
+    ],
+    streets: [
+      "Nairobi-Mombasa Highway (A109)", "Voi-Taveta-Holili Highway (A23)", 
+      "Wundanyi-Mwatate Road", "Taveta Main Market Street", "Voi Station Road", 
+      "Hospital Road Voi", "Biashara Street Voi"
+    ]
   },
   "Garissa": {
-    towns: ["Garissa Town", "Dadaab", "Balambala", "Modogashe", "Masalani"],
-    locations: ["Bullas", "Galbet", "Iftin", "Waberi", "Sankuri"],
-    sublocations: ["Bulla Jamhuria", "Bulla Medina", "Dadaab Camp Area", "Garissa Market Sub"],
-    streets: ["Kismayu Road", "Posta Road Garissa", "Sankuri Road", "Garissa-Thika Highway"]
+    towns: [
+      "Garissa Town", "Dadaab", "Balambala", "Modogashe", "Masalani", "Bura East", "Hulugho", "Ijara"
+    ],
+    locations: [
+      "Galbet", "Waberi", "Iftin", "Township", "Saka", "Sankuri", "Balambala", 
+      "Liboi", "Dadaab", "Dertu", "Benane", "Modogashe", "Masalani", "Ijara", "Sangailu", "Hulugho"
+    ],
+    sublocations: [
+      "Bulla Jamhuria", "Bulla Medina", "Bulla Iftin", "Bulla Mzuri", "Bulla Power", 
+      "Dadaab Camp Area (Hagadera, Ifo, Dagahaley)", "Liboi Border", "Masalani Town", 
+      "Sankuri Stage", "Garissa CBD", "Bula Stage", "Jarrot"
+    ],
+    streets: [
+      "Kismayu Road", "Garissa-Thika Highway (A3)", "Posta Road Garissa", 
+      "Sankuri Road", "Garissa-Dadaab Road", "Modogashe Highway", "Market Street Garissa", "River Road Garissa"
+    ]
   },
   "Wajir": {
-    towns: ["Wajir Town", "Bute", "Habaswein", "Eldas", "Tarbaj"],
-    locations: ["Township", "Garbaharey", "Diif", "Kutulo", "Bura"],
-    sublocations: ["Wajir Central", "Habaswein Stage", "Wajir Bor", "Bute Center"],
-    streets: ["Airport Road Wajir", "Main Market Street", "Moyale Highway"]
+    towns: [
+      "Wajir Town", "Habaswein", "Bute", "Eldas", "Tarbaj", "Buna", "Griftu", "Khorof Harar", "Diff"
+    ],
+    locations: [
+      "Township", "Wagberi", "Danoshi", "Bulla Kiria", "Barwaqo", "Bute", "Buna", 
+      "Korondile", "Gurar", "Eldas", "Elnur", "Tarbaj", "Sarman", "Wajir Bor", 
+      "Habaswein", "Diff", "Sabule"
+    ],
+    sublocations: [
+      "Wajir Central", "Wagberi Sub", "Bulla Jamhuria Wajir", "Habaswein Stage", 
+      "Wajir Bor", "Bute Center", "Eldas Center", "Tarbaj Town", "Diff Border", 
+      "Kutulo", "Buna Center", "Griftu Stage"
+    ],
+    streets: [
+      "Airport Road Wajir", "Wajir Main Market Street", "Isiolo-Wajir-Moyale Highway (A13)", 
+      "Mandera Road", "Habaswein Main Road", "Hospital Road Wajir"
+    ]
   },
   "Mandera": {
-    towns: ["Mandera Town", "Elwak", "Rhamu", "Banissa", "Lafey"],
-    locations: ["Neboi", "Bulla Mpya", "Khalalio", "Ashabito", "Warankara"],
-    sublocations: ["Mandera CBD", "Elwak Stage", "Rhamu Center", "Border Post Sub"],
-    streets: ["Mandera Main Street", "Elwak Highway", "Airstrip Road Mandera"]
+    towns: [
+      "Mandera Town", "Elwak", "Rhamu", "Banissa", "Lafey", "Takaba", "Kutulo"
+    ],
+    locations: [
+      "Neboi", "Bulla Mpya", "Township", "Khalalio", "Hareri", "Rhamu", 
+      "Rhamu Dimtu", "Ashabito", "Banissa", "Derkhale", "Guba", "Takaba", 
+      "Dandu", "Elwak North", "Elwak South", "Lafey", "Warankara"
+    ],
+    sublocations: [
+      "Mandera CBD", "Bulla Jamhuria Mandera", "Bulla Power", "Elwak Stage", 
+      "Rhamu Center", "Banissa Town", "Border Post Sub", "Lafey Stage", 
+      "Ashabito Center", "Kutulo Town", "Shimbir Fatuma"
+    ],
+    streets: [
+      "Mandera Main Street", "Elwak-Mandera Highway (A13)", "Airstrip Road Mandera", 
+      "Rhamu Road", "Border Post Link Road", "Biashara Street Mandera"
+    ]
   },
   "Marsabit": {
-    towns: ["Marsabit Town", "Moyale", "Laisamis", "North Horr", "Sololo"],
-    locations: ["Nagum", "Manyatta", "Heillu", "Kargi", "Loiyangalani"],
-    sublocations: ["Marsabit Central", "Moyale Border", "Laisamis Stage", "Sololo Center"],
-    streets: ["Isiolo-Moyale Highway", "Marsabit Market Road", "Moyale Main Street"]
+    towns: [
+      "Marsabit Town", "Moyale", "Laisamis", "North Horr", "Sololo", 
+      "Loiyangalani", "Kargi", "Dukana", "Kalacha"
+    ],
+    locations: [
+      "Karare", "Sagante/Jaldesa", "Township", "Manyatta", "Uran", "Obbu", 
+      "Heillu/Manyatta", "Golbo", "Sololo", "Laisamis", "Loglogo", "Karare", 
+      "Kargi/South Horr", "North Horr", "Dukana", "Maikona", "Loiyangalani"
+    ],
+    sublocations: [
+      "Marsabit Central", "Manyatta Otte", "Nagum", "Moyale Border", "Sololo Center", 
+      "Laisamis Stage", "Loiyangalani Town", "Kalacha Oasis Sub", "Kargi Center", 
+      "Turbi", "Odha", "Heilu"
+    ],
+    streets: [
+      "Isiolo-Marsabit-Moyale Highway (A2)", "Marsabit Market Road", "Moyale Main Street", 
+      "Airport Road Marsabit", "Laisamis Link Road", "North Horr Track"
+    ]
   },
   "Isiolo": {
-    towns: ["Isiolo Town", "Garbatulla", "Merti", "Oldonyiro"],
-    locations: ["Bulla Pesa", "Wabera", "Burat", "Kinna", "Cherab"],
-    sublocations: ["Isiolo CBD", "Kulamawe", "Garbatulla Center", "Merti Stage"],
-    streets: ["Isiolo Main Highway", "Barclays Road Isiolo", "Airport Road Isiolo"]
+    towns: [
+      "Isiolo Town", "Garbatulla", "Merti", "Kinna", "Oldonyiro", "Ngaremara", "Archer's Post Border"
+    ],
+    locations: [
+      "Bulla Pesa", "Wabera", "Burat", "Ngaremara", "Oldonyiro", "Garbatulla", 
+      "Kinna", "Sericho", "Cherab", "Chari"
+    ],
+    sublocations: [
+      "Isiolo CBD", "Kulamawe", "Kula Mawe", "Bulla Pesa Sub", "Wabera Center", 
+      "Bula Mpya Isiolo", "Garbatulla Center", "Merti Stage", "Kinna Town", 
+      "Merti Center", "Bassa"
+    ],
+    streets: [
+      "Isiolo Main Highway (A2)", "Airport Road Isiolo", "Barclays Road Isiolo", 
+      "Garbatulla-Isiolo Road", "Meru-Isiolo Road", "Hospital Road Isiolo", "Market Street"
+    ]
   },
   "Meru": {
-    towns: ["Meru Town", "Maua", "Nanyuki Border", "Timau", "Ntankiri", "Mikinduri"],
-    locations: ["Municipality", "Igoji", "Mitunguu", "Laare", "Gituamba"],
-    sublocations: ["Makutano Meru", "Gakoromone", "Kinoru", "Maua Town Center", "Kianjai"],
-    streets: ["Meru-Nanyuki Highway", "Tom Mboya Street Meru", "Maua Road", "Meru-Embu Highway"]
+    towns: [
+      "Meru Town", "Maua", "Timau", "Nanyuki Border", "Mikinduri", "Laare", 
+      "Nchiru", "Muthara", "Kianjai", "Imenti", "Igoji"
+    ],
+    locations: [
+      "Municipality", "Ntima East", "Ntima West", "Nyaki East", "Nyaki West", 
+      "Nkuene", "Abogeta East", "Abogeta West", "Abothuguchi", "Igoji East", 
+      "Igoji West", "Akithii", "Kianjai", "Akirang'ondu", "Nthambiro", "Amwathi", 
+      "Kangeta", "Ruiri/Rwarera"
+    ],
+    sublocations: [
+      "Makutano Meru", "Gakoromone", "Kinoru", "Gitimbine", "Kianjai Center", 
+      "Maua Town Center", "Nchiru (MUST Area)", "Timau Town", "Mikinduri Market", 
+      "Kangeta Stage", "Mujwa", "Katheri", "Muthara Town"
+    ],
+    streets: [
+      "Meru-Nanyuki Highway (A2/B6)", "Meru-Embu Highway (B6)", "Maua Road", 
+      "Tom Mboya Street Meru", "Kirinyaga Street Meru", "Meru-Mikinduri Road", 
+      "Makutano-Kianjai Road", "Kenyatta Highway Meru"
+    ]
   },
   "Tharaka-Nithi": {
-    towns: ["Chuka", "Kathwana", "Chogoria", "Marimanti"],
-    locations: ["Karingani", "Magumoni", "Ganga", "Muthambi", "Tharaka North"],
-    sublocations: ["Chuka Town Center", "Chogoria Hospital Sub", "Kathwana HQ", "Marimanti Stage"],
-    streets: ["Nairobi-Meru Highway (Chuka)", "Chuka University Road", "Kathwana Main Street"]
+    towns: [
+      "Chuka", "Kathwana", "Chogoria", "Marimanti", "Kibugua", "Gatunga", "Mukothima", "Chera"
+    ],
+    locations: [
+      "Karingani", "Magumoni", "Mugwe", "Igambang'ombe", "Ganga", "Muthambi", 
+      "Mwimbi", "Chogoria", "Nkondi", "Gatunga", "Marimanti", "Mukothima"
+    ],
+    sublocations: [
+      "Chuka Town Center", "Lower Chuka", "Ndagani (Chuka Univ Area)", 
+      "Chogoria Hospital Sub", "Kathwana HQ", "Marimanti Stage", "Gatunga Center", 
+      "Kibugua Sub", "Kanwa", "Weru", "Mitheru"
+    ],
+    streets: [
+      "Nairobi-Meru Highway (B6)", "Chuka University Access Road", "Kathwana Main Street", 
+      "Chogoria-Chuka Road", "Marimanti-Gatunga Road", "Biashara Street Chuka"
+    ]
   },
   "Embu": {
-    towns: ["Embu Town", "Runyenjes", "Siakago", "Kiritiri"],
-    locations: ["Kamiu", "Blue Valley", "Kangaru", "Kyeni", "Mbeere North"],
-    sublocations: ["Embu CBD", "Kangaru School Sub", "Runyenjes Stage", "Matakari"],
-    streets: ["Embu-Meru Highway", "Kenyatta Avenue Embu", "Mama Ngina Street Embu"]
+    towns: [
+      "Embu Town", "Runyenjes", "Siakago", "Kiritiri", "Ishiara", "Manyatta", "Kanja", "Kibugu"
+    ],
+    locations: [
+      "Kirimari", "Gakwebiri", "Ngandori", "Kieni", "Ruguru", "Gaturi", "Kyeni", 
+      "Kagaari", "Central Ward", "Mbeti North", "Mbeti South", "Mavuria", "Mvomoko", "Evurore"
+    ],
+    sublocations: [
+      "Embu CBD", "Kangaru", "Blue Valley", "Kamiu", "Njukiri", "Matakari", 
+      "Runyenjes Stage", "Kanja Center", "Kiritiri Town", "Ishiara Market", 
+      "Siakago Town", "Karaba Embu", "Ugweri"
+    ],
+    streets: [
+      "Embu-Meru Highway (B6)", "Embu-Nairobi Highway", "Kenyatta Avenue Embu", 
+      "Mama Ngina Street Embu", "Runyenjes Main Street", "Siakago-Kiritiri Road", "Kangaru School Road"
+    ]
   },
   "Kitui": {
-    towns: ["Kitui Town", "Mwingi", "Mutomo", "Kabati", "Kwa Vonza"],
-    locations: ["Township", "Kyuso", "Nuuta", "Migwani", "Ikutha"],
-    sublocations: ["Kitui Central Sub", "Mwingi CBD", "Kwa Vonza Center", "Kabati Stage"],
-    streets: ["Kitui-Machakos Road", "Mwingi-Garissa Highway", "Biashara Street Kitui"]
+    towns: [
+      "Kitui Town", "Mwingi", "Mutomo", "Kabati", "Kwa Vonza", "Migwani", 
+      "Ikutha", "Kyuso", "Tseikuru", "Zombe"
+    ],
+    locations: [
+      "Township", "Kyangwithya West", "Kyangwithya East", "Mulango", "Miambani", 
+      "Central Mwingi", "Kivou", "Nguni", "Nuu", "Kyuso", "Tseikuru", "Mutomo", 
+      "Ikutha", "Mutha", "Kanziko", "Kauwi", "Nzambani"
+    ],
+    sublocations: [
+      "Kitui Central Sub", "Kalundu", "Kitisuru Kitui", "Mwingi CBD", 
+      "Kwa Vonza Center", "Kabati Stage", "Mutomo Town", "Kyuso Center", 
+      "Zombe Market", "Migwani Town", "Ikanga"
+    ],
+    streets: [
+      "Kitui-Machakos Road (C94)", "Mwingi-Garissa Highway (A3)", 
+      "Thika-Garissa Road via Kabati", "Biashara Street Kitui", 
+      "Kitui-Mutomo-Kibwezi Road", "Hospital Road Kitui"
+    ]
   },
   "Machakos": {
-    towns: ["Machakos Town", "Mavoko / Syokimau", "Athi River", "Kangundo", "Matungulu", "Yatta"],
-    locations: ["Syokimau", "Athi River EPZ", "Machakos CBD", "Katani", "Mlolongo", "Tala"],
-    sublocations: ["Mwanawasa", "Gatwekera", "Sabaki", "Kinanie", "Kyumbi", "Kaseve"],
-    streets: ["Mombasa Road Frontage", "Machakos-Kitui Road", "Mutituni Highway", "Katani Road", "Chumvi Junction"]
+    towns: [
+      "Machakos Town", "Mavoko / Syokimau", "Athi River", "Mlolongo", "Kangundo", 
+      "Tala", "Matuu", "Masii", "Wamunyu", "Kathiani"
+    ],
+    locations: [
+      "Syokimau/Mulei", "Athi River Town", "Katani", "Mlolongo", "Machakos Central", 
+      "Muvuti/Kiima-Kimwe", "Mutituni", "Kalama", "Kangundo Central", "Tala", 
+      "Matungulu North", "Ndithini", "Matuu", "Kivaa", "Masii", "Mwala"
+    ],
+    sublocations: [
+      "Sabaki", "Syokimau Phase 1-3", "Katani Center", "Kinanie", "Kyumbi (Chumvi)", 
+      "Machakos CBD", "Eastleigh Machakos", "Katheka Kai", "Tala Market", 
+      "Kangundo Town", "Matuu CBD", "Kaseve", "Masii Stage", "Devki Area"
+    ],
+    streets: [
+      "Mombasa Road (A104)", "Machakos-Kitui Road (C99)", "Machakos-Turnoff Highway", 
+      "Katani Road", "Syokimau Airport Road", "Tala-Kangundo Highway", 
+      "Garissa Road (Matuu)", "Machakos Bypass", "Mbagathi/Kyumbuni Road"
+    ]
   },
   "Makueni": {
-    towns: ["Wote", "Mtito Andei", "Sultan Hamud", "Emali", "Kibwezi"],
-    locations: ["Kee", "Mbooni", "Kilome", "Nguu", "Makindu"],
-    sublocations: ["Wote Town Center", "Emali Junction", "Kibwezi Sub", "Mtito Andei Stage"],
-    streets: ["Nairobi-Mombasa Highway (Emali)", "Wote-Machakos Road", "Kibwezi-Kitui Road"]
+    towns: [
+      "Wote", "Mtito Andei", "Sultan Hamud", "Emali", "Kibwezi", "Makindu", 
+      "Nzoila", "Mukaa", "Mbooni", "Salama"
+    ],
+    locations: [
+      "Makueni/Wote", "Mbitini", "Kee", "Kako", "Mbooni", "Tulimani", "Kilome", 
+      "Mukaa", "Kasikeu", "Nguu/Masumba", "Makindu", "Kibwezi", "Mtito Andei", 
+      "Emali/Mulala", "Nzaui"
+    ],
+    sublocations: [
+      "Wote Town Center", "Unoa", "Kambi Mawe", "Emali Junction", "Kibwezi Sub", 
+      "Mtito Andei Stage", "Makindu Center", "Sultan Hamud Town", "Salama Stage", 
+      "Nunguni", "Kikima"
+    ],
+    streets: [
+      "Nairobi-Mombasa Highway (A109)", "Wote-Machakos Road", "Kibwezi-Kitui Highway (C94)", 
+      "Makindu Hospital Road", "Emali-Loitokitok Road", "Wote Market Street"
+    ]
   },
   "Nyandarua": {
-    towns: ["Ol Kalou", "Engineer", "Mairo Inya", "Njabini", "Ndaragwa"],
-    locations: ["Karandi", "Kinangop", "Kipipiri", "Ol Joro Orok", "Passenga"],
-    sublocations: ["Ol Kalou CBD", "Engineer Center", "Njabini Stage", "Mairo Inya Sub"],
-    streets: ["Gilgil-Nyahururu Highway", "Ol Kalou Main Street", "Flyover-Engineer Road"]
+    towns: [
+      "Ol Kalou", "Engineer", "Mairo Inya", "Njabini", "Ndaragwa", "Miharati", 
+      "Ol Joro Orok", "Flyover"
+    ],
+    locations: [
+      "Karandi", "Kanjuiri", "Ol Kalou Central", "Kaimbaga", "Passenga", "Kipipiri", 
+      "Geta", "Githabai", "Njabini", "Engineer", "Magumu", "North Kinangop", 
+      "Ndaragwa", "Leshau Pondo"
+    ],
+    sublocations: [
+      "Ol Kalou CBD", "Engineer Center", "Njabini Stage", "Mairo Inya Sub", 
+      "Ol Joro Orok Center", "Miharati Town", "Ndaragwa Center", "Flyover Junction", 
+      "Wanjohi", "Murungaru"
+    ],
+    streets: [
+      "Gilgil-Nyahururu Highway (C77)", "Flyover-Engineer-Njabini Road", 
+      "Ol Kalou Main Street", "Njabini-Ol Kalou Road", "Ndaragwa-Nyahururu Road", "Stima Road Ol Kalou"
+    ]
   },
   "Nyeri": {
-    towns: ["Nyeri Town", "Karatina", "Othaya", "Mukurweini", "Naro Moru"],
-    locations: ["Kimathi", "Rware", "Mathira East", "Tetu", "Kieni West"],
-    sublocations: ["Nyeri CBD", "Karatina Market Sub", "Othaya Town", "King'ong'o", "Skuta"],
-    streets: ["Kenyatta Road Nyeri", "Nyeri-Nanyuki Highway", "Karatina Main Street", "Gakere Road"]
+    towns: [
+      "Nyeri Town", "Karatina", "Othaya", "Mukurweini", "Naro Moru", "Mweiga", 
+      "Giakanja", "Chaka", "Endarasha"
+    ],
+    locations: [
+      "Rware", "Gatitu/Aguthi", "Kimathi", "Thenguri", "Kirimukuyu", "Iria-ini (Mathira)", 
+      "Konyu", "Magutu", "Mahiga", "Iria-ini (Othaya)", "Chinga", "Karima", 
+      "Mukurwe Central", "Gakindu", "Rugi", "Kieni East", "Mweiga"
+    ],
+    sublocations: [
+      "Nyeri CBD", "King'ong'o", "Skuta", "Asian Quarter", "Kamakwa", "Nyamachaki", 
+      "Karatina Market Sub", "Othaya Town Center", "Chaka Market", "Naro Moru Town", 
+      "Mweiga Center", "Mukurweini Town", "Giakanja Stage"
+    ],
+    streets: [
+      "Kenyatta Road Nyeri", "Nyeri-Nanyuki Highway (B6)", "Karatina Main Street", 
+      "Gakere Road Nyeri", "Othaya-Nyeri Road", "Kimathi Way", "Kanisa Road", "Mukurweini Road"
+    ]
   },
   "Kirinyaga": {
-    towns: ["Mwea East", "Mwea West", "Kerugoya", "Sagana", "Wanguru", "Gichugu", "Ndia"],
-    locations: ["Tebere", "Nyumpa", "Thiba", "Murinduko", "Mutithi", "Kagio", "Kutus"],
-    sublocations: ["Kimbimbi", "Nice Digital City", "Ngurubani", "Makutano", "Kagio Center", "Difatha", "Wamumu"],
-    streets: ["Wanguru Main Street", "Rice Mills Road", "Sagana Highway", "Kimbimbi Stage", "Hospital Road", "Kutus Main Highway", "Embu-Nairobi Road"]
+    towns: [
+      "Kerugoya", "Kutus", "Sagana", "Wang'uru (Mwea)", "Baricho", "Kagio", "Kianyaga", "Kagumo", "Diffathas"
+    ],
+    locations: [
+      "Kerugoya", "Mutira", "Inoi", "Kinyaga", "Mutithi", "Murinduko", "Tebere", "Nyangati", "Baricho", "Kiine", "Kariti"
+    ],
+    sublocations: [
+      "Kerugoya Town Center", "Kagumo Sub", "Kutus Sub", "Wang'uru Center", "Sagana Town", "Baricho Market", "Kianyaga Sub", "Mutithi Sub", "Kangai", "Thiba", "Kiburu", "Kiandai"
+    ],
+    streets: [
+      "Kerugoya-Kutus Road (C73)", "Nairobi-Nyeri Highway (A2 / Sagana Highway)", "Kutus-Kianyaga Road", "Mwea-Embu Highway (B6)", "Kerugoya-Kagumo Road", "Kerugoya Hospital Road"
+    ]
   },
   "Murang'a": {
-    towns: ["Murang'a Town", "Kenol", "Maragua", "Kangema", "Gatanga", "Kiriaini"],
-    locations: ["Township", "Kandara", "Kigumo", "Kahuro", "Mathioya"],
-    sublocations: ["Kenol Kabati", "Murang'a CBD", "Maragua Sub", "Kangema Stage"],
-    streets: ["Thika-Murang'a Road", "Kenol-Sagana Highway", "Uhuru Highway Murang'a"]
+    towns: [
+      "Murang'a Town", "Kenol", "Maragua", "Kangema", "Thika Greens", "Kigumo", "Kiria-ini", "Kandara", "Saba Saba", "Makuyu"
+    ],
+    locations: [
+      "Township (Murang'a)", "Mbiri", "Mugoiri", "Murarandia", "Kinyona", "Kigumo", "Kangari", "Ithiru", "Gaichanjiru", "Muruka", "Ruchu", "Nginda", "Makuyu", "Kamahuha", "Kiru", "Gitugi"
+    ],
+    sublocations: [
+      "Murang'a Town Center", "Kenol Sub", "Maragua Town", "Kangema Stage", "Kiria-ini Center", "Kigumo Market", "Kandara Town", "Saba Saba Center", "Mukuyu", "Mitheru", "Gaturi"
+    ],
+    streets: [
+      "Thika-Murang'a Highway (C71)", "Kenol-Sagana Highway (A2)", "Murang'a-Kangema Road", "Murang'a-Kiria-ini Road", "Maragua Main Street", "Kandara-Kenol Road", "Cathedral Road Murang'a"
+    ]
   },
   "Kiambu": {
-    towns: ["Thika", "Ruiru", "Githunguri", "Kikuyu", "Limuru", "Kiambu Town", "Juja", "Kabete"],
-    locations: ["Juja Central", "Kahawa Wendani", "Kahawa Sukari", "Ndumberi", "Banana", "Ruaka", "Kiambaa"],
-    sublocations: ["Witeithie", "Membley", "Zimmerman Border", "Muchatha", "Tigoni", "Gachie", "Anmer"],
-    streets: ["Superhighway Frontage", "Biashara Street", "Garissa Road", "Northern Bypass", "Kamiti Road", "Limuru Road", "Thika Main Street"]
+    towns: [
+      "Thika", "Ruiru", "Kikuyu", "Limuru", "Kiambu Town", "Juja", 
+      "Karuri (Banana/Ruaka)", "Kabete", "Githunguri", "Lari", "Gatundu"
+    ],
+    locations: [
+      "Thika Township", "Kamenu", "Hospital Ward", "Ruiru Central", "Kahawa Sukari", 
+      "Kahawa Wendani", "Biashara (Kikuyu)", "Karai", "Limuru Central", "Tigoni", 
+      "Township (Kiambu)", "Ndumberi", "Juja Central", "Kalimoni", "Karuri", 
+      "Muchatha", "Ndenderu", "Kabete", "Githunguri", "Gatundu"
+    ],
+    sublocations: [
+      "Witeithie", "Makongeni", "Section 9 Thika", "Membley", "Ruiru CBD", 
+      "Ruaka Center", "Banana Hill", "Muchatha", "Gachie", "Kihara", "Ndenderu", 
+      "Kimbo", "Kahawa Sukari", "Kahawa Wendani", "Kenyatta Road (Juja)", "Kamwangi", "Tigoni Sub"
+    ],
+    streets: [
+      "Thika Superhighway (A2)", "Northern Bypass", "Eastern Bypass", "Western Bypass", 
+      "Kiambu Road", "Limuru Road", "Kamiti Road", "Thika Garissa Road", 
+      "Waiyaki Way (Kikuyu)", "Banana-Raini Road", "Biashara Street Thika"
+    ]
   },
   "Turkana": {
-    towns: ["Lodwar", "Kakuma", "Lokichogio", "Lokichar", "Kalokol"],
-    locations: ["Township", "Turkana South", "Loima", "Turkana West", "Central"],
-    sublocations: ["Lodwar CBD", "Kakuma Camp Area", "Lokichar Junction", "Kalokol Lake Sub"],
-    streets: ["Kitale-Lodwar Highway", "Lodwar Main Street", "Kakuma Main Road"]
+    towns: [
+      "Lodwar", "Kakuma", "Lokichogio", "Lokichar", "Kalokol", "Lokori", "Kainuk", "Lokitaung"
+    ],
+    locations: [
+      "Township (Lodwar)", "Kanamkemer", "Kalokol", "Kakuma", "Letea", "Songot", 
+      "Lokichogio", "Lokichar", "Katilu", "Kainuk", "Lokori", "Lokitaung", "Lapur"
+    ],
+    sublocations: [
+      "Lodwar CBD", "Kanamkemer Sub", "Kakuma Camp Area (Camp 1-4)", "Kalokol Lake Port", 
+      "Lokichar Junction", "Kainuk Center", "Lokichogio Town", "Lokori Center", "Katilu Scheme Area"
+    ],
+    streets: [
+      "Kitale-Lodwar-Nadapal Highway (A1)", "Lodwar Main Street", "Kakuma Main Road", 
+      "Airport Road Lodwar", "Lokichogio Border Track"
+    ]
   },
   "West Pokot": {
-    towns: ["Kapenguria", "Makutano Pokot", "Chepareria", "Sigor", "Kacheliba"],
-    locations: ["Riwo", "Kipkomo", "Pokot South", "Wei Wei", "Batei"],
-    sublocations: ["Kapenguria CBD", "Makutano Stage", "Chepareria Center", "Sigor Sub"],
-    streets: ["Kitale-Lodwar Highway (Kapenguria)", "Makutano Main Road", "Chepareria Street"]
+    towns: [
+      "Kapenguria", "Makutano Pokot", "Chepareria", "Sigor", "Kacheliba", "Ortum", "Kabichbich", "Alale"
+    ],
+    locations: [
+      "Kapenguria", "Mnagei", "Riwo", "Kipkomo", "Chepareria", "Batei", "Wei Wei", 
+      "Lomut", "Sekerr", "Kacheliba", "Suam", "Alale"
+    ],
+    sublocations: [
+      "Kapenguria CBD", "Makutano Stage", "Chepareria Center", "Sigor Sub", 
+      "Ortum Center", "Kacheliba Border", "Suam Border Post", "Kabichbich Center", "Muruny"
+    ],
+    streets: [
+      "Kitale-Lodwar Highway (A1)", "Makutano Main Road", "Chepareria Street", 
+      "Kapenguria-Sigor Road", "Suam Border Road"
+    ]
   },
   "Samburu": {
-    towns: ["Maralal", "Baragoi", "Wamba", "Archers Post"],
-    locations: ["Maralal Central", "Suguta Marmar", "Samburu East", "Samburu North"],
-    sublocations: ["Maralal CBD", "Wamba Center", "Archers Post Junction", "Baragoi Stage"],
-    streets: ["Nyahururu-Maralal Road", "Maralal Main Street", "Archers Post Highway"]
+    towns: [
+      "Maralal", "Baragoi", "Wamba", "Archers Post", "Suguta Marmar", "South Horr"
+    ],
+    locations: [
+      "Maralal Central", "Loosuk", "Suguta Marmar", "Waso", "Wamba", "Lodokejek", 
+      "Archers Post", "El-Barta", "Baragoi", "Ndoto", "South Horr"
+    ],
+    sublocations: [
+      "Maralal CBD", "Lolkunono", "Wamba Center", "Archers Post Junction", 
+      "Baragoi Stage", "Suguta Marmar Town", "South Horr Center", "Maralal Safari Lodge Area"
+    ],
+    streets: [
+      "Nyahururu-Maralal Road (C78)", "Maralal Main Street", "Isiolo-Archers Post Highway (A2)", "Baragoi Main Track"
+    ]
   },
   "Trans-Nzoia": {
-    towns: ["Kitale", "Kiminini", "Endebess", "Saboti", "Cherangany"],
-    locations: ["Hospital Ward", "Bidii", "Kwanza", "Keiyo", "Machewa"],
-    sublocations: ["Kitale CBD", "Kipkaren", "Kiminini Town", "Endebess Center", "Milimani Kitale"],
-    streets: ["Kenyatta Street Kitale", "Kitale-Eldoret Highway", "Kitale-Webuye Road"]
+    towns: [
+      "Kitale", "Kiminini", "Endebess", "Saboti", "Cherangany/Kipkeikei", "Sibanga", "Suwerwa", "Kitalale"
+    ],
+    locations: [
+      "Hospital Ward", "Bidii", "Tuwan", "Matisi", "Kiminini", "Waitaluk", "Nabiswa", 
+      "Endebess", "Matumbei", "Saboti", "Machewa", "Sinyerere", "Cherangany", "Kwanza", "Keiyo"
+    ],
+    sublocations: [
+      "Kitale CBD", "Milimani Kitale", "Tuwan Estate", "Matisi Sub", "Kipkaren", 
+      "Kiminini Town", "Endebess Center", "Saboti Town", "Sibanga Market", "Bondeni Kitale"
+    ],
+    streets: [
+      "Kenyatta Street Kitale", "Kitale-Eldoret Highway (A1)", "Kitale-Webuye Road", 
+      "Kitale-Endebess Road", "Station Road Kitale", "Lwakhakha Road"
+    ]
   },
   "Uasin Gishu": {
-    towns: ["Eldoret East", "Eldoret West", "Ainabkoi", "Kapseret", "Kesses", "Moiben", "Turbo"],
-    locations: ["Eldoret CBD", "Elgon View", "Huruma", "Langas", "Pioneer", "Kipkenyo"],
-    sublocations: ["Annex", "Kimumu", "Sirikwa", "West Indies", "Maili Nne", "Racecourse"],
-    streets: ["Uganda Road", "Oloo Street", "Kipchoge Keino Avenue", "Nandi Road", "Eldoret-Iten Road"]
+    towns: [
+      "Eldoret", "Turbo", "Moiben", "Kesses", "Burnt Forest", "Ziwa", "Matunda", "Kipkaren"
+    ],
+    locations: [
+      "Eldoret CBD", "Elgon View", "Huruma", "Langas", "Pioneer", "Kipkenyo", 
+      "Kapyemit", "Kimumu", "Kapsoya", "Kapsaret", "Megun", "Ngeria", "Tarakwa", 
+      "Moiben", "Sergoit", "Ziwa", "Turbo", "Tapsagoi", "Kipkaren"
+    ],
+    sublocations: [
+      "Annex", "Kimumu", "Sirikwa", "West Indies", "Maili Nne", "Racecourse", 
+      "Action Estate", "Hillside", "Block 10", "Munyaka", "Yamumbi", "Burnt Forest Town", 
+      "Kapseret Stage", "Cheptiret"
+    ],
+    streets: [
+      "Uganda Road (A104)", "Oloo Street", "Kipchoge Keino Avenue", "Nandi Road", 
+      "Eldoret-Iten Road", "Kisumu Road Eldoret", "Eldoret Bypass", "Uganda Highway Frontage"
+    ]
   },
   "Elgeyo-Marakwet": {
-    towns: ["Iten", "Tambach", "Kapsowar", "Chebiemit", "Flourspar"],
-    locations: ["Keiyo North", "Keiyo South", "Marakwet East", "Marakwet West"],
-    sublocations: ["Iten Viewpoint Sub", "Kapsowar Center", "Tambach Stage", "Chebiemit Sub"],
-    streets: ["Eldoret-Iten Highway", "Iten Viewpoint Road", "Kapsowar Main Street"]
+    towns: [
+      "Iten", "Tambach", "Kapsowar", "Chebiemit", "Flourspar", "Chepkorio", "Nyaru", "Bugar"
+    ],
+    locations: [
+      "Iten/Tambach", "Kamariny", "Chepkorio", "Soy North", "Soy South", "Kapsowar", 
+      "Chebiemit", "Lelan", "Sambirir", "Endo", "Arror"
+    ],
+    sublocations: [
+      "Iten Viewpoint Sub", "Iten CBD", "Tambach Stage", "Kapsowar Center", 
+      "Chebiemit Sub", "Chepkorio Center", "Nyaru Junction", "Flourspar Mining Area", "Tot Market"
+    ],
+    streets: [
+      "Eldoret-Iten Highway (C51)", "Iten-Kapsowar Road", "Iten Viewpoint Road", 
+      "Tambach Escarpment Road", "Nyaru-Ravine Road"
+    ]
   },
   "Nandi": {
-    towns: ["Kapsabet", "Nandi Hills", "Mosoriot", "Kilibwoni", "Kobujoi"],
-    locations: ["Township", "Chesumei", "Aldai", "Tinderet", "Emgwen"],
-    sublocations: ["Kapsabet CBD", "Nandi Hills Center", "Mosoriot University Sub", "Kapsabet Stage"],
-    streets: ["Eldoret-Kapsabet Road", "Chavakali Road", "Nandi Hills Main Street"]
+    towns: [
+      "Kapsabet", "Nandi Hills", "Mosoriot", "Kobujoi", "Kilibwoni", "Maraba", "Serem", "Chemase"
+    ],
+    locations: [
+      "Kapsabet Township", "Chepterit", "Chemundu", "Kilibwoni", "Nandi Hills Town", 
+      "Lessos", "Tindinyo", "Kobujoi", "Kemeloi", "Aldai", "Kabiyet", "Sangalo", "Tinderet", "Songhor"
+    ],
+    sublocations: [
+      "Kapsabet CBD", "Nandi Hills Center", "Mosoriot University Sub", "Kapsabet Stage", 
+      "Kamatargui", "Baraton (UEAB Area)", "Chemelil Border", "Serem Market", "Chepterit Stage"
+    ],
+    streets: [
+      "Eldoret-Kapsabet Road (C39)", "Kapsabet-Chavakali Road", "Nandi Hills Main Street", 
+      "Kapsabet-Eldama Ravine Road", "Hospital Road Kapsabet"
+    ]
   },
   "Baringo": {
-    towns: ["Kabarnet", "Eldama Ravine", "Marigat", "Mogotio", "Chemulingot"],
-    locations: ["Township", "Baringo Central", "Baringo South", "Tiaty", "Mogotio Central"],
-    sublocations: ["Kabarnet CBD", "Eldama Ravine Town", "Marigat Junction", "Mogotio Sub"],
-    streets: ["Nakuru-Kabarnet Highway", "Eldama Ravine Main Road", "Marigat-Baringo Road"]
+    towns: [
+      "Kabarnet", "Eldama Ravine", "Marigat", "Mogotio", "Chemulingot", "Kabartonjo", "Tenges"
+    ],
+    locations: [
+      "Kabarnet Township", "Kapropita", "Sacho", "Tenges", "Eldama Ravine Central", 
+      "Lembus", "Mumberes", "Marigat", "Mukutani", "Mogotio", "Emining", "Kabartonjo", 
+      "Bartabwa", "Ribkwo", "Silale"
+    ],
+    sublocations: [
+      "Kabarnet CBD", "Eldama Ravine Town", "Marigat Junction", "Mogotio Sub", 
+      "Chemulingot Center", "Kabartonjo Stage", "Kiamariga", "Timboroa Border", 
+      "Lake Baringo Area (Kampi ya Samaki)"
+    ],
+    streets: [
+      "Nakuru-Kabarnet Highway (B4)", "Eldama Ravine-Nakuru Road", "Marigat-Baringo Road", 
+      "Kabarnet-Kabartonjo Road", "Ravine Main Street"
+    ]
   },
   "Laikipia": {
-    towns: ["Nanyuki", "Nyahururu", "Rumuruti", "Kinamba", "Doldol"],
-    locations: ["Nanyuki Central", "Igwamiti", "Laikipia West", "Laikipia North", "Umande"],
-    sublocations: ["Nanyuki CBD", "Nyahururu Town Sub", "Rumuruti Center", "Majengo Nanyuki"],
-    streets: ["Nairobi-Nanyuki Highway", "Kenyatta Way Nanyuki", "Nyahururu-Nakuru Road"]
+    towns: [
+      "Nanyuki", "Nyahururu", "Rumuruti", "Kinamba", "Doldol", "Ol Joret", "Sipili", "Wiyumirerie"
+    ],
+    locations: [
+      "Nanyuki Central", "Thingithu", "Igwamiti", "Salama", "Rumuruti Township", 
+      "Ol-Moran", "Sosian", "Mukogodo East", "Mukogodo West", "Umande", "Segera"
+    ],
+    sublocations: [
+      "Nanyuki CBD", "Majengo Nanyuki", "Likii", "Thingithu Sub", "Nyahururu Town Sub", 
+      "Rumuruti Center", "Sipili Market", "Doldol Stage", "Kinamba Town", "Equator Area Nanyuki"
+    ],
+    streets: [
+      "Nairobi-Nanyuki Highway (A2)", "Kenyatta Way Nanyuki", "Nyahururu-Nakuru Road (C77)", 
+      "Nanyuki-Doldol Road", "Rumuruti-Nyahururu Highway"
+    ]
   },
   "Nakuru": {
-    towns: ["Nakuru East", "Nakuru West", "Naivasha", "Gilgil", "Molo", "Njoro", "Subukia"],
-    locations: ["Lanet", "Milimani", "Section 58", "Kiamunyi", "Mai Mahiu", "Kenyatta West"],
-    sublocations: ["Free Area", "Shabab", "White House", "Barnabas", "Pipeline Nakuru", "Karatunga"],
-    streets: ["Kenyatta Avenue Nakuru", "Oginga Odinga Road", "Government Road", "Kanu Street", "Nairobi-Nakuru Highway"]
+    towns: [
+      "Nakuru", "Naivasha", "Gilgil", "Molo", "Njoro", "Subukia", "Mai Mahiu", "Bahati", "Elburgon", "Rongai"
+    ],
+    locations: [
+      "Nakuru CBD", "Milimani", "Section 58", "Kiamunyi", "Lanet", "Free Area", 
+      "Nakuru East", "Nakuru West", "Naivasha East", "Naivasha Central", "Viwandani", 
+      "Mai Mahiu", "Gilgil Township", "Elementaita", "Molo Township", "Njoro", "Lare", "Subukia", "Bahati"
+    ],
+    sublocations: [
+      "Shabab", "White House", "Barnabas", "Pipeline Nakuru", "Freehold", "Kaptembwa", 
+      "Bondeni", "Lake View Naivasha", "Longonot", "Gilgil Town Center", "Molo Center", 
+      "Egerton University Sub", "Njoro Stage", "Kabatini"
+    ],
+    streets: [
+      "Kenyatta Avenue Nakuru", "Oginga Odinga Road", "Government Road", "Kanu Street", 
+      "Nairobi-Nakuru Highway (A104)", "Moi South Lake Road (Naivasha)", "Nakuru-Eldoret Highway", "Bondeni Road"
+    ]
   },
   "Narok": {
-    towns: ["Narok Town", "Kilgoris", "Mai Mahiu Border", "Ololulunga", "Nairagie Enkare"],
-    locations: ["Township", "Narok North", "Narok South", "Transmara", "Narok West"],
-    sublocations: ["Narok CBD", "Kilgoris Center", "Ololulunga Stage", "Maasai Mara Gateway"],
-    streets: ["Nairobi-Narok Highway", "Narok-Bomet Road", "Kilgoris Main Street"]
+    towns: [
+      "Narok Town", "Kilgoris", "Ololulunga", "Nairagie Enkare", "Ntulele", "Lolgorian", "Emurua Dikirr"
+    ],
+    locations: [
+      "Township (Narok)", "Nkoidila", "Olekurto", "Olokurto", "Ololulunga", "Melelo", 
+      "Ntulele", "Mosiro", "Kilgoris Central", "Keyian", "Lolgorian", "Shankoe", "Emurua Dikirr"
+    ],
+    sublocations: [
+      "Narok CBD", "Stadium Area Narok", "Kilgoris Center", "Ololulunga Stage", 
+      "Maasai Mara Gateway (Talek, Sekenani)", "Ntulele Center", "Nairagie Enkare Town", "Lolgorian Sub"
+    ],
+    streets: [
+      "Nairobi-Narok Highway (B3)", "Narok-Bomet Road (B3)", "Narok-Mau Narok Road", 
+      "Kilgoris Main Street", "Sekenani Road", "Hospital Road Narok"
+    ]
   },
   "Kajiado": {
-    towns: ["Kitengela", "Ongata Rongai", "Ngong", "Kajiado Town", "Loitokitok", "Namanga"],
-    locations: ["Nkaimurunya", "Oloitokitok", "Isinya", "Kajiado Central", "Purko"],
-    sublocations: ["Kitengela CBD", "Rongai Stage", "Ngong Vet", "Namanga Border", "Mile 46"],
-    streets: ["Namanga Highway", "Magadi Road", "Ngong Road Extension", "Kitengela-Acacia Road"]
+    towns: [
+      "Kitengela", "Ongata Rongai", "Ngong", "Kajiado Town", "Loitokitok", "Namanga", "Isinya", "Kiserian", "Bisil"
+    ],
+    locations: [
+      "Nkaimurunya", "Ongata Rongai", "Ngong Central", "Olkeri", "Kitengela", 
+      "Oloosirkon/Sholinke", "Isinya", "Kajiado Central", "Dalalekutuk", "Matapato North", 
+      "Matapato South", "Oloitokitok", "Rombo", "Entonet", "Kiserian"
+    ],
+    sublocations: [
+      "Kitengela CBD", "Acacia", "Rongai Stage", "Ngong Vet", "Kiserian Town", 
+      "Namanga Border Post", "Loitokitok Town", "Isinya Center", "Mile 46", 
+      "Sultan Hamud Border", "Bisil Town"
+    ],
+    streets: [
+      "Namanga Highway (A104)", "Magadi Road", "Ngong Road Extension", 
+      "Kitengela-Acacia Road", "Kiserian-Isinya Road", "Loitokitok-Emali Road", "Old Namanga Road"
+    ]
   },
   "Kericho": {
-    towns: ["Kericho Town", "Litein", "Kipkelion", "Londiani", "Kapsoit"],
-    locations: ["Ainamoi", "Belgut", "Buret", "Soin/Sigowet", "Kipkelion East"],
-    sublocations: ["Kericho CBD", "Litein Center", "Kapsoit Stage", "Londiani Junction"],
-    streets: ["Nakuru-Kericho Highway", "Moi Road Kericho", "Kericho-Kisumu Highway"]
+    towns: [
+      "Kericho Town", "Litein", "Kipkelion", "Londiani", "Kapsoit", "Sondu Border", "Kabianga"
+    ],
+    locations: [
+      "Ainamoi", "Kapsoit", "Kipchebor", "Belgut", "Kabianga", "Seretut", "Litein", 
+      "Cheplanget", "Cheborge", "Kipkelion", "Chilchila", "Londiani", "Kedowa", "Soin", "Sigowet"
+    ],
+    sublocations: [
+      "Kericho CBD", "Nyagacho", "Litein Center", "Kapsoit Stage", "Londiani Junction", 
+      "Kabianga University Area", "Sondu Market Sub", "Brooke Center", "Chepseon"
+    ],
+    streets: [
+      "Nakuru-Kericho Highway (B3)", "Moi Road Kericho", "Kericho-Kisumu Highway (B1)", 
+      "Kericho-Litein Road", "Temple Road Kericho", "Hospital Road Kericho"
+    ]
   },
   "Bomet": {
-    towns: ["Bomet Town", "Sotik", "Longisa", "Mulot", "Chepalungu"],
-    locations: ["Township", "Bomet Central", "Sotik East", "Konoin", "Sigor Bomet"],
-    sublocations: ["Bomet CBD", "Sotik Center", "Longisa Stage", "Mulot Border"],
-    streets: ["Narok-Bomet Highway", "Bomet-Kericho Road", "Sotik Main Street"]
+    towns: [
+      "Bomet Town", "Sotik", "Longisa", "Mulot", "Chepalungu", "Silibwet", "Tenwek", "Mogogosiek"
+    ],
+    locations: [
+      "Township (Bomet)", "Silibwet", "Ndaraweta", "Longisa", "Kipreres", "Sotik Central", 
+      "Ndanai/Abosi", "Kipsonoi", "Sigor", "Kongasis", "Mogogosiek", "Kimulot"
+    ],
+    sublocations: [
+      "Bomet CBD", "Sotik Center", "Longisa Stage", "Mulot Border", "Tenwek Hospital Sub", 
+      "Silibwet Market", "Chebole", "Ndanai Town", "Mogogosiek Center"
+    ],
+    streets: [
+      "Narok-Bomet Highway (B3)", "Bomet-Kericho Road", "Sotik Main Street", 
+      "Tenwek Road", "Bomet-Sotik Highway", "Market Road Bomet"
+    ]
   },
   "Kakamega": {
-    towns: ["Kakamega Town", "Mumias", "Malava", "Butere", "Lugari", "Lumakanda"],
-    locations: ["Township", "Lurambi", "Mumias West", "Ikolomani", "Shinyalu"],
-    sublocations: ["Kakamega CBD", "Mumias Center", "Kefinco", "Approved Kakamega", "Malava Stage"],
-    streets: ["Kisumu-Kakamega Highway", "Mumias-Kakamega Road", "Canon Awori Street"]
+    towns: [
+      "Kakamega Town", "Mumias", "Malava", "Butere", "Lugari", "Lumakanda", "Khwisero", "Navakholo", "Shinyalu"
+    ],
+    locations: [
+      "Township (Kakamega)", "Lurambi", "Shirere", "Mahiakalo", "Mumias Central", 
+      "Mumias North", "Malava Township", "South Kabras", "Butere Township", 
+      "Marama Central", "Kisa Central", "Bunyala", "Lumakanda", "Lugari", "Shinyalu", "Ikolomani"
+    ],
+    sublocations: [
+      "Kakamega CBD", "Kefinco", "Approved Kakamega", "Joyland", "Amalemba", 
+      "Mumias Center", "Shibale", "Malava Stage", "Butere Town", "Lumakanda Center", "Khwisero Sub", "Iguhu"
+    ],
+    streets: [
+      "Kisumu-Kakamega Highway (A1)", "Mumias-Kakamega Road", "Canon Awori Street", 
+      "Kakamega-Webuye Highway", "Mumias Main Street", "Hospital Road Kakamega"
+    ]
   },
   "Vihiga": {
-    towns: ["Mbale", "Chavakali", "Luanda", "Hamisi", "Majengo Vihiga"],
-    locations: ["Sabatia", "Emuhaya", "Luanda Central", "Vihiga Ward", "Hamisi Central"],
-    sublocations: ["Mbale CBD", "Chavakali Market Sub", "Luanda Stage", "Majengo Junction"],
-    streets: ["Kisumu-Kakamega Highway (Chavakali)", "Luanda-Majengo Road", "Mbale Main Street"]
+    towns: [
+      "Mbale", "Chavakali", "Luanda", "Hamisi", "Majengo Vihiga", "Serem", "Jeptulu"
+    ],
+    locations: [
+      "Maragoli Central", "Mbale", "Sabatia West", "Lyaduywa/Izava", "Chavakali", 
+      "Luanda Township", "Luanda South", "Emuhaya Central", "Hamisi", "Shiru", "Gisambai", "Jepkoyai"
+    ],
+    sublocations: [
+      "Mbale CBD", "Chavakali Market Sub", "Luanda Stage", "Majengo Junction", "Mungoma", 
+      "Kaimosi Complex Area", "Mudete", "Gambogi", "Lunyerere", "Maseno Border"
+    ],
+    streets: [
+      "Kisumu-Kakamega Highway (A1)", "Luanda-Majengo Road", "Mbale Main Street", 
+      "Chavakali-Kaimosi Road", "C39 Highway"
+    ]
   },
   "Bungoma": {
-    towns: ["Bungoma Town", "Webuye", "Kimilili", "Chwele", "Sirisia", "Kanduyi"],
-    locations: ["Kanduyi", "Webuye East", "Webuye West", "Tongaren", "Mt Elgon"],
-    sublocations: ["Bungoma CBD", "Webuye Town Sub", "Kimilili Center", "Chwele Market Sub"],
-    streets: ["Eldoret-Malaba Highway", "Mumias-Bungoma Road", "Webuye Highway"]
+    towns: [
+      "Bungoma Town", "Webuye", "Kimilili", "Chwele", "Sirisia", "Kanduyi", 
+      "Malaba Border (Bungoma side)", "Kapsokwony", "Cheptais"
+    ],
+    locations: [
+      "Township (Bungoma)", "Bukembe West", "Khalaba", "Webuye East", "Webuye West", 
+      "Misikhu", "Kimilili Township", "Maeni", "Chwele", "Mukweya", "Sirisia", 
+      "Kapsokwony", "Cheptais", "Tongaren"
+    ],
+    sublocations: [
+      "Bungoma CBD", "Kanduyi Junction", "Webuye Town Sub", "National Housing Estate Bungoma", 
+      "Kimilili Center", "Chwele Market Sub", "Malakisi", "Cheptais Town", "Kapsokwony Stage", "Kamukuywa"
+    ],
+    streets: [
+      "Eldoret-Malaba Highway (A104)", "Mumias-Bungoma Road", "Webuye Highway", 
+      "Bungoma-Kimilili Road", "Station Road Bungoma", "Cathedral Road"
+    ]
   },
   "Busia": {
-    towns: ["Busia Town", "Malaba", "Nambale", "Funyula", "Port Victoria"],
-    locations: ["Matayos", "Teso North", "Teso South", "Budalangi", "Samia"],
-    sublocations: ["Busia Border", "Malaba Border Sub", "Nambale Center", "Port Victoria Sub"],
-    streets: ["Kisumu-Busia Highway", "Eldoret-Malaba Highway", "Customs Road Busia"]
+    towns: [
+      "Busia Town", "Malaba", "Nambale", "Funyula", "Port Victoria", "Bumala", "Amukura", "Matayos"
+    ],
+    locations: [
+      "Township (Busia)", "Burumba", "Matayos South", "Malaba Central", "Malaba North", 
+      "Ang'urai", "Nambale Township", "Bukhayo Central", "Funyula Central", "Bwiri", "Bunyala Central", "Bunyala South"
+    ],
+    sublocations: [
+      "Busia Border", "Custom Area", "Burumba Estate", "Malaba Border Sub", 
+      "Nambale Center", "Port Victoria Sub", "Bumala Market", "Ang'orom", "Amukura Town", "Sio Port"
+    ],
+    streets: [
+      "Kisumu-Busia Highway (B1)", "Eldoret-Malaba Highway (A104)", "Customs Road Busia", 
+      "Port Victoria Road", "Busia-Nambale Road", "Border Post Link"
+    ]
   },
   "Siaya": {
-    towns: ["Siaya Town", "Bondo", "Ugunja", "Yala", "Usenge"],
-    locations: ["Alego Usonga", "Gem", "Rarieda", "Ugenya", "Bondo Central"],
-    sublocations: ["Siaya CBD", "Bondo Town Sub", "Ugunja Center", "Yala Stage"],
-    streets: ["Kisumu-Bondo Highway", "Siaya-Rang'ala Road", "Bondo-Usenge Road"]
+    towns: [
+      "Siaya Town", "Bondo", "Ugunja", "Yala", "Usenge", "Ndori", "Akala", "Aram"
+    ],
+    locations: [
+      "Township (Siaya)", "Alego Central", "Yimbo East", "Yimbo West", "Bondo Township", 
+      "Sakwa", "Central Gem", "Yala Township", "Ugunja", "Ugenya", "Rarieda", "Uyoma"
+    ],
+    sublocations: [
+      "Siaya CBD", "Rabango", "Mulaha", "Bondo Town Sub", "Usenge Beach/Port", 
+      "Ugunja Center", "Yala Stage", "Ndori Junction", "Aram Market", "Nyadorera", "Luanda Kotieno"
+    ],
+    streets: [
+      "Kisumu-Bondo Highway (C28)", "Siaya-Rang'ala Road", "Bondo-Usenge Road", 
+      "Siaya-Bondo Road", "Hospital Road Siaya", "Luanda Kotieno Link"
+    ]
   },
   "Kisumu": {
-    towns: ["Kisumu Central", "Kisumu East", "Kisumu West", "Nyando", "Muhoroni", "Seme"],
-    locations: ["Milimani Kisumu", "Mamboleo", "Kenyatta", "Nyamasaria", "Otonglo", "Kondele"],
-    sublocations: ["Manyatta", "Nyawita", "Migosi", "Polyview", "Tom Mboya", "Riat"],
-    streets: ["Oginga Odinga Street", "Jomo Kenyatta Highway", "Accra Street", "Nyerere Road", "Kakamega Road"]
+    towns: [
+      "Kisumu City", "Muhoroni", "Maseno", "Ahero", "Kombewa", "Awasi"
+    ],
+    locations: [
+      "Kisumu Central", "Kaloleni", "Kisumu East", "Kajulu", "Kisumu West", 
+      "North Seme", "South Seme", "Nyando", "Ahero", "Kobura", "Muhoroni Township", "Miwani", "Chemelil"
+    ],
+    sublocations: [
+      "Milimani Kisumu", "Kisumu CBD", "Kondele", "Mamboleo", "Manyatta", 
+      "Nyawita", "Migosi", "Polyview", "Tom Mboya", "Riat", "Nyamasaria", 
+      "Otonglo", "Kibos", "Maseno Town", "Ahero Center", "Muhoroni Town"
+    ],
+    streets: [
+      "Oginga Odinga Street", "Jomo Kenyatta Highway", "Accra Street", 
+      "Nyerere Road", "Kisumu-Kakamega Road (A1)", "Kisumu-Busia Road", 
+      "Otieno Oyoo Street", "Nairobi Road (Nyamasaria Frontage)"
+    ]
   },
   "Homa Bay": {
-    towns: ["Homa Bay Town", "Oyugis", "Mbita", "Kendu Bay", "Ndhiwa"],
-    locations: ["Township", "Kasipul", "Kabondo Kasipul", "Suba North", "Rangwe"],
-    sublocations: ["Homa Bay CBD", "Oyugis Center", "Mbita Point Sub", "Kendu Bay Stage"],
-    streets: ["Kisumu-Homa Bay Highway", "Homa Bay-Mbita Road", "Oyugis-Kisii Road"]
+    towns: [
+      "Homa Bay Town", "Oyugis", "Mbita", "Kendu Bay", "Ndhiwa", "Sindo", "Rangwe", "Rodi Kopany"
+    ],
+    locations: [
+      "Township (Homa Bay)", "Homa Bay Central", "Kasipul", "Karachuonyo", "Kendu West", 
+      "Mbita Township", "Rusinga East/West", "Ndhiwa Township", "Kanyamwa", "Suba Central", "Gwassi North"
+    ],
+    sublocations: [
+      "Homa Bay CBD", "Shauri Yako", "Sofia", "Oyugis Center", "Mbita Point Sub", 
+      "Rusinga Island Area", "Kendu Bay Stage", "Ndhiwa Town", "Rodi Kopany Junction", "Sindo Town", "Mfangano Island Sub"
+    ],
+    streets: [
+      "Kisumu-Homa Bay Highway", "Homa Bay-Mbita Road", "Oyugis-Kisii Road", 
+      "Homa Bay-Rodi Kopany Road", "Pier Road Homa Bay", "Kendu Bay Main Street"
+    ]
   },
   "Migori": {
-    towns: ["Migori Town", "Rongo", "Awendo", "Isebania", "Kehancha"],
-    locations: ["Suna East", "Suna West", "Kuria West", "Kuria East", "Nyatike"],
-    sublocations: ["Migori CBD", "Rongo Center", "Awendo Sare", "Isebania Border"],
-    streets: ["Kisii-Migori-Isebania Highway", "Rongo Highway", "Sony Sugar Road"]
+    towns: [
+      "Migori Town", "Rongo", "Awendo", "Isebania", "Kehancha", "Sori", "Macalder", "Muhuru Bay"
+    ],
+    locations: [
+      "Suna East", "Suna West", "Kakrao", "Rongo Township", "Central Kamagambo", 
+      "Awendo Township", "North Sakwa", "Kuria West", "Kehancha", "Kuria East", "Nyatike", "Karungu"
+    ],
+    sublocations: [
+      "Migori CBD", "Kakrao Sub", "Oruba", "Rongo Center", "Awendo Sare (Sony Sugar Area)", 
+      "Isebania Border Post", "Kehancha Town", "Sori Karungu Bay", "Muhuru Beach Sub"
+    ],
+    streets: [
+      "Kisii-Migori-Isebania Highway (A1)", "Rongo Highway", "Sony Sugar Road", 
+      "Kehancha-Migori Road", "Isebania Border Link", "Suna Market Street"
+    ]
   },
   "Kisii": {
-    towns: ["Kisii Town", "Ogembo", "Suneka", "Keroka Border", "Tabaka"],
-    locations: ["Kitutu Chache", "Nyaribari Chache", "Bomachoge", "Bonchari", "Bobasi"],
-    sublocations: ["Kisii CBD", "Nyanchwa", "Daraja Mbili", "Mosocho", "Ogembo Center"],
-    streets: ["Kisumu-Kisii Highway", "Kisii-Kilgoris Road", "Hospital Road Kisii", "Ogembo Main Street"]
+    towns: [
+      "Kisii Town", "Ogembo", "Suneka", "Keroka Border", "Tabaka", "Gesusu", "Nyamache", "Marani"
+    ],
+    locations: [
+      "Kitutu Chache North/South", "Nyaribari Chache", "Township (Kisii)", "Nyaribari Masaba", 
+      "Bomachoge Borabu", "Ogembo Township", "Bonchari", "Suneka", "Bobasi", "Nyamache", "South Mugirango", "Tabaka"
+    ],
+    sublocations: [
+      "Kisii CBD", "Nyanchwa", "Daraja Mbili", "Mosocho", "Jogoo Estate", 
+      "Nyambera", "Ogembo Center", "Suneka Town", "Tabaka Soapstone Area", "Keroka Kisii side", "Nyamache Market"
+    ],
+    streets: [
+      "Kisumu-Kisii Highway (A1)", "Kisii-Kilgoris Road", "Hospital Road Kisii", 
+      "Ogembo Main Street", "Kisii-Keroka Highway", "Market Street Kisii", "Manga Road"
+    ]
   },
   "Nyamira": {
-    towns: ["Nyamira Town", "Keroka", "Nyyamira North", "Manga", "Ekerenyo"],
-    locations: ["West Mugirango", "North Mugirango", "Borabu", "Kitutu Masaba"],
-    sublocations: ["Nyamira CBD", "Keroka Center Sub", "Ekerenyo Stage", "Manga Sub"],
-    streets: ["Kisii-Chemosit Highway", "Nyamira-Keroka Road", "Main Street Nyamira"]
+    towns: [
+      "Nyamira Town", "Keroka", "Nyamira North (Ekerenyo)", "Manga", "Rigoma", "Kebirigo", "Nyansiongo"
+    ],
+    locations: [
+      "West Mugirango", "Township (Nyamira)", "Kebirigo", "North Mugirango", 
+      "Ekerenyo", "Borabu", "Nyansiongo", "Kitutu Masaba", "Manga", "Rigoma"
+    ],
+    sublocations: [
+      "Nyamira CBD", "Kebirigo Center", "Keroka Nyamira side", "Ekerenyo Stage", 
+      "Manga Sub", "Rigoma Market", "Nyansiongo Town", "Sang'anyi", "Chepilat"
+    ],
+    streets: [
+      "Kisii-Chemosit Highway", "Nyamira-Keroka Road", "Main Street Nyamira", 
+      "Kebirigo-Nyamira Highway", "Hospital Road Nyamira"
+    ]
   },
   "Nairobi": {
-    towns: ["Westlands", "Kasarani", "Lang'ata", "Starehe", "Dagoretti", "Embakasi", "Makadara", "Kamukunji", "Roysambu", "Mathare"],
-    locations: ["Kilimani", "Kasarani Central", "Karen", "CBD", "Upper Hill", "Industrial Area", "Eastleigh", "Buruburu", "South C", "Runda"],
-    sublocations: ["Mwiki", "Roysambu Sub", "Lavington", "Hurlingham", "South B", "Imara Daima", "Kileleshwa", "Parklands", "Donholm", "Pipeline"],
-    streets: ["Moi Avenue", "Kenyatta Avenue", "Waiyaki Way", "Thika Road Landmark", "Ngong Road", "Enterprise Road", "Argwings Kodhek", "Jogoo Road", "Mombasa Road"]
+    towns: [
+      "Westlands", "Kasarani", "Lang'ata", "Starehe", "Dagoretti", "Embakasi", 
+      "Makadara", "Kamukunji", "Roysambu", "Mathare", "Kibra"
+    ],
+    locations: [
+      "Kilimani", "Kasarani Central", "Karen", "CBD", "Upper Hill", "Industrial Area", 
+      "Eastleigh", "Buruburu", "South C", "Runda", "Lavington", "Westlands Central", 
+      "Parklands", "Embakasi East/West/Central", "Roysambu", "Kahawa West", "Kibera", "Pumwani", "Pangani"
+    ],
+    sublocations: [
+      "Mwiki", "Roysambu Sub", "Lavington", "Hurlingham", "South B", "Imara Daima", 
+      "Kileleshwa", "Parklands", "Donholm", "Pipeline", "Utawala", "Ruai", 
+      "Kayole", "Komarock", "Zimmerman", "Kahawa West", "Githurai 44", "Highridge", "Kangemi", "Kawangware"
+    ],
+    streets: [
+      "Moi Avenue", "Kenyatta Avenue", "Waiyaki Way (A104)", "Thika Superhighway", 
+      "Ngong Road", "Enterprise Road", "Argwings Kodhek Road", "Jogoo Road", 
+      "Mombasa Road", "Lang'ata Road", "Uhuru Highway", "Peponi Road", "Kiambu Road", "Ring Road Kilimani"
+    ]
   }
 }; // <--- Fixed: Added closing brace and semicolon here!
 
