@@ -1187,7 +1187,7 @@ export default function PremiumRiceStore() {
 
   // CASCADE REGIONAL LOGISTICS SELECTION WHEN COUNTY CHANGES
   useEffect(() => {
-    const currentData = REGIONAL_LOGISTICS_DATA[checkoutData.county] || DEFAULT_REGIONAL_LOGISTICS;
+    const currentData = REGIONAL_LOGISTICS_DATA[checkoutData.county as keyof typeof REGIONAL_LOGISTICS_DATA] || DEFAULT_REGIONAL_LOGISTICS;
     setCheckoutData(prev => ({
       ...prev,
       town: currentData.towns[0] || 'Central Town',
