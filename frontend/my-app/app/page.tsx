@@ -2599,7 +2599,7 @@ export default function PremiumRiceStore() {
                             onChange={(e) => setCheckoutData(prev => ({ ...prev, town: e.target.value }))}
                             className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-medium bg-white cursor-pointer"
                           >
-                            {(REGIONAL_LOGISTICS_DATA[checkoutData.county]?.towns || DEFAULT_REGIONAL_LOGISTICS.towns).map(t => (
+                            {(REGIONAL_LOGISTICS_DATA[checkoutData.county as keyof typeof REGIONAL_LOGISTICS_DATA]?.towns || DEFAULT_REGIONAL_LOGISTICS.towns).map((t) => (
                               <option key={t} value={t}>{t}</option>
                             ))}
                           </select>
