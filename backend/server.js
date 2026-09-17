@@ -31,8 +31,46 @@ const hostname = process.env.HOSTNAME || 'localhost';
 const port = parseInt(process.env.PORT || '5000', 10);
 const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
 
-// Resend Email Client Initialization
-const resend = new Resend(process.env.RESEND_API_KEY || 're_dR7G9AZb_MQdHKVHqAj44JSQF6gxZmEab');
+// Brevo & Resend Email Configuration (Key loaded strictly from process.env)
+const BREVO_API_KEY = process.env.BREVO_API_KEY;
+const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || process.env.SENDER_EMAIL || 'noreply@mwearicehub.com';
+const BREVO_SENDER_NAME = process.env.BREVO_SENDER_NAME || process.env.SENDER_NAME || 'Mwea Rice Hub';
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// Helper function to send email OTP via Brevo API v3
+const sendBrevoOtpEmail = async (toEmail, toName, otpCode) => {
+  if (!process.env.BREVO_API_KEY) {
+    throw new Error('BREVO_API_KEY is not defined in system environment variables');
+  }
+
+  return await axios.post(
+    'https://api.brevo.com/v3/smtp/email',
+    {
+      sender: { name: BREVO_SENDER_NAME, email: BREVO_SENDER_EMAIL },
+      to: [{ email: toEmail, name: toName || 'Valued Customer' }],
+      subject: 'Your Password Reset OTP Code',
+      htmlContent: `
+        <div style="font-family: Arial, sans-serif; padding: 24px; color: #333; max-width: 600px; margin: auto; background: #f9f9f9; border-radius: 8px;">
+          <h2 style="color: #2e7d32;">Password Reset OTP</h2>
+          <p>Hello ${toName || 'Valued Customer'},</p>
+          <p>You requested a password reset for your Mwea Rice Hub account. Use the 6-digit OTP code below to proceed:</p>
+          <div style="background: #e8f5e9; color: #2e7d32; font-size: 32px; font-weight: bold; text-align: center; padding: 16px; border-radius: 6px; letter-spacing: 6px; margin: 20px 0;">
+            ${otpCode}
+          </div>
+          <p style="font-size: 13px; color: #666;">This code is valid for 10 minutes. If you did not request this, please ignore this email.</p>
+        </div>
+      `
+    },
+    {
+      headers: {
+        'accept': 'application/json',
+        'api-key': process.env.BREVO_API_KEY,
+        'content-type': 'application/json'
+      }
+    }
+  );
+};
 
 // Pay Hero Credentials Configuration
 const getPayHeroAuthHeader = () => {
@@ -315,58 +353,22 @@ async function startServer() {
     };
     await SystemConfig.findOrCreate({ where: { key: 'county_overrides' }, defaults: { value: all47Counties } });
 
-    const kenyaLogisticsHierarchy = {
-      "Kirinyaga": {
-        "Mwea": {
-          "Wamumu": ["Wamumu Primary Area", "Paddy Field Block A", "Rice Mill Zone"],
-          "Mutithi": ["Mutithi Center", "Kandongu Market", "Kiura Junction"]
-        },
-        "Kerugoya": {
-          "Central": ["Hospital Road", "Town Plaza", "Stadium Area"],
-          "Kaguyu": ["Kaguyu Market", "Upper Hill"]
-        }
-      },
-      "Nairobi": {
-        "Nairobi Central": {
-          "CBD": ["Kenyatta Avenue", "Moi Avenue", "Haile Selassie Ave"],
-          "Ngara": ["Ngara Market", "Chambers Road"]
-        },
-        "Westlands": {
-          "Parklands": ["1st Parklands", "Limuru Road", "City Park"],
-          "Kitisuru": ["Getathuru", "Nyari Estate"]
-        },
-        "Kasarani": {
-          "Roysambu": ["TRM Drive", "Zimmerman", "Lumumba Drive"],
-          "Ruaraka": ["Baba Dogo", "Utalii Area"]
-        }
-      },
-      "Kiambu": {
-        "Thika": {
-          "Township": ["Commercial Street", "Section 9", "Gatuanyaga"],
-          "Juja": ["JKUAT Gate A", "Highpoint", "Kalimoni"]
-        },
-        "Kiambu Town": {
-          "Town Center": ["Indian Bazaar", "Kambui"],
-          "Ndumberi": ["Ndumberi Market", "Kirigiti"]
-        }
-      },
-      "Mombasa": {
-        "Nyali": {
-          "Mswambweni": ["Links Road", "Beach Way Drive"],
-          "Kongowea": ["Kongowea Market Area", "Karama Road"]
-        },
-        "Mvita": {
-          "CBD": ["Nkrumah Road", "Digo Road", "Treasury Square"]
-        }
-      },
-      "Nakuru": {
-        "Nakuru Town East": {
-          "Freehold": ["Freehold Market", "Kenyatta Lane"],
-          "Section 58": ["Hyrax Hill Area", "Phase 2"]
-        }
-      }
-    };
+    // ---------------------------------------------------------
+    // READ DYNAMIC LOCATIONS FILE
+    // ---------------------------------------------------------
+    const locationDataPath = path.join(__dirname, 'kenya_locations.json');
+    let kenyaLogisticsHierarchy = {};
+
+    if (fs.existsSync(locationDataPath)) {
+      const rawData = fs.readFileSync(locationDataPath, 'utf8');
+      kenyaLogisticsHierarchy = JSON.parse(rawData);
+      console.log('✅ Loaded dynamic Kenya Logistics Hierarchy from kenya_locations.json');
+    } else {
+      console.warn('⚠️ kenya_locations.json not found, loading empty hierarchy fallback');
+    }
+    
     await SystemConfig.findOrCreate({ where: { key: 'logistics_hierarchy' }, defaults: { value: kenyaLogisticsHierarchy } });
+    // ---------------------------------------------------------
 
     // --- EXPANDED 10-FIELD HERO CONFIGURATION DEFAULT ---
     await SystemConfig.findOrCreate({
@@ -673,7 +675,7 @@ async function startServer() {
       }
     });
 
-    // --- FORGOT PASSWORD (OTP GENERATION & EMAIL VIA RESEND) ---
+    // --- FORGOT PASSWORD (OTP GENERATION & EMAIL VIA BREVO) ---
     expressApp.post('/api/user/forgot-password', async (req, res) => {
       try {
         const { email } = req.body || {};
@@ -696,27 +698,856 @@ async function startServer() {
         user.resetTokenExpires = tokenExpiration;
         await user.save();
 
-        await resend.emails.send({
-          from: 'Mwea Rice Hub <onboarding@resend.dev>',
-          to: user.email,
-          subject: 'Your Password Reset OTP Code',
-          html: `
-            <div style="font-family: Arial, sans-serif; padding: 24px; color: #333; max-width: 600px; margin: auto; background: #f9f9f9; border-radius: 8px;">
-              <h2 style="color: #2e7d32;">Password Reset OTP</h2>
-              <p>Hello ${user.fullName || 'Valued Customer'},</p>
-              <p>You requested a password reset for your Mwea Rice Hub account. Use the 6-digit OTP code below to proceed:</p>
-              <div style="background: #e8f5e9; color: #2e7d32; font-size: 32px; font-weight: bold; text-align: center; padding: 16px; border-radius: 6px; letter-spacing: 6px; margin: 20px 0;">
-                ${otpCode}
-              </div>
-              <p style="font-size: 13px; color: #666;">This code is valid for 10 minutes. If you did not request this, please ignore this email.</p>
-            </div>
-          `
-        });
+        // Send OTP via Brevo API endpoint
+        await sendBrevoOtpEmail(user.email, user.fullName, otpCode);
 
-        console.log(`📧 Password reset OTP sent to ${user.email}`);
+        console.log(`📧 Password reset OTP sent to ${user.email} via Brevo`);
         res.status(200).json({ message: 'If an account with that email exists, a password reset OTP has been sent.' });
       } catch (err) {
-        console.error('❌ Forgot Password OTP Error:', err);
+        console.error('❌ Forgot Password OTP Error via Brevo:', err.response?.data || err.message);
+        res.status(500).json({ error: 'Failed to dispatch password reset OTP email' });
+      }
+    });
+
+    // --- RESET PASSWORD WITH OTP ---
+    expressApp.post('/api/user/reset-password', async (req, res) => {
+      try {
+        const { email, otp, token, newPassword } = req.body || {};
+        const verificationCode = otp || token;
+
+        if (!email || !verificationCode || !newPassword) {
+          return res.status(400).json({ error: 'Email, OTP code, and new password are required' });
+        }
+
+        if (newPassword.length < 6) {
+          return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+        }
+
+        const user = await User.findOne({ 
+          where: { 
+            email, 
+            resetToken: String(verificationCode).trim(),
+            resetTokenExpires: { [Op.gt]: Date.now() } 
+          } 
+        });
+
+        if (!user) {
+          return res.status(400).json({ error: 'Invalid or expired OTP code' });
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+        user.password = hashedPassword;
+        user.resetToken = null;
+        user.resetTokenExpires = null;
+        await user.save();
+
+        res.status(200).json({ message: 'Password has been reset successfully. You can now login with your new password.' });
+      } catch (err) {
+        console.error('❌ Reset Password OTP Error:', err);
+        res.status(500).json({ error: 'Internal server error while resetting password' });
+      }
+    });
+
+    // --- USER REWARD POINTS TRACKING ---
+    expressApp.get('/api/user/points', authenticateToken, async (req, res) => {
+      try {
+        const user = await User.findByPk(req.user.id, { attributes: ['id', 'fullName', 'rewardPoints'] });
+        res.json({
+          rewardPoints: user ? user.rewardPoints || 0 : 0,
+          ratePerKg: 0.2
+        });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // ==========================================
+    // USER PERSISTENT CART MANAGEMENT APIs
+    // ==========================================
+    expressApp.get('/api/cart', authenticateToken, async (req, res) => {
+      try {
+        const items = await Cart.findAll({
+          where: { userId: req.user.id },
+          include: [{ model: RiceProduct, as: 'product' }]
+        });
+        
+        let totalKg = 0;
+        const formattedItems = items.map(item => {
+          const p = item.product ? item.product.toJSON() : {};
+          const weight = p.weightKg || 0;
+          const qty = item.quantity || 1;
+          totalKg += weight * qty;
+          let effectivePrice = p.basePrice || p.price || 0;
+          if (flashSaleState && flashSaleState.active && p.flashSalePrice) {
+            effectivePrice = p.flashSalePrice;
+          }
+          return {
+            id: item.id,
+            productId: item.productId,
+            quantity: item.quantity,
+            product: {
+              ...p,
+              price: effectivePrice
+            }
+          };
+        });
+
+        const expectedPoints = Number((totalKg * 0.2).toFixed(2));
+        res.json({ items: formattedItems, totalKg, expectedPoints });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.post('/api/cart/add', authenticateToken, async (req, res) => {
+      try {
+        const { productId, quantity } = req.body || {};
+        const qty = Number(quantity || 1);
+        
+        let cartItem = await Cart.findOne({ where: { userId: req.user.id, productId } });
+        if (cartItem) {
+          cartItem.quantity += qty;
+          await cartItem.save();
+        } else {
+          cartItem = await Cart.create({ userId: req.user.id, productId, quantity: qty });
+        }
+        
+        res.status(201).json({ message: 'Item added to user cart', cartItem });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.put('/api/cart/item/:id', authenticateToken, async (req, res) => {
+      try {
+        const { quantity } = req.body || {};
+        const cartItem = await Cart.findOne({ where: { id: req.params.id, userId: req.user.id } });
+        if (!cartItem) return res.status(404).json({ error: 'Cart item not found' });
+        
+        if (Number(quantity) <= 0) {
+          await cartItem.destroy();
+          return res.json({ message: 'Cart item removed' });
+        }
+        
+        cartItem.quantity = Number(quantity);
+        await cartItem.save();
+        res.json({ message: 'Cart item quantity updated', cartItem });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.delete('/api/cart/item/:id', authenticateToken, async (req, res) => {
+      try {
+        const deleted = await Cart.destroy({ where: { id: req.params.id, userId: req.user.id } });
+        if (!deleted) return res.status(404).json({ error: 'Cart item not found' });
+        res.json({ message: 'Item deleted from cart' });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.delete('/api/cart', authenticateToken, async (req, res) => {
+      try {
+        await Cart.destroy({ where: { userId: req.user.id } });
+        res.json({ message: 'User cart cleared successfully' });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.get('/api/products/catalog', async (req, res) => {
+      try {
+        const { variety, minWeight, maxWeight, maxPrice, search } = req.query;
+        let whereCondition = { isAvailable: true };
+
+        if (variety) whereCondition.variety = variety;
+        if (minWeight || maxWeight) {
+          whereCondition.weightKg = {};
+          if (minWeight) whereCondition.weightKg[Op.gte] = Number(minWeight);
+          if (maxWeight) whereCondition.weightKg```javascript
+import dns from 'dns';
+dns.setDefaultResultOrder('ipv4first');
+
+import express from 'express';
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
+import { Sequelize, DataTypes, Op } from 'sequelize';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import multer from 'multer';
+import fs from 'fs';
+import path, { dirname } from 'path';
+import { fileURLToPath } from 'url';
+import axios from 'axios';
+import { Resend } from 'resend';
+import { handlePayHeroWebhook } from './controllers/webhookController.js';
+import { initiatePayHeroPayment } from './controllers/paymentController.js';
+import { kenyaLogisticsHierarchy, all47Counties } from './kenya_locations.js';
+
+dotenv.config();
+
+// ==========================================
+// 0. SYSTEM INITIALIZATION & PATHS
+// ==========================================
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const dev = process.env.NODE_ENV !== 'production';
+const hostname = process.env.HOSTNAME || 'localhost';
+const port = parseInt(process.env.PORT || '5000', 10);
+const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
+
+// Brevo & Resend Email Configuration (Key loaded strictly from process.env)
+const BREVO_API_KEY = process.env.BREVO_API_KEY;
+const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || process.env.SENDER_EMAIL || 'noreply@mwearicehub.com';
+const BREVO_SENDER_NAME = process.env.BREVO_SENDER_NAME || process.env.SENDER_NAME || 'Mwea Rice Hub';
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// Helper function to send email OTP via Brevo API v3
+const sendBrevoOtpEmail = async (toEmail, toName, otpCode) => {
+  if (!process.env.BREVO_API_KEY) {
+    throw new Error('BREVO_API_KEY is not defined in system environment variables');
+  }
+
+  return await axios.post(
+    '[https://api.brevo.com/v3/smtp/email](https://api.brevo.com/v3/smtp/email)',
+    {
+      sender: { name: BREVO_SENDER_NAME, email: BREVO_SENDER_EMAIL },
+      to: [{ email: toEmail, name: toName || 'Valued Customer' }],
+      subject: 'Your Password Reset OTP Code',
+      htmlContent: `
+        <div style="font-family: Arial, sans-serif; padding: 24px; color: #333; max-width: 600px; margin: auto; background: #f9f9f9; border-radius: 8px;">
+          <h2 style="color: #2e7d32;">Password Reset OTP</h2>
+          <p>Hello ${toName || 'Valued Customer'},</p>
+          <p>You requested a password reset for your Mwea Rice Hub account. Use the 6-digit OTP code below to proceed:</p>
+          <div style="background: #e8f5e9; color: #2e7d32; font-size: 32px; font-weight: bold; text-align: center; padding: 16px; border-radius: 6px; letter-spacing: 6px; margin: 20px 0;">
+            ${otpCode}
+          </div>
+          <p style="font-size: 13px; color: #666;">This code is valid for 10 minutes. If you did not request this, please ignore this email.</p>
+        </div>
+      `
+    },
+    {
+      headers: {
+        'accept': 'application/json',
+        'api-key': process.env.BREVO_API_KEY,
+        'content-type': 'application/json'
+      }
+    }
+  );
+};
+
+// Pay Hero Credentials Configuration
+const getPayHeroAuthHeader = () => {
+  if (process.env.PAYHERO_BASIC_AUTH) {
+    const cleanAuth = process.env.PAYHERO_BASIC_AUTH.replace(/[\r\n]+/g, '').trim();
+    return cleanAuth.startsWith('Basic ') ? cleanAuth : `Basic ${cleanAuth.replace(/^Basic/i, '').trim()}`;
+  }
+  if (process.env.PAYHERO_API_KEY && process.env.PAYHERO_API_SECRET) {
+    const creds = `${process.env.PAYHERO_API_KEY.trim()}:${process.env.PAYHERO_API_SECRET.trim()}`;
+    return `Basic ${Buffer.from(creds).toString('base64')}`;
+  }
+  const fallbackRaw = 'Basic cnBqZHU3YWJyWG03SWdqcDBI\\nBF:NHFvR\\nV32XR99cDq\\nGf3igKB3R0A5vRtgTMJ7Jpfm'
+    .replace(/\\[rn]/g, '')
+    .replace(/[\r\n]+/g, '')
+    .trim();
+  return fallbackRaw.startsWith('Basic ') ? fallbackRaw : `Basic ${fallbackRaw.replace(/^Basic/i, '').trim()}`;
+};
+
+const PAYHERO_CHANNEL_ID = Number(process.env.PAYHERO_CHANNEL_ID || 11668);
+
+console.log('🚀 Initializing Premium Rice & Grain E-Commerce Backend...');
+console.log('DEBUG: Booting unified agricultural & hardware architecture with Pay Hero Integration...');
+
+// ==========================================
+// 1. UPLOAD DIRECTORY CONFIGURATION (MULTER)
+// ==========================================
+const uploadDir = path.join(__dirname, 'public', 'uploads');
+const imagesDir = path.join(__dirname, 'public', 'images');
+
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+  console.log('DEBUG: Created missing upload directory at', uploadDir);
+}
+
+if (!fs.existsSync(imagesDir)) {
+  fs.mkdirSync(imagesDir, { recursive: true });
+  console.log('DEBUG: Created missing images directory at', imagesDir);
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname.replace(/\s+/g, '-'))
+});
+const upload = multer({ storage });
+
+// ==========================================
+// 2. DATABASE SCHEMAS & MODELS
+// ==========================================
+import { 
+  User, 
+  RiceProduct, 
+  Order, 
+  Review, 
+  AdminLog, 
+  SystemConfig, 
+  sequelize 
+} from './lib/db.js';
+
+// User Cart Database Model Definition
+const Cart = sequelize.models.Cart || sequelize.define('Cart', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  userId: {
+    type: DataTypes.INTEGER,
+    allowNull: false
+  },
+  productId: {
+    type: DataTypes.INTEGER,
+    allowNull: false
+  },
+  quantity: {
+    type: DataTypes.INTEGER,
+    defaultValue: 1,
+    allowNull: false
+  }
+});
+
+// Setup Model Associations
+if (Cart && RiceProduct && !Cart.associations.RiceProduct) {
+  Cart.belongsTo(RiceProduct, { foreignKey: 'productId', as: 'product' });
+}
+if (Cart && User && !Cart.associations.User) {
+  Cart.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+}
+
+// ==========================================
+// 3. LIVE FLASH HARVEST SALE ENGINE UTILS
+// ==========================================
+let flashSaleState = {
+  active: false,
+  endTime: null,
+  countdownIntervalId: null
+};
+
+function initializeFlashSaleEngine(io) {
+  SystemConfig.findOne({ where: { key: 'black_friday' } }).then((config) => {
+    if (config && config.value && config.value.active) {
+      const remainingTime = new Date(config.value.endTime).getTime() - Date.now();
+      if (remainingTime > 0) {
+        flashSaleState.active = true;
+        flashSaleState.endTime = config.value.endTime;
+        startFlashSaleCountdown(io);
+        console.log(`🔥 Flash Harvest Sale Engine Restored! Active until: ${flashSaleState.endTime}`);
+      } else {
+        config.value = { ...config.value, active: false };
+        config.changed('value', true);
+        config.save();
+      }
+    }
+  }).catch(err => console.error('❌ Failed to boot Flash Sale Engine state:', err));
+}
+
+function startFlashSaleCountdown(io) {
+  if (flashSaleState.countdownIntervalId) clearInterval(flashSaleState.countdownIntervalId);
+  
+  flashSaleState.countdownIntervalId = setInterval(() => {
+    const totalRemaining = new Date(flashSaleState.endTime).getTime() - Date.now();
+    if (totalRemaining <= 0) {
+      clearInterval(flashSaleState.countdownIntervalId);
+      flashSaleState.active = false;
+      flashSaleState.endTime = null;
+      io.emit('blackFridayEnded', { active: false });
+      
+      SystemConfig.findOne({ where: { key: 'black_friday' } }).then(config => {
+        if (config) {
+          config.value = { ...config.value, active: false };
+          config.changed('value', true);
+          config.save();
+        }
+      });
+      console.log('🏁 Flash Harvest Sale structural window has closed.');
+    } else {
+      io.emit('blackFridayTick', {
+        active: true,
+        endTime: flashSaleState.endTime,
+        msRemaining: totalRemaining
+      });
+    }
+  }, 1000);
+}
+
+// ==========================================
+// 4. MIDDLEWARES
+// ==========================================
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+  let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : authHeader;
+  if (!token && req.query && req.query.token) {
+    token = req.query.token;
+  }
+  
+  if (token) {
+    token = token.trim().replace(/^["']|["']$/g, '');
+  }
+
+  if (!token || token === 'null' || token === 'undefined' || token === '') {
+    console.log('DEBUG: Auth failed - Missing token');
+    return res.status(401).json({ error: 'Access token missing' });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, decodedUser) => {
+    if (err) {
+      console.log(`DEBUG: Auth failed - Invalid token (${err.message})`);
+      return res.status(403).json({ error: 'Token invalid or expired' });
+    }
+    req.user = decodedUser;
+    next();
+  });
+};
+
+const requireAdmin = async (req, res, next) => {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ error: 'Authentication details missing' });
+    }
+    const userInstance = await User.findByPk(req.user.id);
+    if (!userInstance || userInstance.role !== 'admin') {
+      console.log(`DEBUG: Admin clearance rejected for user ID: ${req.user.id}`);
+      return res.status(403).json({ error: 'Access denied. Administrator privileges required.' });
+    }
+    if (!userInstance.isActive) return res.status(403).json({ error: 'Admin account disabled' });
+    req.adminUser = userInstance;
+    next();
+  } catch (error) {
+    console.error('DEBUG: Role evaluation crash:', error);
+    res.status(500).json({ error: 'Internal role evaluation crash' });
+  }
+};
+
+// ==========================================
+// 5. SERVER INITIALIZATION & DATABASE BOOTSTRAP
+// ==========================================
+async function startServer() {
+  try {
+    await sequelize.authenticate();
+    
+    // Auto migration checks for dynamic reward points & product buying prices
+    try {
+      const queryInterface = sequelize.getQueryInterface();
+      const userTable = await queryInterface.describeTable('Users');
+      if (!userTable.rewardPoints) {
+        await queryInterface.addColumn('Users', 'rewardPoints', {
+          type: DataTypes.FLOAT,
+          defaultValue: 0,
+          allowNull: false
+        });
+      }
+      const productTable = await queryInterface.describeTable('RiceProducts');
+      if (!productTable.buyingPrice) {
+        await queryInterface.addColumn('RiceProducts', 'buyingPrice', {
+          type: DataTypes.FLOAT,
+          defaultValue: 0,
+          allowNull: true
+        });
+      }
+    } catch (colErr) {
+      console.log('DEBUG: Table column sync verified.');
+    }
+
+    await sequelize.sync();
+    
+    const currentMode = process.env.DB_MODE === 'cloud' ? '☁️ AIVEN CLOUD' : '🏠 LOCAL';
+    console.log(`🍃 Database Connected Successfully! Mode: [ ${currentMode} ]`);
+
+    const expressApp = express();
+    expressApp.set('trust proxy', true);
+
+    const server = createServer(expressApp);
+
+    const corsOptions = {
+      origin: (origin, callback) => {
+        if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1') || origin.endsWith('.onrender.com')) {
+          callback(null, true);
+        } else {
+          callback(null, true);
+        }
+      },
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      credentials: true
+    };
+    
+    expressApp.use(cors(corsOptions));
+    expressApp.use(express.json({ limit: '50mb' }));
+    expressApp.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+    expressApp.use(express.static(path.join(__dirname, 'public')));
+    expressApp.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
+    expressApp.use('/images', express.static(path.join(__dirname, 'public', 'images')));
+
+    await SystemConfig.findOrCreate({ where: { key: 'transport_fee' }, defaults: { value: 250 } });
+    await SystemConfig.findOrCreate({ where: { key: 'black_friday' }, defaults: { value: { active: false, endTime: null } } });
+    
+    await SystemConfig.findOrCreate({
+      where: { key: 'mpesa_config' },
+      defaults: {
+        value: {
+          paybillNumber: '522522',
+          paybillAccount: 'MWEARICE',
+          tillNumber: '889900',
+          stkEnabled: true
+        }
+      }
+    });
+
+    await SystemConfig.findOrCreate({ where: { key: 'county_overrides' }, defaults: { value: all47Counties } });
+
+    await SystemConfig.findOrCreate({ where: { key: 'logistics_hierarchy' }, defaults: { value: kenyaLogisticsHierarchy } });
+
+    // --- EXPANDED 10-FIELD HERO CONFIGURATION DEFAULT ---
+    await SystemConfig.findOrCreate({
+      where: { key: 'hero_settings' },
+      defaults: {
+        value: {
+          type: 'video',
+          url: '[https://www.youtube.com/embed/gjZAThNHGwI?start=6&autoplay=1&mute=1&loop=1&playlist=gjZAThNHGwI](https://www.youtube.com/embed/gjZAThNHGwI?start=6&autoplay=1&mute=1&loop=1&playlist=gjZAThNHGwI)',
+          title: 'Direct From Mwea Paddy Fields',
+          subtitle: '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.',
+          badgeText: '🌾 100% Authentic Mwea Harvest',
+          buttonText: 'Shop Fresh Harvest Now',
+          buttonLink: '/catalog',
+          secondaryButtonText: 'View Flash Deals',
+          secondaryButtonLink: '#flash-sales',
+          overlayOpacity: 0.4,
+          alignment: 'center',
+          autoPlay: true,
+          videoDuration: 5,
+          imageDuration: 4
+        }
+      }
+    });
+
+    await SystemConfig.findOrCreate({
+      where: { key: 'homepage_carousel' },
+      defaults: {
+        value: [
+          { 
+            id: "1", 
+            type: 'video', 
+            url: '[https://www.youtube.com/embed/gjZAThNHGwI?start=6&autoplay=1&mute=1&loop=1&playlist=gjZAThNHGwI](https://www.youtube.com/embed/gjZAThNHGwI?start=6&autoplay=1&mute=1&loop=1&playlist=gjZAThNHGwI)', 
+            title: 'Mwea Paddy Harvest Live', 
+            subtitle: 'Direct from rich Kenyan soil into your kitchen.',
+            duration: 5
+          },
+          { 
+            id: "2", 
+            type: 'image', 
+            url: '[https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=1200&q=80](https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=1200&q=80)', 
+            title: 'Pure Mwea Pishori Grade 1', 
+            subtitle: 'Unmatched aroma and long-grain perfection.',
+            duration: 4
+          },
+          { 
+            id: "3", 
+            type: 'image', 
+            url: '[https://images.unsplash.com/photo-1536304929831-ee1ca9d44906?auto=format&fit=crop&w=1200&q=80](https://images.unsplash.com/photo-1536304929831-ee1ca9d44906?auto=format&fit=crop&w=1200&q=80)', 
+            title: 'Wholesale & Bulk Sack Delivery', 
+            subtitle: 'Available in 5kg, 10kg, 25kg, and 50kg sacks with discounted transport.',
+            duration: 3
+          },
+          { 
+            id: "4", 
+            type: 'image', 
+            url: '[https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=1200&q=80](https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=1200&q=80)', 
+            title: 'Premium Imported Basmati', 
+            subtitle: 'Aged to perfection for fluffy, non-sticky ceremonial cooking.',
+            duration: 4
+          }
+        ]
+      }
+    });
+
+    const existingFeaturedCount = await RiceProduct.count();
+    if (existingFeaturedCount === 0) {
+      await RiceProduct.bulkCreate([
+        {
+          brandName: 'Pure Mwea Pishori Grade 1',
+          variety: 'Aromatic Pishori',
+          weightKg: 5,
+          basePrice: 1250,
+          buyingPrice: 950,
+          flashSalePrice: 1100,
+          stockQuantity: 150,
+          imageUrl: '[https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=800&q=80](https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=800&q=80)',
+          isAvailable: true
+        },
+        {
+          brandName: 'Super Aromatic Basmati',
+          variety: 'Long Grain Basmati',
+          weightKg: 10,
+          basePrice: 2400,
+          buyingPrice: 1800,
+          flashSalePrice: 2150,
+          stockQuantity: 80,
+          imageUrl: '[https://images.unsplash.com/photo-1536304929831-ee1ca9d44906?auto=format&fit=crop&w=800&q=80](https://images.unsplash.com/photo-1536304929831-ee1ca9d44906?auto=format&fit=crop&w=800&q=80)',
+          isAvailable: true
+        },
+        {
+          brandName: 'Biryani Special Feast Grain',
+          variety: 'Kaisari Long Grain',
+          weightKg: 25,
+          basePrice: 5200,
+          buyingPrice: 4000,
+          flashSalePrice: 4800,
+          stockQuantity: 40,
+          imageUrl: '[https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=800&q=80](https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=800&q=80)',
+          isAvailable: true
+        },
+        {
+          brandName: 'Whole Grain Brown Pishori',
+          variety: 'Brown Nutritious Rice',
+          weightKg: 5,
+          basePrice: 1400,
+          buyingPrice: 1050,
+          flashSalePrice: 1250,
+          stockQuantity: 60,
+          imageUrl: '[https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=800&q=80](https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=800&q=80)',
+          isAvailable: true
+        }
+      ]);
+      console.log('🌾 Seeded default 4 Featured Grain selection products into catalog.');
+    }
+
+    expressApp.post('/api/sync/google', async (req, res) => {
+      const { googleId, fullName, email } = req.body || {};
+      
+      if (!googleId) {
+        console.error("DEBUG: google-sync received an empty payload");
+        return res.status(400).json({ error: "Missing identity credentials" });
+      }
+
+      try {
+        let user = await User.findOne({ where: { googleId } });
+        if (!user) {
+          user = await User.create({ 
+            googleId, 
+            fullName: fullName || 'Google User', 
+            email, 
+            role: 'user',
+            isActive: true
+          });
+          console.log(`✨ Created fresh database profile for Google user: ${fullName}`);
+        } else {
+          console.log(`🔐 Verified existing database profile for Google user: ${fullName}`);
+        }
+        res.status(200).json({ message: "User synced", user });
+      } catch (error) {
+        console.error("Database Sync Error:", error);
+        res.status(500).json({ error: "DB Sync Failed" });
+      }
+    });
+
+    const io = new SocketIOServer(server, { 
+      cors: corsOptions
+    });
+
+    initializeFlashSaleEngine(io);
+
+    io.on('connection', (socket) => {
+      if (flashSaleState.active) socket.emit('blackFridayTick', { active: true, endTime: flashSaleState.endTime });
+      
+      socket.on('joinAdminChannel', (token) => {
+        jwt.verify(token, JWT_SECRET, async (err, decoded) => {
+          if (!err && decoded && decoded.role === 'admin') {
+            socket.join('admin-dashboard-room');
+            console.log(`DEBUG: Admin joined real-time channel. Node ID: ${decoded.id}`);
+          }
+        });
+      });
+    });
+
+    // ==========================================
+    // 6. PUBLIC REST API CONTROLLERS & PAYMENTS
+    // ==========================================
+
+    // 1. Route called by your frontend checkout page to start M-Pesa STK push
+    expressApp.post('/api/payments/payhero/initiate', initiatePayHeroPayment);
+
+    // 2. Route called automatically by PayHero servers when the transaction completes/fails
+    expressApp.post('/api/payments/payhero/webhook', handlePayHeroWebhook);
+
+    expressApp.post('/api/user/signup', async (req, res) => {
+      try {
+        const { phoneNumber, email, password, fullName } = req.body || {};
+        
+        if (!password || !fullName || (!phoneNumber && !email)) {
+          return res.status(400).json({ error: 'Full name, password, and at least a phone number or email are required' });
+        }
+        
+        const searchCondition = [];
+        if (phoneNumber) searchCondition.push({ phoneNumber });
+        if (email) searchCondition.push({ email });
+
+        const existingUser = await User.findOne({ where: { [Op.or]: searchCondition } });
+        if (existingUser) {
+          return res.status(409).json({ error: 'User registration payload matches an active account' });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 12);
+        const newUser = await User.create({ phoneNumber, email, password: hashedPassword, fullName });
+        
+        const token = jwt.sign({ id: newUser.id, role: newUser.role }, JWT_SECRET, { expiresIn: '7d' });
+        res.status(201).json({ token, user: { id: newUser.id, fullName: newUser.fullName, role: newUser.role, rewardPoints: newUser.rewardPoints || 0 } });
+      } catch (err) { 
+        console.error("Signup Error:", err);
+        res.status(500).json({ error: err.message || 'Internal server signup failure' }); 
+      }
+    });
+
+    expressApp.post('/api/user/login', async (req, res) => {
+      try {
+        const { phoneNumber, email, identifier, password } = req.body || {};
+        const loginIdentifier = phoneNumber || email || identifier;
+        
+        if (!loginIdentifier || !password) {
+          return res.status(400).json({ error: 'Phone number or email and password are required' });
+        }
+
+        const user = await User.findOne({ 
+          where: { 
+            [Op.or]: [
+              { phoneNumber: loginIdentifier },
+              { email: loginIdentifier }
+            ]
+          } 
+        });
+
+        if (!user || !user.isActive) {
+          return res.status(401).json({ error: 'Invalid credentials or account disabled/suspended' });
+        }
+
+        if (!user.password) {
+          return res.status(401).json({ error: 'Account uses Google Sign-In. Please sign in with Google.' });
+        }
+
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+          return res.status(401).json({ error: 'Invalid credentials or account disabled' });
+        }
+
+        const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+        res.json({ token, user: { id: user.id, fullName: user.fullName, role: user.role, phoneNumber: user.phoneNumber, email: user.email, rewardPoints: user.rewardPoints || 0 } });
+      } catch (err) { 
+        console.error("Login Error:", err);
+        res.status(500).json({ error: err.message || 'Internal server authentication failure' }); 
+      }
+    });
+
+    // --- USER PROFILE SELF-MANAGEMENT & EDIT USER DETAILS ---
+    expressApp.get('/api/user/profile', authenticateToken, async (req, res) => {
+      try {
+        const user = await User.findByPk(req.user.id, { attributes: { exclude: ['password', 'resetToken', 'resetTokenExpires'] } });
+        if (!user) return res.status(404).json({ error: 'User profile not found' });
+        res.json(user);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.put('/api/user/profile', authenticateToken, async (req, res) => {
+      try {
+        const { fullName, email, phoneNumber, currentPassword, newPassword } = req.body || {};
+        const user = await User.findByPk(req.user.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (fullName !== undefined) user.fullName = fullName;
+        if (email !== undefined) user.email = email;
+        if (phoneNumber !== undefined) user.phoneNumber = phoneNumber;
+
+        if (newPassword && newPassword.trim() !== '') {
+          if (user.password) {
+            if (!currentPassword) {
+              return res.status(400).json({ error: 'Current password is required to set a new password' });
+            }
+            const match = await bcrypt.compare(currentPassword, user.password);
+            if (!match) {
+              return res.status(400).json({ error: 'Current password is incorrect' });
+            }
+          }
+          user.password = await bcrypt.hash(newPassword, 12);
+        }
+
+        await user.save();
+        res.json({ 
+          message: 'Profile details updated successfully', 
+          user: { 
+            id: user.id, 
+            fullName: user.fullName, 
+            email: user.email, 
+            phoneNumber: user.phoneNumber, 
+            role: user.role, 
+            rewardPoints: user.rewardPoints || 0 
+          } 
+        });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- USER SELF ACCOUNT SUSPENSION ---
+    expressApp.post('/api/user/suspend', authenticateToken, async (req, res) => {
+      try {
+        const user = await User.findByPk(req.user.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        user.isActive = false;
+        await user.save();
+
+        res.json({ message: 'Account suspended successfully. Contact support if you need to reactivate.' });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- FORGOT PASSWORD (OTP GENERATION & EMAIL VIA BREVO) ---
+    expressApp.post('/api/user/forgot-password', async (req, res) => {
+      try {
+        const { email } = req.body || {};
+        if (!email) {
+          return res.status(400).json({ error: 'Email address is required' });
+        }
+
+        const user = await User.findOne({ where: { email } });
+        
+        if (!user) {
+          return res.status(200).json({ 
+            message: 'If an account with that email exists, a password reset OTP has been sent.' 
+          });
+        }
+
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const tokenExpiration = Date.now() + 10 * 60 * 1000;
+
+        user.resetToken = otpCode;
+        user.resetTokenExpires = tokenExpiration;
+        await user.save();
+
+        // Send OTP via Brevo API endpoint
+        await sendBrevoOtpEmail(user.email, user.fullName, otpCode);
+
+        console.log(`📧 Password reset OTP sent to ${user.email} via Brevo`);
+        res.status(200).json({ message: 'If an account with that email exists, a password reset OTP has been sent.' });
+      } catch (err) {
+        console.error('❌ Forgot Password OTP Error via Brevo:', err.response?.data || err.message);
         res.status(500).json({ error: 'Failed to dispatch password reset OTP email' });
       }
     });
@@ -1026,14 +1857,13 @@ async function startServer() {
           return res.status(400).json({ error: 'Phone number parameter is required for STK push' });
         }
 
-        // Updated for Render Production URL
-        const hostUrl = process.env.BASE_URL || 'https://premium-rice-store-7.onrender.com';
+        const hostUrl = process.env.BASE_URL || '[https://premium-rice-store-7.onrender.com](https://premium-rice-store-7.onrender.com)';
         const callbackEndpoint = `${hostUrl}/api/payments/payhero/callback`;
 
         console.log(`📱 Direct Pay Hero STK Push triggered for ${targetPhone}, Amount: KES ${targetAmount}, Ref: ${ref}`);
 
         const payheroResponse = await axios.post(
-          'https://backend.payhero.co.ke/api/v2/payments',
+          '[https://backend.payhero.co.ke/api/v2/payments](https://backend.payhero.co.ke/api/v2/payments)',
           {
             amount: Number(targetAmount),
             phone_number: targetPhone,
@@ -1190,15 +2020,14 @@ async function startServer() {
 
         if (paymentMethod === 'mpesa_stk') {
           const targetPhone = mpesaPhoneNumber || req.user.phoneNumber;
-          // Updated for Render Production URL
-          const hostUrl = process.env.BASE_URL || 'https://premium-rice-store-7.onrender.com';
+          const hostUrl = process.env.BASE_URL || '[https://premium-rice-store-7.onrender.com](https://premium-rice-store-7.onrender.com)';
           const callbackEndpoint = `${hostUrl}/api/payments/payhero/callback`;
 
           try {
             console.log(`📱 Triggering Pay Hero STK Push for Order #${generatedOrder.id} to ${targetPhone}...`);
             
             const payheroResponse = await axios.post(
-              'https://backend.payhero.co.ke/api/v2/payments',
+              '[https://backend.payhero.co.ke/api/v2/payments](https://backend.payhero.co.ke/api/v2/payments)',
               {
                 amount: finalOrderTotal,
                 phone_number: targetPhone,
@@ -1250,7 +2079,7 @@ async function startServer() {
 
         try {
           const response = await axios.get(
-            `https://backend.payhero.co.ke/api/v2/payments?external_reference=${ref}`,
+            `[https://backend.payhero.co.ke/api/v2/payments?external_reference=$](https://backend.payhero.co.ke/api/v2/payments?external_reference=$){ref}`,
             { headers: { 'Authorization': getPayHeroAuthHeader() } }
           );
           heroStatusData = response.data;
