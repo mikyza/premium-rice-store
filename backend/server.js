@@ -11,8 +11,7 @@
  * Complete, single-file server engine handling real-time WebSocket state synchronization,
  * dynamic location logistics hierarchies (loaded directly from kenya_locations.json),
  * full-stack shopping cart management, M-Pesa STK push & webhooks via PayHero,
- * administrative analytics, account creation OTP verification, password reset OTP,
- * email verification via Nodemailer SMTP, and dynamic hero carousel settings.
+ * administrative analytics, email verification via Nodemailer SMTP, and dynamic hero carousel settings.
  * ====================================================================================
  */
 
@@ -151,30 +150,20 @@ const EMAIL_FROM = process.env.EMAIL_FROM || process.env.EMAIL_USER || 'noreply@
 const SENDER_NAME = 'Mwea Rice Hub Enterprise';
 
 /**
- * Helper function to send email OTP via Nodemailer for Account Creation & Password Reset
+ * Helper function to send email OTP via Nodemailer
  * @param {string} toEmail 
  * @param {string} toName 
  * @param {string} otpCode 
- * @param {string} type - 'reset' | 'signup' | 'account_creation'
  */
-const sendOtpEmail = async (toEmail, toName, otpCode, type = 'reset') => {
+const sendOtpEmail = async (toEmail, toName, otpCode) => {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
     console.warn('⚠️ WARNING: SMTP Email credentials (EMAIL_USER / EMAIL_PASS) are missing in environment variables.');
   }
 
-  const isSignup = type === 'signup' || type === 'account_creation';
-  const subject = isSignup 
-    ? '🔐 Account Verification OTP Code - Mwea Rice Hub' 
-    : '🔐 Your Password Reset OTP Code - Mwea Rice Hub';
-  const title = isSignup ? 'Account Verification' : 'Password Reset Request';
-  const description = isSignup
-    ? 'Thank you for signing up with Mwea Rice Hub. Please use the following 6-digit One-Time Password (OTP) to verify and activate your new account:'
-    : 'You recently requested to reset your password for your Mwea Rice Hub account. Please use the following 6-digit One-Time Password (OTP) to verify your request:';
-
   const mailOptions = {
     from: `"${SENDER_NAME}" <${EMAIL_FROM}>`,
     to: toEmail,
-    subject: subject,
+    subject: '🔐 Your Password Reset OTP Code - Mwea Rice Hub',
     html: `
       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 28px; color: #2c3e50; max-width: 620px; margin: auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
         <div style="text-align: center; margin-bottom: 24px;">
@@ -182,13 +171,13 @@ const sendOtpEmail = async (toEmail, toName, otpCode, type = 'reset') => {
           <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Direct From Mwea Paddy Fields to Your Doorstep</p>
         </div>
         <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
-        <h2 style="color: #1e293b; font-size: 20px; margin-top: 0;">${title}</h2>
+        <h2 style="color: #1e293b; font-size: 20px; margin-top: 0;">Password Reset Request</h2>
         <p style="font-size: 15px; line-height: 1.6;">Hello <strong>${toName || 'Valued Customer'}</strong>,</p>
-        <p style="font-size: 15px; line-height: 1.6;">${description}</p>
+        <p style="font-size: 15px; line-height: 1.6;">You recently requested to reset your password for your Mwea Rice Hub account. Please use the following 6-digit One-Time Password (OTP) to verify your request:</p>
         <div style="background: #f0fdf4; border: 2px dashed #22c55e; color: #15803d; font-size: 36px; font-weight: 800; text-align: center; padding: 20px; border-radius: 10px; letter-spacing: 8px; margin: 24px 0;">
           ${otpCode}
         </div>
-        <p style="font-size: 13px; color: #64748b; line-height: 1.5;">This verification code is strictly valid for <strong>10 minutes</strong>. If you did not initiate this request, please secure your account or disregard this email.</p>
+        <p style="font-size: 13px; color: #64748b; line-height: 1.5;">This verification code is strictly valid for <strong>10 minutes</strong>. If you did not request this password reset, please secure your account or disregard this email.</p>
         <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
         <p style="font-size: 12px; color: #94a3b8; text-align: center; margin: 0;">&copy; ${new Date().getFullYear()} Mwea Rice Hub Kenya. All Rights Reserved.</p>
       </div>
@@ -444,7 +433,7 @@ async function startServer() {
     // Authenticate database connectivity
     await sequelize.authenticate();
     
-    // Auto migration checks for dynamic reward points, buying prices & account verification columns
+    // Auto migration checks for dynamic reward points & buying prices
     try {
       const queryInterface = sequelize.getQueryInterface();
       const userTable = await queryInterface.describeTable('Users');
@@ -455,31 +444,6 @@ async function startServer() {
           allowNull: false
         });
         console.log('✅ Synchronized database column: Users.rewardPoints');
-      }
-
-      if (!userTable.isVerified) {
-        await queryInterface.addColumn('Users', 'isVerified', {
-          type: DataTypes.BOOLEAN,
-          defaultValue: true,
-          allowNull: false
-        });
-        console.log('✅ Synchronized database column: Users.isVerified');
-      }
-
-      if (!userTable.verificationOtp) {
-        await queryInterface.addColumn('Users', 'verificationOtp', {
-          type: DataTypes.STRING,
-          allowNull: true
-        });
-        console.log('✅ Synchronized database column: Users.verificationOtp');
-      }
-
-      if (!userTable.verificationOtpExpires) {
-        await queryInterface.addColumn('Users', 'verificationOtpExpires', {
-          type: DataTypes.DATE,
-          allowNull: true
-        });
-        console.log('✅ Synchronized database column: Users.verificationOtpExpires');
       }
       
       const productTable = await queryInterface.describeTable('RiceProducts');
@@ -699,7 +663,6 @@ async function startServer() {
             fullName: fullName || 'Google User', 
             email, 
             role: 'user',
-            isVerified: true,
             isActive: true
           });
           console.log(`✨ Created fresh database profile for Google user: ${fullName}`);
@@ -747,115 +710,26 @@ async function startServer() {
     // 2. PayHero Automated Server Callback Webhook
     expressApp.post('/api/payments/payhero/webhook', handlePayHeroWebhook);
 
-    // --- USER SIGNUP / REGISTER (SUPPORTS DIRECT & OTP VERIFICATION FLOW) ---
+    // --- USER SIGNUP / REGISTER ---
     expressApp.post('/api/user/signup', async (req, res) => {
       try {
-        const { phoneNumber, email, password, fullName, requireOtp, sendOtp, otp, code } = req.body || {};
-        const inputOtp = otp || code;
+        const { phoneNumber, email, password, fullName } = req.body || {};
         
         if (!password || !fullName || (!phoneNumber && !email)) {
           return res.status(400).json({ error: 'Full name, password, and at least a phone number or email are required.' });
         }
-
+        
         const searchCondition = [];
         if (phoneNumber) searchCondition.push({ phoneNumber });
         if (email) searchCondition.push({ email });
 
         const existingUser = await User.findOne({ where: { [Op.or]: searchCondition } });
-
-        // If OTP code is submitted alongside signup payload, verify it
-        if (inputOtp && existingUser && existingUser.verificationOtp) {
-          if (existingUser.verificationOtp !== String(inputOtp).trim() || new Date(existingUser.verificationOtpExpires).getTime() < Date.now()) {
-            return res.status(400).json({ error: 'Invalid or expired account verification OTP.' });
-          }
-
-          const hashedPassword = await bcrypt.hash(password, 12);
-          existingUser.password = hashedPassword;
-          existingUser.fullName = fullName;
-          existingUser.isVerified = true;
-          existingUser.isActive = true;
-          existingUser.verificationOtp = null;
-          existingUser.verificationOtpExpires = null;
-          await existingUser.save();
-
-          const token = jwt.sign({ id: existingUser.id, role: existingUser.role }, JWT_SECRET, { expiresIn: '7d' });
-          return res.status(200).json({
-            message: 'Account verified and created successfully.',
-            token,
-            user: {
-              id: existingUser.id,
-              fullName: existingUser.fullName,
-              email: existingUser.email,
-              phoneNumber: existingUser.phoneNumber,
-              role: existingUser.role,
-              rewardPoints: existingUser.rewardPoints || 0
-            }
-          });
-        }
-
-        // If user already exists and is fully verified/active
-        if (existingUser && existingUser.isVerified !== false && existingUser.password) {
+        if (existingUser) {
           return res.status(409).json({ error: 'An account with this phone number or email address already exists.' });
         }
 
         const hashedPassword = await bcrypt.hash(password, 12);
-
-        // If explicitly requested to send OTP during signup step
-        if (requireOtp || sendOtp) {
-          const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-          const tokenExpiration = Date.now() + 10 * 60 * 1000;
-
-          let targetUser = existingUser;
-          if (!targetUser) {
-            targetUser = await User.create({
-              phoneNumber,
-              email,
-              password: hashedPassword,
-              fullName,
-              isVerified: false,
-              isActive: true,
-              verificationOtp: otpCode,
-              verificationOtpExpires: tokenExpiration
-            });
-          } else {
-            targetUser.fullName = fullName;
-            targetUser.password = hashedPassword;
-            targetUser.verificationOtp = otpCode;
-            targetUser.verificationOtpExpires = tokenExpiration;
-            await targetUser.save();
-          }
-
-          if (targetUser.email) {
-            await sendOtpEmail(targetUser.email, targetUser.fullName, otpCode, 'signup');
-          }
-
-          return res.status(200).json({
-            requiresOtp: true,
-            message: 'Account creation OTP code has been dispatched to your email address.',
-            email: targetUser.email,
-            phoneNumber: targetUser.phoneNumber
-          });
-        }
-
-        // Standard direct signup creation (backward compatible)
-        let newUser;
-        if (existingUser) {
-          existingUser.password = hashedPassword;
-          existingUser.fullName = fullName;
-          existingUser.isVerified = true;
-          existingUser.isActive = true;
-          await existingUser.save();
-          newUser = existingUser;
-        } else {
-          newUser = await User.create({ 
-            phoneNumber, 
-            email, 
-            password: hashedPassword, 
-            fullName, 
-            isVerified: true, 
-            isActive: true 
-          });
-        }
+        const newUser = await User.create({ phoneNumber, email, password: hashedPassword, fullName });
         
         const token = jwt.sign({ id: newUser.id, role: newUser.role }, JWT_SECRET, { expiresIn: '7d' });
         res.status(201).json({ 
@@ -872,183 +746,6 @@ async function startServer() {
         res.status(500).json({ error: err.message || 'Internal server signup failure.' }); 
       }
     });
-
-    // --- ACCOUNT CREATION OTP REQUEST ENDPOINTS ---
-    const handleSignupOtpRequest = async (req, res) => {
-      try {
-        const { phoneNumber, email, password, fullName } = req.body || {};
-        
-        if (!fullName || (!phoneNumber && !email)) {
-          return res.status(400).json({ error: 'Full name and at least an email or phone number are required.' });
-        }
-
-        const searchCondition = [];
-        if (phoneNumber) searchCondition.push({ phoneNumber });
-        if (email) searchCondition.push({ email });
-
-        const existingUser = await User.findOne({ where: { [Op.or]: searchCondition } });
-
-        if (existingUser && existingUser.isVerified !== false && existingUser.password) {
-          return res.status(409).json({ error: 'An account with this phone number or email address already exists.' });
-        }
-
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const tokenExpiration = Date.now() + 10 * 60 * 1000; // 10 mins
-        let hashedPassword = existingUser ? existingUser.password : null;
-        if (password) {
-          hashedPassword = await bcrypt.hash(password, 12);
-        }
-
-        let userRecord = existingUser;
-        if (!userRecord) {
-          userRecord = await User.create({
-            phoneNumber: phoneNumber || null,
-            email: email || null,
-            password: hashedPassword,
-            fullName: fullName,
-            isVerified: false,
-            isActive: true,
-            verificationOtp: otpCode,
-            verificationOtpExpires: tokenExpiration
-          });
-        } else {
-          userRecord.fullName = fullName;
-          if (hashedPassword) userRecord.password = hashedPassword;
-          userRecord.verificationOtp = otpCode;
-          userRecord.verificationOtpExpires = tokenExpiration;
-          userRecord.isVerified = false;
-          await userRecord.save();
-        }
-
-        if (userRecord.email) {
-          await sendOtpEmail(userRecord.email, userRecord.fullName, otpCode, 'signup');
-          console.log(`📧 Account creation OTP sent to ${userRecord.email}`);
-        }
-
-        res.status(200).json({
-          success: true,
-          message: 'Account creation OTP has been sent to your email address.',
-          email: userRecord.email,
-          phoneNumber: userRecord.phoneNumber,
-          requiresOtp: true
-        });
-      } catch (err) {
-        console.error('❌ Signup OTP Request Error:', err);
-        res.status(500).json({ error: err.message || 'Failed to generate signup OTP.' });
-      }
-    };
-
-    expressApp.post('/api/user/signup/request-otp', handleSignupOtpRequest);
-    expressApp.post('/api/user/send-signup-otp', handleSignupOtpRequest);
-    expressApp.post('/api/user/signup-otp', handleSignupOtpRequest);
-
-    // --- ACCOUNT CREATION OTP VERIFICATION ENDPOINTS ---
-    const handleSignupOtpVerification = async (req, res) => {
-      try {
-        const { email, phoneNumber, otp, code } = req.body || {};
-        const inputOtp = String(otp || code || '').trim();
-        const searchIdentifier = email || phoneNumber;
-
-        if (!searchIdentifier || !inputOtp) {
-          return res.status(400).json({ error: 'Email or phone number and OTP verification code are required.' });
-        }
-
-        const user = await User.findOne({
-          where: {
-            [Op.or]: [
-              { email: searchIdentifier },
-              { phoneNumber: searchIdentifier }
-            ],
-            verificationOtp: inputOtp,
-            verificationOtpExpires: { [Op.gt]: Date.now() }
-          }
-        });
-
-        if (!user) {
-          return res.status(400).json({ error: 'Invalid or expired account verification OTP code.' });
-        }
-
-        user.isVerified = true;
-        user.isActive = true;
-        user.verificationOtp = null;
-        user.verificationOtpExpires = null;
-        await user.save();
-
-        const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-
-        res.status(200).json({
-          success: true,
-          message: 'Account verified and created successfully!',
-          token,
-          user: {
-            id: user.id,
-            fullName: user.fullName,
-            email: user.email,
-            phoneNumber: user.phoneNumber,
-            role: user.role,
-            rewardPoints: user.rewardPoints || 0
-          }
-        });
-      } catch (err) {
-        console.error('❌ Signup OTP Verification Error:', err);
-        res.status(500).json({ error: err.message || 'Failed to verify account creation OTP.' });
-      }
-    };
-
-    expressApp.post('/api/user/signup/verify-otp', handleSignupOtpVerification);
-    expressApp.post('/api/user/verify-signup-otp', handleSignupOtpVerification);
-    expressApp.post('/api/user/verify-signup', handleSignupOtpVerification);
-
-    // --- RESEND SIGNUP OTP ENDPOINT ---
-    const handleResendSignupOtp = async (req, res) => {
-      try {
-        const { email, phoneNumber } = req.body || {};
-        const searchIdentifier = email || phoneNumber;
-
-        if (!searchIdentifier) {
-          return res.status(400).json({ error: 'Email address or phone number is required.' });
-        }
-
-        const user = await User.findOne({
-          where: {
-            [Op.or]: [
-              { email: searchIdentifier },
-              { phoneNumber: searchIdentifier }
-            ]
-          }
-        });
-
-        if (!user) {
-          return res.status(404).json({ error: 'No account registration found for this email/phone.' });
-        }
-
-        if (user.isVerified && user.password) {
-          return res.status(400).json({ error: 'Account is already verified. Please sign in.' });
-        }
-
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const tokenExpiration = Date.now() + 10 * 60 * 1000;
-
-        user.verificationOtp = otpCode;
-        user.verificationOtpExpires = tokenExpiration;
-        await user.save();
-
-        if (user.email) {
-          await sendOtpEmail(user.email, user.fullName, otpCode, 'signup');
-        }
-
-        res.status(200).json({
-          success: true,
-          message: 'A fresh account verification OTP has been sent to your email address.'
-        });
-      } catch (err) {
-        console.error('❌ Resend Signup OTP Error:', err);
-        res.status(500).json({ error: err.message || 'Failed to resend signup OTP.' });
-      }
-    };
-
-    expressApp.post('/api/user/signup/resend-otp', handleResendSignupOtp);
-    expressApp.post('/api/user/resend-signup-otp', handleResendSignupOtp);
 
     // --- USER LOGIN ---
     expressApp.post('/api/user/login', async (req, res) => {
@@ -1103,7 +800,7 @@ async function startServer() {
     // --- USER PROFILE MANAGEMENT ---
     expressApp.get('/api/user/profile', authenticateToken, async (req, res) => {
       try {
-        const user = await User.findByPk(req.user.id, { attributes: { exclude: ['password', 'resetToken', 'resetTokenExpires', 'verificationOtp', 'verificationOtpExpires'] } });
+        const user = await User.findByPk(req.user.id, { attributes: { exclude: ['password', 'resetToken', 'resetTokenExpires'] } });
         if (!user) return res.status(404).json({ error: 'User profile not found.' });
         res.json(user);
       } catch (err) {
@@ -1167,27 +864,18 @@ async function startServer() {
     });
 
     // --- FORGOT PASSWORD (OTP GENERATION & SMTP DISPATCH) ---
-    const handleForgotPasswordRequest = async (req, res) => {
+    expressApp.post('/api/user/forgot-password', async (req, res) => {
       try {
-        const { email, phoneNumber } = req.body || {};
-        const searchIdentifier = email || phoneNumber;
-
-        if (!searchIdentifier) {
-          return res.status(400).json({ error: 'Email address or phone number is required.' });
+        const { email } = req.body || {};
+        if (!email) {
+          return res.status(400).json({ error: 'Email address is required.' });
         }
 
-        const user = await User.findOne({
-          where: {
-            [Op.or]: [
-              { email: searchIdentifier },
-              { phoneNumber: searchIdentifier }
-            ]
-          }
-        });
+        const user = await User.findOne({ where: { email } });
         
         if (!user) {
           return res.status(200).json({ 
-            message: 'If an account with that email or phone exists, a password reset OTP code has been dispatched.' 
+            message: 'If an account with that email exists, a password reset OTP code has been dispatched.' 
           });
         }
 
@@ -1199,84 +887,33 @@ async function startServer() {
         await user.save();
 
         // Dispatch email via Nodemailer
-        if (user.email) {
-          await sendOtpEmail(user.email, user.fullName, otpCode, 'reset');
-          console.log(`📧 Password reset OTP sent to ${user.email} via SMTP.`);
-        }
+        await sendOtpEmail(user.email, user.fullName, otpCode);
 
+        console.log(`📧 Password reset OTP sent to ${user.email} via SMTP.`);
         res.status(200).json({ message: 'If an account with that email exists, a password reset OTP code has been dispatched.' });
       } catch (err) {
         console.error('❌ Forgot Password OTP Error via SMTP:', err.message);
         res.status(500).json({ error: 'Failed to dispatch password reset OTP email.' });
       }
-    };
-
-    expressApp.post('/api/user/forgot-password', handleForgotPasswordRequest);
-    expressApp.post('/api/user/send-reset-otp', handleForgotPasswordRequest);
-    expressApp.post('/api/user/forgot-password/request-otp', handleForgotPasswordRequest);
-
-    // --- VERIFY FORGOT PASSWORD OTP ENDPOINT ---
-    const handleVerifyResetOtp = async (req, res) => {
-      try {
-        const { email, phoneNumber, otp, code, resetToken } = req.body || {};
-        const inputOtp = String(otp || code || resetToken || '').trim();
-        const searchIdentifier = email || phoneNumber;
-
-        if (!searchIdentifier || !inputOtp) {
-          return res.status(400).json({ error: 'Email address and OTP code are required.' });
-        }
-
-        const user = await User.findOne({
-          where: {
-            [Op.or]: [
-              { email: searchIdentifier },
-              { phoneNumber: searchIdentifier }
-            ],
-            resetToken: inputOtp,
-            resetTokenExpires: { [Op.gt]: Date.now() }
-          }
-        });
-
-        if (!user) {
-          return res.status(400).json({ error: 'Invalid or expired password reset OTP code.' });
-        }
-
-        res.status(200).json({
-          success: true,
-          valid: true,
-          message: 'Password reset OTP code is valid.'
-        });
-      } catch (err) {
-        console.error('❌ Verify Reset OTP Error:', err);
-        res.status(500).json({ error: err.message || 'Failed to verify password reset OTP.' });
-      }
-    };
-
-    expressApp.post('/api/user/verify-reset-otp', handleVerifyResetOtp);
-    expressApp.post('/api/user/forgot-password/verify-otp', handleVerifyResetOtp);
+    });
 
     // --- RESET PASSWORD WITH OTP ---
     expressApp.post('/api/user/reset-password', async (req, res) => {
       try {
-        const { email, phoneNumber, otp, token, code, resetToken, newPassword, password } = req.body || {};
-        const verificationCode = otp || token || code || resetToken;
-        const targetPassword = newPassword || password;
-        const searchIdentifier = email || phoneNumber;
+        const { email, otp, token, newPassword } = req.body || {};
+        const verificationCode = otp || token;
 
-        if (!searchIdentifier || !verificationCode || !targetPassword) {
-          return res.status(400).json({ error: 'Email or phone number, OTP code, and new password are required.' });
+        if (!email || !verificationCode || !newPassword) {
+          return res.status(400).json({ error: 'Email, OTP code, and new password are required.' });
         }
 
-        if (targetPassword.length < 6) {
+        if (newPassword.length < 6) {
           return res.status(400).json({ error: 'Password must be at least 6 characters in length.' });
         }
 
         const user = await User.findOne({ 
           where: { 
-            [Op.or]: [
-              { email: searchIdentifier },
-              { phoneNumber: searchIdentifier }
-            ],
+            email, 
             resetToken: String(verificationCode).trim(),
             resetTokenExpires: { [Op.gt]: Date.now() } 
           } 
@@ -1286,7 +923,7 @@ async function startServer() {
           return res.status(400).json({ error: 'Invalid or expired OTP verification code.' });
         }
 
-        const hashedPassword = await bcrypt.hash(targetPassword, 12);
+        const hashedPassword = await bcrypt.hash(newPassword, 12);
 
         user.password = hashedPassword;
         user.resetToken = null;
