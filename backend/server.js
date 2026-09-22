@@ -41,6 +41,10 @@ import { initiatePayHeroPayment } from './controllers/paymentController.js';
 
 // Initialize environment variables from .env file
 dotenv.config();
+
+// Initialize the Express app instance
+const app = express();
+
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', 'https://premium-rice-store-3.onrender.com');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
