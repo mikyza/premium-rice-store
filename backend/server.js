@@ -42,20 +42,6 @@ import { initiatePayHeroPayment } from './controllers/paymentController.js';
 // Initialize environment variables from .env file
 dotenv.config();
 
-// Initialize the Express app instance
-const app = express();
-
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', 'https://premium-rice-store-3.onrender.com');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
 /**
  * ==========================================
  * 0. SYSTEM INITIALIZATION, PATHS & CONSTANTS
@@ -822,839 +808,6 @@ async function startServer() {
           }
 
           const hashedPassword = await bcrypt.hash(password, 12);
-          existingHere is your fully repaired and completed `server.js` file. 
-
-The previous version was cut off at the bottom, leaving an unfinished endpoint, a missing server initialization loop, and an unclosed `startServer()` block[cite: 1]. Additionally, there was a silent architectural bug where the global Express `app` (with your custom headers) was disconnected from the inner `expressApp` that managed the routes. 
-
-I've resolved the detached `app` instance bug and completed the missing configuration endpoint, server listen binding, and startup execution block without removing any of your existing logic[cite: 1].
-
-```javascript
-/**
- * ====================================================================================
- * PREMIUM RICE & GRAIN STORE - UNIFIED BACKEND ENTERPRISE ARCHITECTURE
- * ====================================================================================
- * System: Mwea Rice Hub Enterprise API Engine
- * Version: 3.5.0-ENTERPRISE-RENDER
- * Platform: Node.js / Express / Socket.IO / Sequelize ORM / PayHero API / Nodemailer
- * Deployment: Render Cloud Infrastructure (Production Optimized)
- * 
- * Description:
- * Complete, single-file server engine handling real-time WebSocket state synchronization,
- * dynamic location logistics hierarchies (loaded directly from kenya_locations.json),
- * full-stack shopping cart management, M-Pesa STK push & webhooks via PayHero,
- * administrative analytics, account creation OTP verification, password reset OTP,
- * email verification via Nodemailer SMTP, and dynamic hero carousel settings.
- * ====================================================================================
- */
-
-import dns from 'dns';
-// Enforce IPv4 lookup resolution order for consistent DNS resolution on cloud environments like Render
-dns.setDefaultResultOrder('ipv4first');
-
-import express from 'express';
-import { createServer } from 'http';
-import { Server as SocketIOServer } from 'socket.io';
-import { Sequelize, DataTypes, Op } from 'sequelize';
-import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import multer from 'multer';
-import fs from 'fs';
-import path, { dirname } from 'path';
-import { fileURLToPath } from 'url';
-import axios from 'axios';
-import nodemailer from 'nodemailer';
-
-// Payment & Webhook Controller Integrations
-import { handlePayHeroWebhook } from './controllers/webhookController.js';
-import { initiatePayHeroPayment } from './controllers/paymentController.js';
-
-// Initialize environment variables from .env file
-dotenv.config();
-
-// Initialize the Express app instance
-const app = express();
-
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '[https://premium-rice-store-3.onrender.com](https://premium-rice-store-3.onrender.com)');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
-
-/**
- * ==========================================
- * 0. SYSTEM INITIALIZATION, PATHS & CONSTANTS
- * ==========================================
- */
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const NODE_ENV = process.env.NODE_ENV || 'development';
-const isProduction = NODE_ENV === 'production';
-const hostname = process.env.HOSTNAME || '0.0.0.0';
-const port = parseInt(process.env.PORT || '5000', 10);
-const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
-const RENDER_BASE_URL = process.env.BASE_URL || '[https://premium-rice-store-7.onrender.com](https://premium-rice-store-7.onrender.com)';
-
-console.log('====================================================================');
-console.log('🚀 Booting Mwea Rice Hub Enterprise Architecture...');
-console.log(`🌍 Environment: ${NODE_ENV.toUpperCase()}`);
-console.log(`⚡ Execution Directory: ${__dirname}`);
-console.log(`📡 Base Deployment Target URL: ${RENDER_BASE_URL}`);
-console.log('====================================================================');
-
-/**
- * ==========================================
- * DYNAMIC KENYA LOCATIONS LOADER UTILITY
- * ==========================================
- * Safely reads and parses 'kenya_locations.json' generated by convert.js.
- * Eliminates hardcoded location literals while providing safe fallbacks.
- */
-function loadKenyaLocationsDataset() {
-  const primaryLocationsPath = path.join(__dirname, 'kenya_locations.json');
-  const secondaryLocationsPath = path.join(__dirname, 'public', 'kenya_locations.json');
-  
-  let selectedPath = null;
-  if (fs.existsSync(primaryLocationsPath)) {
-    selectedPath = primaryLocationsPath;
-  } else if (fs.existsSync(secondaryLocationsPath)) {
-    selectedPath = secondaryLocationsPath;
-  }
-
-  let rawJsonData = null;
-  let countyOverrides = {};
-  let logisticsHierarchy = {};
-
-  if (selectedPath) {
-    try {
-      console.log(`📂 Reading Kenya locations dataset directly from: ${selectedPath}`);
-      const fileBuffer = fs.readFileSync(selectedPath, 'utf8');
-      rawJsonData = JSON.parse(fileBuffer);
-
-      // Structure check: Handles both formatted { counties, hierarchy } and nested county trees
-      if (rawJsonData && typeof rawJsonData === 'object') {
-        if (rawJsonData.counties && rawJsonData.hierarchy) {
-          countyOverrides = rawJsonData.counties;
-          logisticsHierarchy = rawJsonData.hierarchy;
-        } else if (rawJsonData.counties && !rawJsonData.hierarchy) {
-          countyOverrides = rawJsonData.counties;
-          logisticsHierarchy = rawJsonData;
-        } else {
-          // Build hierarchy and county fee map dynamically from top-level keys
-          logisticsHierarchy = rawJsonData;
-          Object.keys(rawJsonData).forEach((countyName) => {
-            // Assign default regional transport charges based on common geographical zones
-            const lowerName = countyName.toLowerCase();
-            if (lowerName.includes('nairobi') || lowerName.includes('kirinyaga') || lowerName.includes('kiambu')) {
-              countyOverrides[countyName] = 200;
-            } else if (lowerName.includes('mombasa') || lowerName.includes('kwale') || lowerName.includes('kilifi')) {
-              countyOverrides[countyName] = 500;
-            } else if (lowerName.includes('mandera') || lowerName.includes('wajir') || lowerName.includes('turkana')) {
-              countyOverrides[countyName] = 800;
-            } else {
-              countyOverrides[countyName] = 350;
-            }
-          });
-        }
-        console.log(`✅ Successfully loaded location dataset. Total Counties Identified: ${Object.keys(countyOverrides).length}`);
-      }
-    } catch (readErr) {
-      console.error(`❌ Failed to parse kenya_locations.json dataset: ${readErr.message}`);
-    }
-  } else {
-    console.warn('⚠️ WARNING: kenya_locations.json was not found on disk. Initializing basic empty location structures.');
-  }
-
-  return { countyOverrides, logisticsHierarchy, rawJsonData };
-}
-
-/**
- * ==========================================
- * EMAIL CONFIGURATION (Nodemailer SMTP Transporter)
- * ==========================================
- */
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT || '587', 10),
-  secure: process.env.SMTP_PORT === '465', // true for 465, false for 587 / submit
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-  tls: {
-    rejectUnauthorized: false // Tolerant TLS handshake for cloud hosting environments
-  }
-});
-
-const EMAIL_FROM = process.env.EMAIL_FROM || process.env.EMAIL_USER || 'noreply@mwearicehub.com';
-const SENDER_NAME = 'Mwea Rice Hub Enterprise';
-
-/**
- * Helper function to send email OTP via Nodemailer for Account Creation & Password Reset
- * @param {string} toEmail 
- * @param {string} toName 
- * @param {string} otpCode 
- * @param {string} type - 'reset' | 'signup' | 'account_creation'
- */
-const sendOtpEmail = async (toEmail, toName, otpCode, type = 'reset') => {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    console.warn('⚠️ WARNING: SMTP Email credentials (EMAIL_USER / EMAIL_PASS) are missing in environment variables.');
-  }
-
-  const isSignup = type === 'signup' || type === 'account_creation';
-  const subject = isSignup 
-    ? '🔐 Account Verification OTP Code - Mwea Rice Hub' 
-    : '🔐 Your Password Reset OTP Code - Mwea Rice Hub';
-  const title = isSignup ? 'Account Verification' : 'Password Reset Request';
-  const description = isSignup
-    ? 'Thank you for signing up with Mwea Rice Hub. Please use the following 6-digit One-Time Password (OTP) to verify and activate your new account:'
-    : 'You recently requested to reset your password for your Mwea Rice Hub account. Please use the following 6-digit One-Time Password (OTP) to verify your request:';
-
-  const mailOptions = {
-    from: `"${SENDER_NAME}" <${EMAIL_FROM}>`,
-    to: toEmail,
-    subject: subject,
-    html: `
-      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 28px; color: #2c3e50; max-width: 620px; margin: auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-        <div style="text-align: center; margin-bottom: 24px;">
-          <h1 style="color: #2e7d32; margin: 0; font-size: 26px; font-weight: 700;">🌾 Mwea Rice Hub</h1>
-          <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Direct From Mwea Paddy Fields to Your Doorstep</p>
-        </div>
-        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
-        <h2 style="color: #1e293b; font-size: 20px; margin-top: 0;">${title}</h2>
-        <p style="font-size: 15px; line-height: 1.6;">Hello <strong>${toName || 'Valued Customer'}</strong>,</p>
-        <p style="font-size: 15px; line-height: 1.6;">${description}</p>
-        <div style="background: #f0fdf4; border: 2px dashed #22c55e; color: #15803d; font-size: 36px; font-weight: 800; text-align: center; padding: 20px; border-radius: 10px; letter-spacing: 8px; margin: 24px 0;">
-          ${otpCode}
-        </div>
-        <p style="font-size: 13px; color: #64748b; line-height: 1.5;">This verification code is strictly valid for <strong>10 minutes</strong>. If you did not initiate this request, please secure your account or disregard this email.</p>
-        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-        <p style="font-size: 12px; color: #94a3b8; text-align: center; margin: 0;">&copy; ${new Date().getFullYear()} Mwea Rice Hub Kenya. All Rights Reserved.</p>
-      </div>
-    `
-  };
-
-  return await transporter.sendMail(mailOptions);
-};
-
-/**
- * Helper function to send SMS OTP based on standard gateway logic.
- * Update the axios block with your specific SMS provider API documentation once available.
- * @param {string} phoneNumber 
- * @param {string} otpCode 
- * @param {string} type - 'reset' | 'signup'
- */
-const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
-  try {
-    if (!phoneNumber) return;
-    
-    // Normalize phone numbers to standard Kenyan +254 format
-    const formattedPhone = phoneNumber.startsWith('0') 
-      ? `+254${phoneNumber.substring(1)}` 
-      : phoneNumber;
-      
-    const message = type === 'signup' 
-      ? `Your Mwea Rice Hub account verification OTP is ${otpCode}. Valid for 10 mins.`
-      : `Your Mwea Rice Hub password reset OTP is ${otpCode}. Valid for 10 mins.`;
-
-    console.log(`📱 [SMS DISPATCH] Triggering SMS to ${formattedPhone}: ${message}`);
-    
-    // --- SMS API PLACEHOLDER ---
-    // Uncomment and replace with the exact endpoint and payload from your SMS PDF
-    /*
-    await axios.post('YOUR_SMS_GATEWAY_URL_HERE', {
-      api_key: process.env.SMS_API_KEY,
-      to: formattedPhone,
-      message: message
-    });
-    */
-    
-    return true;
-  } catch (error) {
-    console.error(`❌ Failed to send SMS OTP to ${phoneNumber}:`, error.message);
-  }
-};
-
-/**
- * Helper function to retrieve and construct PayHero Basic Auth Headers cleanly
- */
-const getPayHeroAuthHeader = () => {
-  if (process.env.PAYHERO_BASIC_AUTH) {
-    const cleanAuth = process.env.PAYHERO_BASIC_AUTH.replace(/[\r\n]+/g, '').trim();
-    return cleanAuth.startsWith('Basic ') ? cleanAuth : `Basic ${cleanAuth.replace(/^Basic/i, '').trim()}`;
-  }
-  if (process.env.PAYHERO_API_KEY && process.env.PAYHERO_API_SECRET) {
-    const creds = `${process.env.PAYHERO_API_KEY.trim()}:${process.env.PAYHERO_API_SECRET.trim()}`;
-    return `Basic ${Buffer.from(creds).toString('base64')}`;
-  }
-  const fallbackRaw = 'Basic cnBqZHU3YWJyWG03SWdqcDBI\\nBF:NHFvR\\nV32XR99cDq\\nGf3igKB3R0A5vRtgTMJ7Jpfm'
-    .replace(/\\[rn]/g, '')
-    .replace(/[\r\n]+/g, '')
-    .trim();
-  return fallbackRaw.startsWith('Basic ') ? fallbackRaw : `Basic ${fallbackRaw.replace(/^Basic/i, '').trim()}`;
-};
-
-const PAYHERO_CHANNEL_ID = Number(process.env.PAYHERO_CHANNEL_ID || 11668);
-
-/**
- * ==========================================
- * 1. UPLOAD DIRECTORY & ASSET CONFIGURATION
- * ==========================================
- */
-const uploadDir = path.join(__dirname, 'public', 'uploads');
-const imagesDir = path.join(__dirname, 'public', 'images');
-
-try {
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-    console.log('📁 Created missing upload directory at:', uploadDir);
-  }
-
-  if (!fs.existsSync(imagesDir)) {
-    fs.mkdirSync(imagesDir, { recursive: true });
-    console.log('📁 Created missing images directory at:', imagesDir);
-  }
-} catch (fsErr) {
-  console.error('❌ Failed to verify or build static public storage directories:', fsErr.message);
-}
-
-// Multer Storage Configuration for File Uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const cleanFileName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-    cb(null, `${Date.now()}-${cleanFileName}`);
-  }
-});
-
-const upload = multer({ 
-  storage,
-  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB file upload limit
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only valid image files are permitted for upload.'), false);
-    }
-  }
-});
-
-/**
- * ==========================================
- * 2. DATABASE SCHEMAS, MODELS & ASSOCIATIONS
- * ==========================================
- */
-import { 
-  User, 
-  RiceProduct, 
-  Order, 
-  Review, 
-  AdminLog, 
-  SystemConfig, 
-  sequelize 
-} from './lib/db.js';
-
-// User Persistent Shopping Cart Database Model Definition
-const Cart = sequelize.models.Cart || sequelize.define('Cart', {
-  id: {
-    type: DataTypes.INTEGER,
-    primaryKey: true,
-    autoIncrement: true
-  },
-  userId: {
-    type: DataTypes.INTEGER,
-    allowNull: false,
-    references: {
-      model: User,
-      key: 'id'
-    }
-  },
-  productId: {
-    type: DataTypes.INTEGER,
-    allowNull: false,
-    references: {
-      model: RiceProduct,
-      key: 'id'
-    }
-  },
-  quantity: {
-    type: DataTypes.INTEGER,
-    defaultValue: 1,
-    allowNull: false,
-    validate: {
-      min: 1
-    }
-  }
-}, {
-  timestamps: true,
-  tableName: 'Carts'
-});
-
-// Define Relational Model Associations
-if (Cart && RiceProduct && !Cart.associations.RiceProduct) {
-  Cart.belongsTo(RiceProduct, { foreignKey: 'productId', as: 'product', onDelete: 'CASCADE' });
-}
-if (Cart && User && !Cart.associations.User) {
-  Cart.belongsTo(User, { foreignKey: 'userId', as: 'user', onDelete: 'CASCADE' });
-}
-
-/**
- * ==========================================
- * 3. LIVE FLASH HARVEST SALE ENGINE UTILS
- * ==========================================
- */
-let flashSaleState = {
-  active: false,
-  endTime: null,
-  countdownIntervalId: null
-};
-
-function initializeFlashSaleEngine(io) {
-  SystemConfig.findOne({ where: { key: 'black_friday' } }).then((config) => {
-    if (config && config.value && config.value.active) {
-      const remainingTime = new Date(config.value.endTime).getTime() - Date.now();
-      if (remainingTime > 0) {
-        flashSaleState.active = true;
-        flashSaleState.endTime = config.value.endTime;
-        startFlashSaleCountdown(io);
-        console.log(`🔥 Flash Harvest Sale Engine Restored! Active until: ${flashSaleState.endTime}`);
-      } else {
-        config.value = { ...config.value, active: false };
-        config.changed('value', true);
-        config.save();
-        console.log('🏁 Expired Flash Harvest Sale state automatically deactivated in DB.');
-      }
-    }
-  }).catch(err => console.error('❌ Failed to boot Flash Sale Engine state:', err.message));
-}
-
-function startFlashSaleCountdown(io) {
-  if (flashSaleState.countdownIntervalId) {
-    clearInterval(flashSaleState.countdownIntervalId);
-  }
-  
-  flashSaleState.countdownIntervalId = setInterval(() => {
-    const totalRemaining = new Date(flashSaleState.endTime).getTime() - Date.now();
-    if (totalRemaining <= 0) {
-      clearInterval(flashSaleState.countdownIntervalId);
-      flashSaleState.active = false;
-      flashSaleState.endTime = null;
-      io.emit('blackFridayEnded', { active: false });
-      
-      SystemConfig.findOne({ where: { key: 'black_friday' } }).then(config => {
-        if (config) {
-          config.value = { ...config.value, active: false };
-          config.changed('value', true);
-          config.save();
-        }
-      });
-      console.log('🏁 Flash Harvest Sale window has officially closed.');
-    } else {
-      io.emit('blackFridayTick', {
-        active: true,
-        endTime: flashSaleState.endTime,
-        msRemaining: totalRemaining
-      });
-    }
-  }, 1000);
-}
-
-/**
- * ==========================================
- * 4. AUTHENTICATION & SECURITY MIDDLEWARES
- * ==========================================
- */
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'] || req.headers['Authorization'];
-  let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : authHeader;
-  
-  if (!token && req.query && req.query.token) {
-    token = req.query.token;
-  }
-  
-  if (token) {
-    token = token.trim().replace(/^["']|["']$/g, '');
-  }
-
-  if (!token || token === 'null' || token === 'undefined' || token === '') {
-    return res.status(401).json({ error: 'Authentication token is required to access this resource.' });
-  }
-
-  jwt.verify(token, JWT_SECRET, (err, decodedUser) => {
-    if (err) {
-      console.log(`DEBUG: Auth Token Verification Failed - ${err.message}`);
-      return res.status(403).json({ error: 'Token is invalid or expired. Please sign in again.' });
-    }
-    req.user = decodedUser;
-    next();
-  });
-};
-
-const requireAdmin = async (req, res, next) => {
-  try {
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ error: 'User identification details missing from session token.' });
-    }
-    const userInstance = await User.findByPk(req.user.id);
-    if (!userInstance || userInstance.role !== 'admin') {
-      console.log(`DEBUG: Unauthorized Administrative Access Attempted by User ID: ${req.user.id}`);
-      return res.status(403).json({ error: 'Access Denied. Elevated Administrator privileges are required.' });
-    }
-    if (!userInstance.isActive) {
-      return res.status(403).json({ error: 'Access Denied. Your administrator account is suspended or disabled.' });
-    }
-    req.adminUser = userInstance;
-    next();
-  } catch (error) {
-    console.error('DEBUG: Administrative Role Evaluation Error:', error);
-    res.status(500).json({ error: 'Internal administrative role security evaluation failure.' });
-  }
-};
-
-/**
- * ==========================================
- * 5. CORE SERVER & DATABASE BOOTSTRAP ENGINE
- * ==========================================
- */
-async function startServer() {
-  try {
-    // Authenticate database connectivity
-    await sequelize.authenticate();
-    
-    // Auto migration checks for dynamic reward points, buying prices & account verification columns
-    try {
-      const queryInterface = sequelize.getQueryInterface();
-      const userTable = await queryInterface.describeTable('Users');
-      if (!userTable.rewardPoints) {
-        await queryInterface.addColumn('Users', 'rewardPoints', {
-          type: DataTypes.FLOAT,
-          defaultValue: 0,
-          allowNull: false
-        });
-        console.log('✅ Synchronized database column: Users.rewardPoints');
-      }
-
-      if (!userTable.isVerified) {
-        await queryInterface.addColumn('Users', 'isVerified', {
-          type: DataTypes.BOOLEAN,
-          defaultValue: true,
-          allowNull: false
-        });
-        console.log('✅ Synchronized database column: Users.isVerified');
-      }
-
-      if (!userTable.verificationOtp) {
-        await queryInterface.addColumn('Users', 'verificationOtp', {
-          type: DataTypes.STRING,
-          allowNull: true
-        });
-        console.log('✅ Synchronized database column: Users.verificationOtp');
-      }
-
-      if (!userTable.verificationOtpExpires) {
-        await queryInterface.addColumn('Users', 'verificationOtpExpires', {
-          type: DataTypes.DATE,
-          allowNull: true
-        });
-        console.log('✅ Synchronized database column: Users.verificationOtpExpires');
-      }
-      
-      const productTable = await queryInterface.describeTable('RiceProducts');
-      if (!productTable.buyingPrice) {
-        await queryInterface.addColumn('RiceProducts', 'buyingPrice', {
-          type: DataTypes.FLOAT,
-          defaultValue: 0,
-          allowNull: true
-        });
-        console.log('✅ Synchronized database column: RiceProducts.buyingPrice');
-      }
-    } catch (colErr) {
-      console.log('DEBUG: Database table structure sync verified.');
-    }
-
-    await sequelize.sync();
-    
-    const currentMode = process.env.DB_MODE === 'cloud' ? '☁️ AIVEN / CLOUD POSTGRES' : '🏠 RENDER / LOCAL DB';
-    console.log(`🍃 Database Connected Successfully! Running Mode: [ ${currentMode} ]`);
-
-    // Fix detached app instance: Use the globally defined `app` which holds CORS middlewares
-    const expressApp = app; 
-    expressApp.set('trust proxy', true);
-
-    const server = createServer(expressApp);
-
-    // Dynamic CORS configuration accepting Render domains, local clients, and mobile wrappers
-    const corsOptions = {
-      origin: (origin, callback) => {
-        if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1') || origin.endsWith('.onrender.com')) {
-          callback(null, true);
-        } else {
-          callback(null, true);
-        }
-      },
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-      credentials: true
-    };
-    
-    expressApp.use(cors(corsOptions));
-    expressApp.use(express.json({ limit: '50mb' }));
-    expressApp.use(express.urlencoded({ limit: '50mb', extended: true }));
-
-    // Serve static files from public, uploads, and images directories
-    expressApp.use(express.static(path.join(__dirname, 'public')));
-    expressApp.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
-    expressApp.use('/images', express.static(path.join(__dirname, 'public', 'images')));
-
-    // Initialize Default System Configuration Entries
-    await SystemConfig.findOrCreate({ where: { key: 'transport_fee' }, defaults: { value: 250 } });
-    await SystemConfig.findOrCreate({ where: { key: 'black_friday' }, defaults: { value: { active: false, endTime: null } } });
-    
-    await SystemConfig.findOrCreate({
-      where: { key: 'mpesa_config' },
-      defaults: {
-        value: {
-          paybillNumber: '522522',
-          paybillAccount: 'MWEARICE',
-          tillNumber: '889900',
-          stkEnabled: true
-        }
-      }
-    });
-
-    // =========================================================================
-    // LOAD REAL KENYA LOCATIONS DATASET DYNAMICALLY FROM JSON FILE
-    // =========================================================================
-    const { countyOverrides, logisticsHierarchy, rawJsonData } = loadKenyaLocationsDataset();
-
-    await SystemConfig.findOrCreate({ 
-      where: { key: 'county_overrides' }, 
-      defaults: { value: countyOverrides } 
-    });
-
-    await SystemConfig.findOrCreate({ 
-      where: { key: 'logistics_hierarchy' }, 
-      defaults: { value: logisticsHierarchy } 
-    });
-
-    // Save full JSON dataset in SystemConfig if available for deep front-end search
-    if (rawJsonData) {
-      await SystemConfig.findOrCreate({
-        where: { key: 'kenya_locations_full' },
-        defaults: { value: rawJsonData }
-      });
-    }
-
-    // --- EXPANDED 10-FIELD HERO CONFIGURATION DEFAULT ---
-    await SystemConfig.findOrCreate({
-      where: { key: 'hero_settings' },
-      defaults: {
-        value: {
-          type: 'video',
-          url: '[https://www.youtube.com/embed/gjZAThNHGwI?start=6&autoplay=1&mute=1&loop=1&playlist=gjZAThNHGwI](https://www.youtube.com/embed/gjZAThNHGwI?start=6&autoplay=1&mute=1&loop=1&playlist=gjZAThNHGwI)',
-          title: 'Direct From Mwea Paddy Fields',
-          subtitle: '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.',
-          badgeText: '🌾 100% Authentic Mwea Harvest',
-          buttonText: 'Shop Fresh Harvest Now',
-          buttonLink: '/catalog',
-          secondaryButtonText: 'View Flash Deals',
-          secondaryButtonLink: '#flash-sales',
-          overlayOpacity: 0.4,
-          alignment: 'center',
-          autoPlay: true,
-          videoDuration: 5,
-          imageDuration: 4
-        }
-      }
-    });
-
-    await SystemConfig.findOrCreate({
-      where: { key: 'homepage_carousel' },
-      defaults: {
-        value: [
-          { 
-            id: "1", 
-            type: 'video', 
-            url: '[https://www.youtube.com/embed/gjZAThNHGwI?start=6&autoplay=1&mute=1&loop=1&playlist=gjZAThNHGwI](https://www.youtube.com/embed/gjZAThNHGwI?start=6&autoplay=1&mute=1&loop=1&playlist=gjZAThNHGwI)', 
-            title: 'Mwea Paddy Harvest Live', 
-            subtitle: 'Direct from rich Kenyan soil into your kitchen.',
-            duration: 5
-          },
-          { 
-            id: "2", 
-            type: 'image', 
-            url: '[https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=1200&q=80](https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=1200&q=80)', 
-            title: 'Pure Mwea Pishori Grade 1', 
-            subtitle: 'Unmatched aroma and long-grain perfection.',
-            duration: 4
-          },
-          { 
-            id: "3", 
-            type: 'image', 
-            url: '[https://images.unsplash.com/photo-1536304929831-ee1ca9d44906?auto=format&fit=crop&w=1200&q=80](https://images.unsplash.com/photo-1536304929831-ee1ca9d44906?auto=format&fit=crop&w=1200&q=80)', 
-            title: 'Wholesale & Bulk Sack Delivery', 
-            subtitle: 'Available in 5kg, 10kg, 25kg, and 50kg sacks with discounted transport.',
-            duration: 3
-          },
-          { 
-            id: "4", 
-            type: 'image', 
-            url: '[https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=1200&q=80](https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=1200&q=80)', 
-            title: 'Premium Imported Basmati', 
-            subtitle: 'Aged to perfection for fluffy, non-sticky ceremonial cooking.',
-            duration: 4
-          }
-        ]
-      }
-    });
-
-    // Seed Default Rice Products Catalog if empty
-    const existingFeaturedCount = await RiceProduct.count();
-    if (existingFeaturedCount === 0) {
-      await RiceProduct.bulkCreate([
-        {
-          brandName: 'Pure Mwea Pishori Grade 1',
-          variety: 'Aromatic Pishori',
-          weightKg: 5,
-          basePrice: 1250,
-          buyingPrice: 950,
-          flashSalePrice: 1100,
-          stockQuantity: 150,
-          imageUrl: '[https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=800&q=80](https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=800&q=80)',
-          isAvailable: true
-        },
-        {
-          brandName: 'Super Aromatic Basmati',
-          variety: 'Long Grain Basmati',
-          weightKg: 10,
-          basePrice: 2400,
-          buyingPrice: 1800,
-          flashSalePrice: 2150,
-          stockQuantity: 80,
-          imageUrl: '[https://images.unsplash.com/photo-1536304929831-ee1ca9d44906?auto=format&fit=crop&w=800&q=80](https://images.unsplash.com/photo-1536304929831-ee1ca9d44906?auto=format&fit=crop&w=800&q=80)',
-          isAvailable: true
-        },
-        {
-          brandName: 'Biryani Special Feast Grain',
-          variety: 'Kaisari Long Grain',
-          weightKg: 25,
-          basePrice: 5200,
-          buyingPrice: 4000,
-          flashSalePrice: 4800,
-          stockQuantity: 40,
-          imageUrl: '[https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=800&q=80](https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=800&q=80)',
-          isAvailable: true
-        },
-        {
-          brandName: 'Whole Grain Brown Pishori',
-          variety: 'Brown Nutritious Rice',
-          weightKg: 5,
-          basePrice: 1400,
-          buyingPrice: 1050,
-          flashSalePrice: 1250,
-          stockQuantity: 60,
-          imageUrl: '[https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=800&q=80](https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=800&q=80)',
-          isAvailable: true
-        }
-      ]);
-      console.log('🌾 Seeded default 4 Featured Grain selection products into database catalog.');
-    }
-
-    // Google Sign-In Account Synchronization Endpoint
-    expressApp.post('/api/sync/google', async (req, res) => {
-      const { googleId, fullName, email } = req.body || {};
-      
-      if (!googleId) {
-        console.error("DEBUG: google-sync received an empty payload");
-        return res.status(400).json({ error: "Missing identity credentials" });
-      }
-
-      try {
-        let user = await User.findOne({ where: { googleId } });
-        if (!user) {
-          user = await User.create({ 
-            googleId, 
-            fullName: fullName || 'Google User', 
-            email, 
-            role: 'user',
-            isVerified: true,
-            isActive: true
-          });
-          console.log(`✨ Created fresh database profile for Google user: ${fullName}`);
-        } else {
-          console.log(`🔐 Verified existing database profile for Google user: ${fullName}`);
-        }
-        res.status(200).json({ message: "User profile synchronized", user });
-      } catch (error) {
-        console.error("Database Sync Error:", error);
-        res.status(500).json({ error: "Database Synchronization Failed" });
-      }
-    });
-
-    // Real-Time Socket.IO Server Setup
-    const io = new SocketIOServer(server, { 
-      cors: corsOptions
-    });
-
-    initializeFlashSaleEngine(io);
-
-    io.on('connection', (socket) => {
-      if (flashSaleState.active) {
-        socket.emit('blackFridayTick', { active: true, endTime: flashSaleState.endTime });
-      }
-      
-      socket.on('joinAdminChannel', (token) => {
-        jwt.verify(token, JWT_SECRET, async (err, decoded) => {
-          if (!err && decoded && decoded.role === 'admin') {
-            socket.join('admin-dashboard-room');
-            console.log(`DEBUG: Admin connected to real-time broadcast room. User ID: ${decoded.id}`);
-          }
-        });
-      });
-    });
-
-    /**
-     * ==========================================
-     * 6. PUBLIC & CUSTOMER REST API CONTROLLERS
-     * ==========================================
-     */
-
-    // 1. PayHero STK Payment Trigger Endpoint
-    expressApp.post('/api/payments/payhero/initiate', initiatePayHeroPayment);
-
-    // 2. PayHero Automated Server Callback Webhook
-    expressApp.post('/api/payments/payhero/webhook', handlePayHeroWebhook);
-
-    // --- USER SIGNUP / REGISTER (SUPPORTS DIRECT & OTP VERIFICATION FLOW) ---
-    expressApp.post('/api/user/signup', async (req, res) => {
-      try {
-        const { phoneNumber, email, password, fullName, requireOtp, sendOtp, otp, code } = req.body || {};
-        const inputOtp = otp || code;
-        
-        if (!password || !fullName || (!phoneNumber && !email)) {
-          return res.status(400).json({ error: 'Full name, password, and at least a phone number or email are required.' });
-        }
-
-        const searchCondition = [];
-        if (phoneNumber) searchCondition.push({ phoneNumber });
-        if (email) searchCondition.push({ email });
-
-        const existingUser = await User.findOne({ where: { [Op.or]: searchCondition } });
-
-        // If OTP code is submitted alongside signup payload, verify it
-        if (inputOtp && existingUser && existingUser.verificationOtp) {
-          if (existingUser.verificationOtp !== String(inputOtp).trim() || new Date(existingUser.verificationOtpExpires).getTime() < Date.now()) {
-            return res.status(400).json({ error: 'Invalid or expired account verification OTP.' });
-          }
-
-          const hashedPassword = await bcrypt.hash(password, 12);
           existingUser.password = hashedPassword;
           existingUser.fullName = fullName;
           existingUser.isVerified = true;
@@ -2015,16 +1168,1408 @@ async function startServer() {
         if (email !== undefined) user.email = email;
         if (phoneNumber !== undefined) user.phoneNumber = phoneNumber;
 
-        if (currentPassword && newPassword) {
-            const isMatch = await bcrypt.compare(currentPassword, user.password);
-            if (!isMatch) return res.status(401).json({ error: 'Current password provided is incorrect.' });
-            user.password = await bcrypt.hash(newPassword, 12);
+        if (newPassword && newPassword.trim() !== '') {
+          if (user.password) {
+            if (!currentPassword) {
+              return res.status(400).json({ error: 'Current password is required to update your password.' });
+            }
+            const match = await bcrypt.compare(currentPassword, user.password);
+            if (!match) {
+              return res.status(400).json({ error: 'Current password provided is incorrect.' });
+            }
+          }
+          user.password = await bcrypt.hash(newPassword, 12);
         }
 
         await user.save();
-        res.json({ message: 'Profile updated successfully.', user: { fullName: user.fullName, email: user.email, phoneNumber: user.phoneNumber } });
+        res.json({ 
+          message: 'Profile details updated successfully.', 
+          user: { 
+            id: user.id, 
+            fullName: user.fullName, 
+            email: user.email, 
+            phoneNumber: user.phoneNumber, 
+            role: user.role, 
+            rewardPoints: user.rewardPoints || 0 
+          } 
+        });
       } catch (err) {
         res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- ACCOUNT SELF-SUSPENSION ---
+    expressApp.post('/api/user/suspend', authenticateToken, async (req, res) => {
+      try {
+        const user = await User.findByPk(req.user.id);
+        if (!user) return res.status(404).json({ error: 'User not found.' });
+
+        user.isActive = false;
+        await user.save();
+
+        res.json({ message: 'Account suspended successfully. Contact customer support if you need to reactivate.' });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- FORGOT PASSWORD (OTP GENERATION & SMTP/SMS DISPATCH) ---
+    const handleForgotPasswordRequest = async (req, res) => {
+      try {
+        const { email, phoneNumber } = req.body || {};
+        const searchIdentifier = email || phoneNumber;
+
+        if (!searchIdentifier) {
+          return res.status(400).json({ error: 'Email address or phone number is required.' });
+        }
+
+        const user = await User.findOne({
+          where: {
+            [Op.or]: [
+              { email: searchIdentifier },
+              { phoneNumber: searchIdentifier }
+            ]
+          }
+        });
+        
+        if (!user) {
+          return res.status(200).json({ 
+            message: 'If an account with that email or phone exists, a password reset OTP code has been dispatched.' 
+          });
+        }
+
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const tokenExpiration = Date.now() + 10 * 60 * 1000; // 10 minutes validity
+
+        user.resetToken = otpCode;
+        user.resetTokenExpires = tokenExpiration;
+        await user.save();
+
+        if (user.email) {
+          await sendOtpEmail(user.email, user.fullName, otpCode, 'reset');
+          console.log(`📧 Password reset OTP sent to ${user.email} via SMTP.`);
+        }
+        if (user.phoneNumber) {
+          await sendOtpSms(user.phoneNumber, otpCode, 'reset');
+        }
+
+        res.status(200).json({ message: 'If an account exists, a password reset OTP code has been dispatched.' });
+      } catch (err) {
+        console.error('❌ Forgot Password OTP Error:', err.message);
+        res.status(500).json({ error: 'Failed to dispatch password reset OTP.' });
+      }
+    };
+
+    expressApp.post('/api/user/forgot-password', handleForgotPasswordRequest);
+    expressApp.post('/api/user/send-reset-otp', handleForgotPasswordRequest);
+    expressApp.post('/api/user/forgot-password/request-otp', handleForgotPasswordRequest);
+
+    // --- VERIFY FORGOT PASSWORD OTP ENDPOINT ---
+    const handleVerifyResetOtp = async (req, res) => {
+      try {
+        const { email, phoneNumber, otp, code, resetToken } = req.body || {};
+        const inputOtp = String(otp || code || resetToken || '').trim();
+        const searchIdentifier = email || phoneNumber;
+
+        if (!searchIdentifier || !inputOtp) {
+          return res.status(400).json({ error: 'Email address and OTP code are required.' });
+        }
+
+        const user = await User.findOne({
+          where: {
+            [Op.or]: [
+              { email: searchIdentifier },
+              { phoneNumber: searchIdentifier }
+            ],
+            resetToken: inputOtp,
+            resetTokenExpires: { [Op.gt]: Date.now() }
+          }
+        });
+
+        if (!user) {
+          return res.status(400).json({ error: 'Invalid or expired password reset OTP code.' });
+        }
+
+        res.status(200).json({
+          success: true,
+          valid: true,
+          message: 'Password reset OTP code is valid.'
+        });
+      } catch (err) {
+        console.error('❌ Verify Reset OTP Error:', err);
+        res.status(500).json({ error: err.message || 'Failed to verify password reset OTP.' });
+      }
+    };
+
+    expressApp.post('/api/user/verify-reset-otp', handleVerifyResetOtp);
+    expressApp.post('/api/user/forgot-password/verify-otp', handleVerifyResetOtp);
+
+    // --- RESET PASSWORD WITH OTP ---
+    expressApp.post('/api/user/reset-password', async (req, res) => {
+      try {
+        const { email, phoneNumber, otp, token, code, resetToken, newPassword, password } = req.body || {};
+        const verificationCode = otp || token || code || resetToken;
+        const targetPassword = newPassword || password;
+        const searchIdentifier = email || phoneNumber;
+
+        if (!searchIdentifier || !verificationCode || !targetPassword) {
+          return res.status(400).json({ error: 'Email or phone number, OTP code, and new password are required.' });
+        }
+
+        if (targetPassword.length < 6) {
+          return res.status(400).json({ error: 'Password must be at least 6 characters in length.' });
+        }
+
+        const user = await User.findOne({ 
+          where: { 
+            [Op.or]: [
+              { email: searchIdentifier },
+              { phoneNumber: searchIdentifier }
+            ],
+            resetToken: String(verificationCode).trim(),
+            resetTokenExpires: { [Op.gt]: Date.now() } 
+          } 
+        });
+
+        if (!user) {
+          return res.status(400).json({ error: 'Invalid or expired OTP verification code.' });
+        }
+
+        const hashedPassword = await bcrypt.hash(targetPassword, 12);
+
+        user.password = hashedPassword;
+        user.resetToken = null;
+        user.resetTokenExpires = null;
+        await user.save();
+
+        res.status(200).json({ message: 'Password has been reset successfully. You can now login with your new password.' });
+      } catch (err) {
+        console.error('❌ Reset Password OTP Error:', err);
+        res.status(500).json({ error: 'Internal server error while resetting password.' });
+      }
+    });
+
+    // --- REWARD POINTS TRACKING ---
+    expressApp.get('/api/user/points', authenticateToken, async (req, res) => {
+      try {
+        const user = await User.findByPk(req.user.id, { attributes: ['id', 'fullName', 'rewardPoints'] });
+        res.json({
+          rewardPoints: user ? user.rewardPoints || 0 : 0,
+          ratePerKg: 0.2
+        });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    /**
+     * ==========================================
+     * USER PERSISTENT CART MANAGEMENT APIs
+     * ==========================================
+     */
+    expressApp.get('/api/cart', authenticateToken, async (req, res) => {
+      try {
+        const items = await Cart.findAll({
+          where: { userId: req.user.id },
+          include: [{ model: RiceProduct, as: 'product' }]
+        });
+        
+        let totalKg = 0;
+        const formattedItems = items.map(item => {
+          const p = item.product ? item.product.toJSON() : {};
+          const weight = p.weightKg || 0;
+          const qty = item.quantity || 1;
+          totalKg += weight * qty;
+          let effectivePrice = p.basePrice || p.price || 0;
+          if (flashSaleState && flashSaleState.active && p.flashSalePrice) {
+            effectivePrice = p.flashSalePrice;
+          }
+          return {
+            id: item.id,
+            productId: item.productId,
+            quantity: item.quantity,
+            product: {
+              ...p,
+              price: effectivePrice
+            }
+          };
+        });
+
+        const expectedPoints = Number((totalKg * 0.2).toFixed(2));
+        res.json({ items: formattedItems, totalKg, expectedPoints });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.post('/api/cart/add', authenticateToken, async (req, res) => {
+      try {
+        const { productId, quantity } = req.body || {};
+        const qty = Number(quantity || 1);
+        
+        let cartItem = await Cart.findOne({ where: { userId: req.user.id, productId } });
+        if (cartItem) {
+          cartItem.quantity += qty;
+          await cartItem.save();
+        } else {
+          cartItem = await Cart.create({ userId: req.user.id, productId, quantity: qty });
+        }
+        
+        res.status(201).json({ message: 'Item added to shopping cart successfully.', cartItem });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.put('/api/cart/item/:id', authenticateToken, async (req, res) => {
+      try {
+        const { quantity } = req.body || {};
+        const cartItem = await Cart.findOne({ where: { id: req.params.id, userId: req.user.id } });
+        if (!cartItem) return res.status(404).json({ error: 'Cart item not found.' });
+        
+        if (Number(quantity) <= 0) {
+          await cartItem.destroy();
+          return res.json({ message: 'Cart item removed.' });
+        }
+        
+        cartItem.quantity = Number(quantity);
+        await cartItem.save();
+        res.json({ message: 'Cart item quantity updated.', cartItem });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.delete('/api/cart/item/:id', authenticateToken, async (req, res) => {
+      try {
+        const deleted = await Cart.destroy({ where: { id: req.params.id, userId: req.user.id } });
+        if (!deleted) return res.status(404).json({ error: 'Cart item not found.' });
+        res.json({ message: 'Item deleted from shopping cart.' });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.delete('/api/cart', authenticateToken, async (req, res) => {
+      try {
+        await Cart.destroy({ where: { userId: req.user.id } });
+        res.json({ message: 'User shopping cart cleared successfully.' });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- PRODUCTS CATALOG & FEATURED PRODUCTS APIs ---
+    expressApp.get('/api/products/catalog', async (req, res) => {
+      try {
+        const { variety, minWeight, maxWeight, maxPrice, search } = req.query;
+        let whereCondition = { isAvailable: true };
+
+        if (variety) whereCondition.variety = variety;
+        if (minWeight || maxWeight) {
+          whereCondition.weightKg = {};
+          if (minWeight) whereCondition.weightKg[Op.gte] = Number(minWeight);
+          if (maxWeight) whereCondition.weightKg[Op.lte] = Number(maxWeight);
+        }
+        if (search) {
+          whereCondition[Op.or] = [
+            { brandName: { [Op.like]: `%${search}%` } },
+            { variety: { [Op.like]: `%${search}%` } }
+          ];
+        }
+
+        const products = await RiceProduct.findAll({ where: whereCondition });
+        
+        const optimizedCatalog = products.map(product => {
+          const productObj = product.toJSON();
+          let currentEffectivePrice = productObj.basePrice || productObj.price || 0;
+          if (flashSaleState && flashSaleState.active && productObj.flashSalePrice !== null && productObj.flashSalePrice !== undefined) {
+            currentEffectivePrice = productObj.flashSalePrice;
+          }
+          return {
+            ...productObj,
+            price: currentEffectivePrice,
+            imageUrl: productObj.imageUrl || productObj.image || productObj.url || null,
+            isBlackFridayApplied: (flashSaleState && flashSaleState.active && productObj.flashSalePrice !== null && productObj.flashSalePrice !== undefined)
+          };
+        }).filter(item => !maxPrice || item.price <= Number(maxPrice));
+
+        res.json(optimizedCatalog);
+      } catch (err) { 
+        res.status(500).json({ error: err.message }); 
+      }
+    });
+
+    expressApp.get('/api/products/featured', async (req, res) => {
+      try {
+        const featuredProducts = await RiceProduct.findAll({
+          where: { isAvailable: true },
+          limit: 4,
+          order: [['id', 'ASC']]
+        });
+
+        const formatted = featuredProducts.map(p => {
+          const pObj = p.toJSON();
+          let currentPrice = pObj.basePrice || pObj.price || 0;
+          if (flashSaleState && flashSaleState.active && pObj.flashSalePrice) {
+            currentPrice = pObj.flashSalePrice;
+          }
+          return {
+            ...pObj,
+            price: currentPrice,
+            imageUrl: pObj.imageUrl || pObj.image || null
+          };
+        });
+
+        res.json(formatted);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- CONFIGURATION RETRIEVAL ENDPOINTS ---
+    expressApp.get('/api/config/carousel', async (req, res) => {
+      try {
+        const config = await SystemConfig.findOne({ where: { key: 'homepage_carousel' } });
+        res.json(config ? config.value : []);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.get('/api/config/hero', async (req, res) => {
+      try {
+        const config = await SystemConfig.findOne({ where: { key: 'hero_settings' } });
+        res.json(config ? config.value : {});
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // Dynamic County Shipping Overrides API (Backed by kenya_locations.json)
+    expressApp.get('/api/config/counties', async (req, res) => {
+      try {
+        const config = await SystemConfig.findOne({ where: { key: 'county_overrides' } });
+        res.json(config ? config.value : countyOverrides);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // Dynamic Logistics Locations Hierarchy API (Backed by kenya_locations.json)
+    expressApp.get('/api/config/locations', async (req, res) => {
+      try {
+        const config = await SystemConfig.findOne({ where: { key: 'logistics_hierarchy' } });
+        res.json(config ? config.value : logisticsHierarchy);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // Full Raw Location Dataset Endpoint for Advanced Frontend Multi-Select UI
+    expressApp.get('/api/config/locations-full', async (req, res) => {
+      try {
+        const config = await SystemConfig.findOne({ where: { key: 'kenya_locations_full' } });
+        if (config && config.value) {
+          return res.json(config.value);
+        }
+        res.json({ counties: countyOverrides, hierarchy: logisticsHierarchy });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.get('/api/config/payment-methods', async (req, res) => {
+      try {
+        const config = await SystemConfig.findOne({ where: { key: 'mpesa_config' } });
+        res.json(config ? config.value : {
+          paybillNumber: '522522',
+          paybillAccount: 'MWEARICE',
+          tillNumber: '889900',
+          stkEnabled: true
+        });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- USER ORDERS RETRIEVAL ---
+    expressApp.get('/api/orders/my-orders', authenticateToken, async (req, res) => {
+      try {
+        const orders = await Order.findAll({
+          where: { userId: req.user.id },
+          order: [['createdAt', 'DESC']]
+        });
+        res.json(orders);
+      } catch (err) { 
+        res.status(500).json({ error: err.message }); 
+      }
+    });
+
+    expressApp.get('/api/orders/:id', authenticateToken, async (req, res) => {
+      try {
+        const order = await Order.findByPk(req.params.id, {
+          include: [{ model: User, attributes: ['id', 'fullName', 'phoneNumber', 'email'] }]
+        });
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+
+        if (order.userId !== req.user.id && req.user.role !== 'admin') {
+          return res.status(403).json({ error: 'Access denied.' });
+        }
+
+        res.json(order);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- DIRECT M-PESA STK PUSH ROUTE ---
+    const handleStkPushRequest = async (req, res) => {
+      try {
+        const { phoneNumber, phone, amount, orderId, external_reference } = req.body || {};
+        const targetPhone = phoneNumber || phone;
+        const targetAmount = amount || 10;
+        const ref = external_reference || (orderId ? `ORD-${orderId}` : `STK-${Date.now()}`);
+
+        if (!targetPhone) {
+          return res.status(400).json({ error: 'Phone number parameter is required for M-Pesa STK push.' });
+        }
+
+        const callbackEndpoint = `${RENDER_BASE_URL}/api/payments/payhero/callback`;
+
+        console.log(`📱 Dispatching Direct PayHero STK Push to ${targetPhone}, Amount: KES ${targetAmount}, Ref: ${ref}`);
+
+        const payheroResponse = await axios.post(
+          'https://backend.payhero.co.ke/api/v2/payments',
+          {
+            amount: Number(targetAmount),
+            phone_number: targetPhone,
+            channel_id: PAYHERO_CHANNEL_ID,
+            provider: 'm-pesa',
+            external_reference: ref,
+            callback_url: callbackEndpoint
+          },
+          {
+            headers: {
+              'Authorization': getPayHeroAuthHeader(),
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        res.status(200).json({
+          success: true,
+          message: 'STK push prompt dispatched successfully to handset.',
+          data: payheroResponse.data
+        });
+      } catch (stkError) {
+        console.error('❌ Direct STK Push Processing Failure:', stkError.response ? stkError.response.data : stkError.message);
+        res.status(500).json({
+          success: false,
+          error: stkError.response?.data?.message || stkError.message || 'Failed to dispatch M-Pesa STK Push.'
+        });
+      }
+    };
+
+    expressApp.post('/api/payments/stkpush', handleStkPushRequest);
+    expressApp.post('/api/payments/stk-push', handleStkPushRequest);
+    expressApp.post('/api/payment/stkpush', handleStkPushRequest);
+
+    // --- CREATE ORDER, CALCULATE WEIGHT/POINTS & TRIGGER PAYHERO STK PUSH ---
+    expressApp.post('/api/orders/create', authenticateToken, async (req, res) => {
+      try {
+        const { 
+          cartItems, 
+          paymentMethod, 
+          mpesaPhoneNumber,
+          county, 
+          town, 
+          location, 
+          sublocation, 
+          streetAddress,
+          shippingAddress, 
+          shippingFee, 
+          grandTotal 
+        } = req.body || {};
+        
+        if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
+          return res.status(400).json({ error: 'Shopping cart items cannot be empty.' });
+        }
+
+        let calculatedSubtotal = 0;
+        let totalWeightKg = 0;
+        const builtOrderLineItems = [];
+
+        for (const item of cartItems) {
+          const targetId = item.productId || item.laptopId || item.id;
+          const product = await RiceProduct.findByPk(targetId);
+          
+          if (!product || product.stockQuantity < item.quantity) {
+            return res.status(422).json({ error: `Insufficient stock for product ID: ${targetId} (${product ? product.brandName : 'Unknown Item'}).` });
+          }
+
+          let purchasePrice = product.basePrice || product.price || 0;
+          if (flashSaleState.active && product.flashSalePrice !== null && product.flashSalePrice !== undefined) {
+            purchasePrice = product.flashSalePrice;
+          }
+
+          const itemKg = (product.weightKg || 0) * item.quantity;
+          totalWeightKg += itemKg;
+
+          calculatedSubtotal += (purchasePrice * item.quantity);
+          product.stockQuantity -= item.quantity; 
+          await product.save();
+
+          builtOrderLineItems.push({ 
+            productId: product.id, 
+            name: `${product.brandName} ${product.variety || ''} (${product.weightKg || 0}kg)`,
+            variety: product.variety || 'Aromatic Rice',
+            brandName: product.brandName,
+            weightKg: product.weightKg || 0,
+            quantity: item.quantity, 
+            priceAtPurchase: purchasePrice,
+            buyingPrice: product.buyingPrice || (purchasePrice * 0.75),
+            imageUrl: product.imageUrl || product.image || null
+          });
+          
+          io.emit('stockUpdated', { productId: product.id, newStockQuantity: product.stockQuantity });
+          
+          if (product.stockQuantity <= 10) {
+            io.to('admin-dashboard-room').emit('lowStockAlert', {
+              productId: product.id,
+              name: product.brandName,
+              remainingStock: product.stockQuantity
+            });
+          }
+        }
+
+        let activeTransportCharge = shippingFee !== undefined ? Number(shippingFee) : 250;
+        if (county) {
+          const countyConfig = await SystemConfig.findOne({ where: { key: 'county_overrides' } });
+          const activeMap = countyConfig && countyConfig.value ? countyConfig.value : countyOverrides;
+          if (activeMap && activeMap[county] !== undefined) {
+            activeTransportCharge = Number(activeMap[county]);
+          }
+        }
+
+        const fullDeliveryAddress = {
+          county: county || 'Not Specified',
+          town: town || 'Not Specified',
+          location: location || 'Not Specified',
+          sublocation: sublocation || 'Not Specified',
+          streetAddress: streetAddress || 'Not Specified',
+          details: shippingAddress || `${streetAddress || ''}, ${sublocation || ''}, ${location || ''}, ${town || ''}, ${county || ''}`
+        };
+
+        const finalOrderTotal = Number(grandTotal || (calculatedSubtotal + activeTransportCharge));
+        const earnedPoints = Number((totalWeightKg * 0.2).toFixed(2));
+
+        const generatedOrder = await Order.create({
+          userId: req.user.id,
+          items: builtOrderLineItems,
+          transportFee: activeTransportCharge,
+          subTotal: calculatedSubtotal,
+          grandTotal: finalOrderTotal,
+          totalWeightKg: totalWeightKg,
+          pointsEarned: earnedPoints,
+          paymentDetails: { 
+            method: paymentMethod || 'mpesa_stk', 
+            isPaid: false,
+            paidTag: 'PENDING',
+            mpesaNumber: mpesaPhoneNumber || null,
+            amount: finalOrderTotal,
+            paidAt: null,
+            mpesaReceipt: null,
+            failureReason: null
+          },
+          county: county || 'Not Specified', 
+          town: town || '',
+          location: location || '',
+          sublocation: sublocation || '',
+          shippingAddress: fullDeliveryAddress,
+          status: 'pending' 
+        });
+
+        // Clear user shopping cart after successful order creation
+        await Cart.destroy({ where: { userId: req.user.id } });
+
+        let stkInitiated = false;
+        let stkMessage = '';
+
+        if (paymentMethod === 'mpesa_stk') {
+          const targetPhone = mpesaPhoneNumber || req.user.phoneNumber;
+          const callbackEndpoint = `${RENDER_BASE_URL}/api/payments/payhero/callback`;
+
+          try {
+            console.log(`📱 Triggering PayHero STK Push for Order #${generatedOrder.id} to ${targetPhone}...`);
+            
+            const payheroResponse = await axios.post(
+              'https://backend.payhero.co.ke/api/v2/payments',
+              {
+                amount: finalOrderTotal,
+                phone_number: targetPhone,
+                channel_id: PAYHERO_CHANNEL_ID,
+                provider: 'm-pesa',
+                external_reference: `ORD-${generatedOrder.id}`,
+                callback_url: callbackEndpoint
+              },
+              {
+                headers: {
+                  'Authorization': getPayHeroAuthHeader(),
+                  'Content-Type': 'application/json'
+                }
+              }
+            );
+
+            stkInitiated = true;
+            stkMessage = 'STK Push payment prompt sent to handset successfully.';
+            console.log(`✅ PayHero Response for Order #${generatedOrder.id}:`, payheroResponse.data);
+          } catch (stkError) {
+            stkMessage = 'Failed to trigger M-Pesa prompt automatically. You can retry from your order dashboard.';
+            console.error(`❌ PayHero STK Push Error for Order #${generatedOrder.id}:`, stkError.response ? stkError.response.data : stkError.message);
+          }
+        }
+
+        io.to('admin-dashboard-room').emit('newOrderAlert', generatedOrder);
+        res.status(201).json({
+          ...generatedOrder.toJSON(),
+          stkPromptSent: stkInitiated,
+          stkStatusMessage: stkMessage
+        });
+
+      } catch (err) { 
+        console.error("Order Creation Error:", err);
+        res.status(500).json({ error: err.message }); 
+      }
+    });
+
+    // --- PAYHERO PAYMENT STATUS POLLING API ---
+    const handlePayHeroStatusCheck = async (req, res) => {
+      try {
+        const order = await Order.findByPk(req.params.orderId);
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+
+        const ref = `ORD-${order.id}`;
+        let heroStatusData = null;
+        let failureReason = null;
+        let isSuccess = false;
+
+        try {
+          const response = await axios.get(
+            `https://backend.payhero.co.ke/api/v2/payments?external_reference=${ref}`,
+            { headers: { 'Authorization': getPayHeroAuthHeader() } }
+          );
+          heroStatusData = response.data;
+          
+          const paymentObj = Array.isArray(heroStatusData) ? heroStatusData[0] : (heroStatusData.response || heroStatusData);
+          if (paymentObj) {
+            const rawStatus = String(paymentObj.status || paymentObj.Status || '').toUpperCase();
+            if (rawStatus === 'SUCCESS' || rawStatus === 'PAID') {
+              isSuccess = true;
+            } else if (rawStatus === 'FAILED' || rawStatus === 'CANCELLED' || rawStatus === 'REJECTED') {
+              failureReason = paymentObj.failure_reason || paymentObj.message || paymentObj.ResultDesc || 'Payment failed or was cancelled by user.';
+            }
+          }
+        } catch (apiErr) {
+          console.warn(`PayHero live status poll warning for Order #${order.id}:`, apiErr.message);
+        }
+
+        if (isSuccess && !order.paymentDetails?.isPaid) {
+          order.paymentDetails = {
+            ...order.paymentDetails,
+            isPaid: true,
+            paidTag: 'PAID',
+            paidAt: new Date()
+          };
+          if (order.status === 'payment_failed') order.status = 'pending';
+          
+          const totalKg = order.totalWeightKg || 0;
+          const points = Number((totalKg * 0.2).toFixed(2));
+          const user = await User.findByPk(order.userId);
+          if (user && points > 0) {
+            user.rewardPoints = Number(((user.rewardPoints || 0) + points).toFixed(2));
+            await user.save();
+          }
+          await order.save();
+          io.emit('orderStatusUpdated', order);
+        } else if (failureReason) {
+          order.paymentDetails = {
+            ...order.paymentDetails,
+            isPaid: false,
+            paidTag: 'FAILED',
+            failureReason: failureReason
+          };
+          order.status = 'payment_failed';
+          await order.save();
+          io.emit('orderStatusUpdated', order);
+        }
+
+        res.json({
+          orderId: order.id,
+          status: order.status,
+          paymentStatus: order.paymentDetails?.paidTag || (order.paymentDetails?.isPaid ? 'PAID' : 'PENDING'),
+          paymentDetails: order.paymentDetails,
+          totalWeightKg: order.totalWeightKg || 0,
+          pointsEarned: order.pointsEarned || 0,
+          heroData: heroStatusData
+        });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    };
+
+    expressApp.get('/api/payments/payhero/status/:orderId', authenticateToken, handlePayHeroStatusCheck);
+    expressApp.get('/api/payment-status/:orderId', authenticateToken, handlePayHeroStatusCheck);
+
+    // --- PAYHERO PAYMENT WEBHOOK CALLBACK RECEIVER ---
+    expressApp.post('/api/payments/payhero/callback', async (req, res) => {
+      try {
+        console.log('🔔 PayHero Callback Notification Received:', JSON.stringify(req.body, null, 2));
+
+        const body = req.body || {};
+        const responseObj = body.response || body;
+
+        const externalRef = responseObj.external_reference || responseObj.ExternalReference || body.external_reference || body.ExternalReference;
+        const statusStr = responseObj.status || responseObj.Status || body.status || body.Status;
+        const mpesaReceipt = responseObj.mpesa_code || responseObj.MpesaReceiptNumber || body.mpesa_code || body.MpesaReceiptNumber || null;
+
+        if (externalRef && String(externalRef).startsWith('ORD-')) {
+          const orderId = String(externalRef).replace('ORD-', '');
+          const order = await Order.findByPk(orderId);
+
+          if (order) {
+            const isPaymentSuccessful = String(statusStr).toUpperCase() === 'SUCCESS' || body.success === true;
+            const existingPaymentDetails = order.paymentDetails || {};
+            
+            if (isPaymentSuccessful) {
+              if (order.status === 'payment_failed' || order.status === 'pending') {
+                order.status = 'pending'; 
+              }
+              order.paymentDetails = {
+                ...existingPaymentDetails,
+                isPaid: true,
+                paidTag: 'PAID',
+                mpesaReceipt: mpesaReceipt,
+                paidAt: new Date(),
+                rawCallback: body
+              };
+
+              // Credit 0.2 points per kg bought to customer
+              const totalKg = order.totalWeightKg || 0;
+              const points = Number((totalKg * 0.2).toFixed(2));
+              const user = await User.findByPk(order.userId);
+              if (user && points > 0) {
+                user.rewardPoints = Number(((user.rewardPoints || 0) + points).toFixed(2));
+                await user.save();
+              }
+
+              console.log(`🎉 Payment VERIFIED for Order #${order.id}. M-Pesa Receipt: ${mpesaReceipt}`);
+            } else {
+              const reason = responseObj.message || responseObj.failure_reason || responseObj.ResultDesc || 'Insufficient M-Pesa balance or user cancelled transaction.';
+              order.status = 'payment_failed';
+              order.paymentDetails = {
+                ...existingPaymentDetails,
+                isPaid: false,
+                paidTag: 'FAILED',
+                failureReason: reason,
+                rawCallback: body
+              };
+              console.log(`⚠️ Payment FAILED/CANCELLED for Order #${order.id}. Reason: ${reason}`);
+            }
+
+            await order.save();
+
+            io.to('admin-dashboard-room').emit('paymentReceived', {
+              orderId: order.id,
+              status: order.status,
+              isPaid: isPaymentSuccessful,
+              mpesaReceipt: mpesaReceipt,
+              paymentDetails: order.paymentDetails
+            });
+
+            io.emit('orderStatusUpdated', order);
+          } else {
+            console.warn(`⚠️ Received callback for non-existent Order ID: ${orderId}`);
+          }
+        }
+
+        res.status(200).json({ status: 'SUCCESS', message: 'Callback received and processed successfully.' });
+      } catch (err) {
+        console.error('❌ Error processing PayHero Callback:', err);
+        res.status(200).json({ status: 'ERROR', message: err.message });
+      }
+    });
+
+    /**
+     * ==========================================
+     * 7. SECURE ADMINISTRATIVE ENGINE & ANALYTICS
+     * ==========================================
+     */
+    
+    // --- ADMIN FINANCIAL ANALYTICS DASHBOARD ---
+    expressApp.get('/api/admin/analytics/finances', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const selectedYear = Number(req.query.year || new Date().getFullYear());
+        
+        const allOrders = await Order.findAll({
+          include: [{ model: User, attributes: ['id', 'fullName', 'phoneNumber', 'email'] }],
+          order: [['createdAt', 'DESC']]
+        });
+
+        const products = await RiceProduct.findAll();
+        const productMap = {};
+        products.forEach(p => {
+          productMap[p.id] = p;
+        });
+
+        let totalReceivedMoney = 0;
+        let totalBuyingCost = 0;
+        let totalNetProfit = 0;
+        let totalKgSold = 0;
+        let totalPointsAwarded = 0;
+
+        const yearsSet = new Set([new Date().getFullYear()]);
+        const categorySalesMap = {};
+
+        const monthlyStats = Array.from({ length: 12 }, (_, i) => ({
+          monthIndex: i,
+          month: new Date(2000, i, 1).toLocaleString('en-US', { month: 'short' }),
+          totalReceivedSales: 0,
+          totalBuyingCost: 0,
+          totalProfit: 0,
+          paidOrderCount: 0
+        }));
+
+        allOrders.forEach(order => {
+          const createdAt = new Date(order.createdAt);
+          const orderYear = createdAt.getFullYear();
+          yearsSet.add(orderYear);
+
+          // RECEIVED MONEY CONDITION: ONLY SUCCEEDED/PAID TRANSACTIONS
+          const isPaid = order.paymentDetails && (order.paymentDetails.isPaid === true || order.paymentDetails.paidTag === 'PAID' || order.status === 'paid' || order.status === 'completed' || order.status === 'delivered');
+
+          if (isPaid) {
+            const orderMoneyReceived = Number(order.grandTotal || 0);
+            totalReceivedMoney += orderMoneyReceived;
+
+            let orderCost = 0;
+            let orderRevenueFromItems = 0;
+            let orderKg = order.totalWeightKg || 0;
+
+            if (Array.isArray(order.items)) {
+              order.items.forEach(item => {
+                const prod = productMap[item.productId];
+                const qty = item.quantity || 1;
+                const sellPrice = item.priceAtPurchase || (prod ? prod.basePrice : 0);
+                const buyPrice = (prod && prod.buyingPrice !== undefined && prod.buyingPrice !== null) 
+                  ? prod.buyingPrice 
+                  : (item.buyingPrice || (sellPrice * 0.75));
+                
+                const itemRevenue = sellPrice * qty;
+                const itemCost = buyPrice * qty;
+                const itemProfit = itemRevenue - itemCost;
+
+                orderRevenueFromItems += itemRevenue;
+                orderCost += itemCost;
+
+                const catName = (prod && prod.variety) ? prod.variety : (item.variety || prod?.brandName || 'Standard Rice');
+                if (!categorySalesMap[catName]) {
+                  categorySalesMap[catName] = {
+                    category: catName,
+                    brandName: prod?.brandName || item.name || catName,
+                    quantitySold: 0,
+                    totalRevenue: 0,
+                    totalBuyingCost: 0,
+                    totalProfit: 0,
+                    buyingPricePerUnit: buyPrice,
+                    sellingPricePerUnit: sellPrice
+                  };
+                }
+
+                categorySalesMap[catName].quantitySold += qty;
+                categorySalesMap[catName].totalRevenue += itemRevenue;
+                categorySalesMap[catName].totalBuyingCost += itemCost;
+                categorySalesMap[catName].totalProfit += itemProfit;
+
+                if (!order.totalWeightKg && prod) {
+                  orderKg += (prod.weightKg || 0) * qty;
+                }
+              });
+            }
+
+            const orderProfit = orderMoneyReceived - orderCost;
+            totalBuyingCost += orderCost;
+            totalNetProfit += orderProfit;
+            totalKgSold += orderKg;
+            
+            const orderPoints = Number((orderKg * 0.2).toFixed(2));
+            totalPointsAwarded += orderPoints;
+
+            if (orderYear === selectedYear) {
+              const monthIdx = createdAt.getMonth();
+              monthlyStats[monthIdx].totalReceivedSales += orderMoneyReceived;
+              monthlyStats[monthIdx].totalBuyingCost += orderCost;
+              monthlyStats[monthIdx].totalProfit += orderProfit;
+              monthlyStats[monthIdx].paidOrderCount += 1;
+            }
+          }
+        });
+
+        const riceCategoryBreakdown = Object.values(categorySalesMap).map(cat => ({
+          ...cat,
+          totalRevenue: Number(cat.totalRevenue.toFixed(2)),
+          totalBuyingCost: Number(cat.totalBuyingCost.toFixed(2)),
+          totalProfit: Number(cat.totalProfit.toFixed(2))
+        }));
+
+        res.json({
+          selectedYear,
+          availableYears: Array.from(yearsSet).sort((a, b) => b - a),
+          summary: {
+            totalMoneyReceived: Number(totalReceivedMoney.toFixed(2)),
+            totalBuyingCost: Number(totalBuyingCost.toFixed(2)),
+            totalNetProfit: Number(totalNetProfit.toFixed(2)),
+            totalKgSold: Number(totalKgSold.toFixed(2)),
+            totalPointsAwarded: Number(totalPointsAwarded.toFixed(2))
+          },
+          riceCategories: riceCategoryBreakdown,
+          monthlySalesGrowth: monthlyStats
+        });
+      } catch (err) {
+        console.error('DEBUG: Financial Analytics Error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- ADMIN UPDATE MONTHLY BUYING PRICE PER PRODUCT ---
+    expressApp.put('/api/admin/products/:id/buying-price', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const { buyingPrice } = req.body || {};
+        if (buyingPrice === undefined || isNaN(Number(buyingPrice))) {
+          return res.status(400).json({ error: 'Valid numerical buyingPrice parameter is required.' });
+        }
+
+        const product = await RiceProduct.findByPk(req.params.id);
+        if (!product) return res.status(404).json({ error: 'Rice product not found.' });
+
+        const oldBuyingPrice = product.buyingPrice;
+        product.buyingPrice = Number(buyingPrice);
+        await product.save();
+
+        await AdminLog.create({
+          adminId: req.adminUser.id,
+          action: 'UPDATE_PRODUCT_BUYING_PRICE',
+          targetType: 'product',
+          targetId: product.id,
+          changes: { oldBuyingPrice, newBuyingPrice: product.buyingPrice },
+          ipAddress: req.ip
+        });
+
+        res.json({
+          message: `Buying price for ${product.brandName} updated successfully.`,
+          productId: product.id,
+          buyingPrice: product.buyingPrice
+        });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- BATCH UPDATE BUYING PRICES ---
+    expressApp.post('/api/admin/products/buying-prices/batch', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const { updates } = req.body || {};
+        if (!Array.isArray(updates)) {
+          return res.status(400).json({ error: 'Updates must be an array of objects containing id and buyingPrice.' });
+        }
+
+        const updatedRecords = [];
+        for (const item of updates) {
+          if (item.id && item.buyingPrice !== undefined) {
+            const product = await RiceProduct.findByPk(item.id);
+            if (product) {
+              product.buyingPrice = Number(item.buyingPrice);
+              await product.save();
+              updatedRecords.push({ id: product.id, brandName: product.brandName, buyingPrice: product.buyingPrice });
+            }
+          }
+        }
+
+        await AdminLog.create({
+          adminId: req.adminUser.id,
+          action: 'BATCH_UPDATE_BUYING_PRICES',
+          targetType: 'product',
+          changes: updates,
+          ipAddress: req.ip
+        });
+
+        res.json({ message: 'Batch buying prices updated successfully.', updatedRecords });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- ADMIN FILE / IMAGE UPLOAD ROUTE ---
+    expressApp.post('/api/admin/upload', authenticateToken, requireAdmin, upload.single('image'), (req, res) => {
+      try {
+        if (!req.file) return res.status(400).json({ error: 'No file buffered to stream.' });
+        const fileUrl = `/uploads/${req.file.filename}`;
+        res.json({ url: fileUrl, imageUrl: fileUrl });
+      } catch (err) { 
+        res.status(500).json({ error: err.message }); 
+      }
+    });
+
+    // --- PRODUCT MANAGEMENT CONTROLLERS ---
+    const addProductHandler = async (req, res) => {
+      try {
+        console.log("DEBUG: Raw Product Creation Payload:", req.body); 
+        const payload = {
+          ...req.body,
+          brandName: req.body.brandName || req.body.brand || 'Premium Rice',
+          variety: req.body.variety || 'Aromatic Pishori',
+          weightKg: Number(req.body.weightKg || req.body.weight || 0),
+          basePrice: Number(req.body.basePrice || req.body.price || 0),
+          buyingPrice: req.body.buyingPrice !== undefined && req.body.buyingPrice !== null && req.body.buyingPrice !== '' ? Number(req.body.buyingPrice) : (Number(req.body.basePrice || req.body.price || 0) * 0.75),
+          flashSalePrice: req.body.flashSalePrice !== undefined && req.body.flashSalePrice !== null && req.body.flashSalePrice !== '' ? Number(req.body.flashSalePrice) : null,
+          stockQuantity: Number(req.body.stockQuantity || req.body.stock || 0),
+          imageUrl: req.body.imageUrl || req.body.image || req.body.url || null,
+          isAvailable: req.body.isAvailable !== undefined ? Boolean(req.body.isAvailable) : true
+        };
+
+        const createdRecord = await RiceProduct.create(payload);
+        
+        await AdminLog.create({
+          adminId: req.adminUser.id,
+          action: 'CREATE_PRODUCT',
+          targetType: 'product',
+          targetId: createdRecord.id,
+          changes: { brand: createdRecord.brandName, variety: createdRecord.variety },
+          ipAddress: req.ip
+        });
+        
+        res.status(201).json(createdRecord);
+      } catch (err) {
+        if (err.name === 'SequelizeValidationError') {
+          console.error("DEBUG: VALIDATION ERROR:", err.errors.map(e => e.message));
+          return res.status(400).json({ error: 'Validation Failed', details: err.errors.map(e => e.message) });
+        }
+        console.error("DEBUG: SERVER ERROR:", err);
+        res.status(500).json({ error: err.message }); 
+      }
+    };
+
+    expressApp.post('/api/admin/products', authenticateToken, requireAdmin, addProductHandler);
+    expressApp.post('/api/admin/products/add', authenticateToken, requireAdmin, addProductHandler);
+    expressApp.post('/api/admin/laptops/add', authenticateToken, requireAdmin, addProductHandler);
+
+    const editProductHandler = async (req, res) => {
+      try {
+        const updatePayload = {
+          ...req.body
+        };
+        if (req.body.price !== undefined && req.body.basePrice === undefined) {
+          updatePayload.basePrice = Number(req.body.price);
+        }
+        if (req.body.image !== undefined && req.body.imageUrl === undefined) {
+          updatePayload.imageUrl = req.body.image;
+        }
+
+        await RiceProduct.update(updatePayload, { where: { id: req.params.id } });
+        const updatedProduct = await RiceProduct.findByPk(req.params.id);
+        
+        await AdminLog.create({
+          adminId: req.adminUser.id,
+          action: 'EDIT_PRODUCT_SPEC_OR_PRICE',
+          targetType: 'product',
+          targetId: updatedProduct ? updatedProduct.id : req.params.id,
+          changes: req.body,
+          ipAddress: req.ip
+        });
+        res.json(updatedProduct);
+      } catch (err) { 
+        res.status(500).json({ error: err.message }); 
+      }
+    };
+
+    expressApp.put('/api/admin/products/:id', authenticateToken, requireAdmin, editProductHandler);
+    expressApp.put('/api/admin/products/:id/edit', authenticateToken, requireAdmin, editProductHandler);
+    expressApp.put('/api/admin/laptops/:id/edit', authenticateToken, requireAdmin, editProductHandler);
+
+    const deleteProductHandler = async (req, res) => {
+      try {
+        await RiceProduct.destroy({ where: { id: req.params.id } });
+        
+        await AdminLog.create({
+          adminId: req.adminUser.id,
+          action: 'DELETE_PRODUCT',
+          targetType: 'product',
+          targetId: req.params.id,
+          ipAddress: req.ip
+        });
+
+        res.json({ message: 'Catalog item wiped permanently.' });
+      } catch (err) { 
+        res.status(500).json({ error: err.message }); 
+      }
+    };
+
+    expressApp.delete('/api/admin/products/:id', authenticateToken, requireAdmin, deleteProductHandler);
+    expressApp.delete('/api/admin/products/:id/destroy', authenticateToken, requireAdmin, deleteProductHandler);
+    expressApp.delete('/api/admin/laptops/:id/destroy', authenticateToken, requireAdmin, deleteProductHandler);
+
+    // --- GET ADMIN ORDERS WITH CATEGORY & LOCATION SEARCH ---
+    expressApp.get('/api/admin/orders', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const { search, category } = req.query;
+        const include = [{
+          model: User,
+          attributes: ['id', 'fullName', 'phoneNumber', 'email', 'role', 'isActive', 'rewardPoints']
+        }];
+
+        let whereCondition = {};
+        
+        if (search && search.trim() !== '') {
+          const searchStr = `%${search.trim()}%`;
+          whereCondition[Op.or] = [
+            { id: { [Op.like]: searchStr } },
+            { county: { [Op.like]: searchStr } },
+            { town: { [Op.like]: searchStr } },
+            { location: { [Op.like]: searchStr } },
+            { '$User.fullName$': { [Op.like]: searchStr } },
+            { '$User.phoneNumber$': { [Op.like]: searchStr } },
+            { '$User.email$': { [Op.like]: searchStr } }
+          ];
+        }
+
+        const orders = await Order.findAll({
+          where: whereCondition,
+          include: include,
+          order: [['createdAt', 'DESC']]
+        });
+
+        const formattedOrders = orders.map(order => {
+          const o = order.toJSON();
+          const isPaid = o.paymentDetails && (o.paymentDetails.isPaid === true || o.paymentDetails.paidTag === 'PAID' || o.status === 'paid');
+          const isDelivered = o.status === 'delivered';
+          
+          return {
+            ...o,
+            isPaid,
+            isDelivered,
+            transactionCategory: isPaid ? (isDelivered ? 'completed' : 'pending_shipping') : 'unpaid',
+            userName: o.User ? o.User.fullName : 'Guest/N/A',
+            userPhone: o.User ? o.User.phoneNumber : 'N/A',
+            userEmail: o.User ? o.User.email : 'N/A'
+          };
+        });
+
+        if (category === 'pending_shipping' || category === 'pending') {
+          return res.json(formattedOrders.filter(o => o.transactionCategory === 'pending_shipping'));
+        } else if (category === 'completed' || category === 'delivered') {
+          return res.json(formattedOrders.filter(o => o.transactionCategory === 'completed'));
+        }
+
+        res.json(formattedOrders);
+      } catch (err) {
+        console.error("DEBUG: Order Fetch Error:", err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- PENDING SHIPPING TRANSACTIONS ENDPOINT ---
+    expressApp.get('/api/admin/orders/pending-transactions', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const orders = await Order.findAll({
+          include: [{
+            model: User,
+            attributes: ['id', 'fullName', 'phoneNumber', 'email']
+          }],
+          order: [['createdAt', 'DESC']]
+        });
+
+        const pendingTransactions = orders
+          .map(order => {
+            const o = order.toJSON();
+            const isPaid = o.paymentDetails && (o.paymentDetails.isPaid === true || o.paymentDetails.paidTag === 'PAID' || o.status === 'paid');
+            const isDelivered = o.status === 'delivered';
+            
+            return {
+              ...o,
+              isPaid,
+              userName: o.User ? o.User.fullName : 'N/A',
+              userPhone: o.User ? o.User.phoneNumber : 'N/A',
+              userEmail: o.User ? o.User.email : 'N/A',
+              transactionCategory: isPaid ? (isDelivered ? 'completed' : 'pending_shipping') : 'unpaid'
+            };
+          })
+          .filter(o => o.isPaid && !o.isDelivered);
+
+        res.json(pendingTransactions);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- EXPORT ORDERS TO CSV ---
+    expressApp.get('/api/admin/orders/export/csv', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const orders = await Order.findAll({
+          include: [{ model: User, attributes: ['fullName', 'phoneNumber', 'email'] }],
+          order: [['createdAt', 'DESC']]
+        });
+
+        let csv = 'Order ID,Customer Name,Phone Number,Email,County,Town,Location,Sublocation,Street Address,Grand Total (KES),Payment Status,M-Pesa Receipt,Delivery Status,Order Date\n';
+        
+        orders.forEach(o => {
+          const customerName = o.User ? o.User.fullName.replace(/,/g, ' ') : 'N/A';
+          const phone = o.User ? o.User.phoneNumber : 'N/A';
+          const email = o.User ? o.User.email || 'N/A' : 'N/A';
+          const county = (o.county || '').replace(/,/g, ' ');
+          const town = (o.town || '').replace(/,/g, ' ');
+          const loc = (o.location || '').replace(/,/g, ' ');
+          const subloc = (o.sublocation || '').replace(/,/g, ' ');
+          const street = (o.shippingAddress?.streetAddress || o.shippingAddress?.details || '').replace(/,/g, ' ');
+          const payTag = o.paymentDetails ? (o.paymentDetails.paidTag || (o.paymentDetails.isPaid ? 'PAID' : 'PENDING')) : 'PENDING';
+          const receipt = o.paymentDetails ? (o.paymentDetails.mpesaReceipt || 'N/A') : 'N/A';
+          const dateStr = new Date(o.createdAt).toISOString().split('T')[0];
+          
+          csv += `${o.id},"${customerName}",${phone},${email},${county},${town},${loc},${subloc},"${street}",${o.grandTotal},${payTag},${receipt},${o.status},${dateStr}\n`;
+        });
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename=delivery-history-${Date.now()}.csv`);
+        res.status(200).send(csv);
+      } catch (err) {
+        console.error("DEBUG: CSV Export Error:", err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- ORDER STATUS UPDATES ---
+    expressApp.put('/api/admin/orders/:id/status', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const order = await Order.findByPk(req.params.id);
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+        
+        const oldStatus = order.status;
+        order.status = req.body.status;
+        await order.save();
+
+        await AdminLog.create({
+          adminId: req.adminUser.id,
+          action: 'UPDATE_ORDER_STATUS',
+          targetType: 'order',
+          targetId: order.id,
+          changes: { oldStatus, newStatus: req.body.status },
+          ipAddress: req.ip
+        });
+
+        io.emit('orderStatusUpdated', order);
+        res.json(order);
+      } catch (err) { 
+        res.status(500).json({ error: err.message }); 
+      }
+    });
+
+    // --- MANUAL PAYMENT STATUS OVERRIDE ---
+    expressApp.put('/api/admin/orders/:id/payment-status', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const { isPaid, paidTag, mpesaReceipt, failureReason, method } = req.body || {};
+        const order = await Order.findByPk(req.params.id);
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+
+        const currentPaymentDetails = order.paymentDetails || {};
+        const updatedIsPaid = isPaid !== undefined ? Boolean(isPaid) : currentPaymentDetails.isPaid;
+
+        order.paymentDetails = {
+          ...currentPaymentDetails,
+          isPaid: updatedIsPaid,
+          paidTag: paidTag || (updatedIsPaid ? 'PAID' : 'PENDING'),
+          mpesaReceipt: mpesaReceipt !== undefined ? mpesaReceipt : currentPaymentDetails.mpesaReceipt,
+          failureReason: failureReason !== undefined ? failureReason : currentPaymentDetails.failureReason,
+          method: method || currentPaymentDetails.method || 'mpesa_stk',
+          paidAt: updatedIsPaid ? (currentPaymentDetails.paidAt || new Date()) : currentPaymentDetails.paidAt
+        };
+
+        if (updatedIsPaid && order.status === 'payment_failed') {
+          order.status = 'pending';
+        }
+
+        await order.save();
+
+        await AdminLog.create({
+          adminId: req.adminUser.id,
+          action: 'UPDATE_ORDER_PAYMENT_STATUS',
+          targetType: 'order',
+          targetId: order.id,
+          changes: req.body,
+          ipAddress: req.ip
+        });
+
+        io.emit('orderStatusUpdated', order);
+        res.json(order);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- USER CLEARANCE MANAGEMENT ---
+    expressApp.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const systemRegisteredUsers = await User.findAll({ attributes: { exclude: ['password'] } });
+        res.json(systemRegisteredUsers);
+      } catch (err) { 
+        res.status(500).json({ error: err.message }); 
+      }
+    });
+
+    expressApp.put('/api/admin/users/:id/modify', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const { fullName, role, isActive } = req.body || {};
+        const targetUserRecord = await User.findByPk(req.params.id);
+        if (!targetUserRecord) return res.status(404).json({ error: 'User record not found.' });
+
+        if (fullName !== undefined) targetUserRecord.fullName = fullName;
+        if (role !== undefined) targetUserRecord.role = role;
+        if (isActive !== undefined) targetUserRecord.isActive = isActive;
+
+        await targetUserRecord.save();
+        
+        await AdminLog.create({
+          adminId: req.adminUser.id,
+          action: 'MODIFY_USER_CLEARANCE',
+          targetType: 'user',
+          targetId: targetUserRecord.id,
+          changes: req.body,
+          ipAddress: req.ip
+        });
+
+        res.json({ message: 'User profile updated.', record: targetUserRecord });
+      } catch (err) { 
+        res.status(500).json({ error: err.message }); 
+      }
+    });
+
+    expressApp.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const targetUserRecord = await User.findByPk(req.params.id);
+        if (!targetUserRecord) return res.status(404).json({ error: 'User not found.' });
+        if (targetUserRecord.id === req.user.id) return res.status(403).json({ error: 'Cannot delete active administrator session.' });
+
+        await targetUserRecord.destroy();
+
+        await AdminLog.create({
+          adminId: req.adminUser.id,
+          action: 'DELETE_USER',
+          targetType: 'user',
+          targetId: req.params.id,
+          ipAddress: req.ip
+        });
+
+        res.json({ message: 'User permanently deleted.' });
+      } catch (err) { 
+        res.status(500).json({ error: err.message }); 
       }
     });
 
@@ -2036,41 +2581,106 @@ async function startServer() {
           return res.status(400).json({ error: 'Slides validation failed: input must be an array.' });
         }
 
-        const config = await SystemConfig.findOne({ where: { key: 'homepage_carousel' } });
-        if (config) {
-          config.value = slides;
-          await config.save();
+        const processedSlides = slides.map(slide => ({
+          ...slide,
+          duration: slide.duration || (slide.type === 'video' ? 5 : 4)
+        }));
+
+        let config = await SystemConfig.findOne({ where: { key: 'homepage_carousel' } });
+        if (!config) {
+          config = await SystemConfig.create({ key: 'homepage_carousel', value: processedSlides });
         } else {
-          await SystemConfig.create({ key: 'homepage_carousel', value: slides });
+          config.value = processedSlides;
+          config.changed('value', true);
+          await config.save();
         }
 
         await AdminLog.create({
           adminId: req.adminUser.id,
           action: 'UPDATE_CAROUSEL_CONFIG',
-          targetType: 'system_config',
-          changes: { slidesCount: slides.length },
+          targetType: 'config',
+          changes: { slides: processedSlides },
           ipAddress: req.ip
         });
 
-        res.json({ message: 'Homepage carousel updated successfully.', slides: config ? config.value : slides });
+        io.emit('carouselUpdated', config.value);
+        res.json({ message: 'Homepage carousel configuration synchronized successfully.', slides: config.value });
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
     });
 
-    // =========================================================================
-    // BOOT HTTP SERVER & BIND LISTENERS
-    // =========================================================================
+    expressApp.post('/api/admin/config/hero', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const { 
+          type, 
+          url, 
+          title, 
+          subtitle, 
+          badgeText,
+          buttonText,
+          buttonLink,
+          secondaryButtonText,
+          secondaryButtonLink,
+          overlayOpacity,
+          alignment,
+          autoPlay,
+          videoDuration, 
+          imageDuration 
+        } = req.body || {};
+        
+        let config = await SystemConfig.findOne({ where: { key: 'hero_settings' } });
+        
+        const newSettings = { 
+          type: type || 'video', 
+          url: url || '', 
+          title: title || 'Direct From Mwea Paddy Fields', 
+          subtitle: subtitle || '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.', 
+          badgeText: badgeText || '🌾 100% Authentic Mwea Harvest',
+          buttonText: buttonText || 'Shop Fresh Harvest Now',
+          buttonLink: buttonLink || '/catalog',
+          secondaryButtonText: secondaryButtonText || 'View Flash Deals',
+          secondaryButtonLink: secondaryButtonLink || '#flash-sales',
+          overlayOpacity: overlayOpacity !== undefined ? overlayOpacity : 0.4,
+          alignment: alignment || 'center',
+          autoPlay: autoPlay !== undefined ? autoPlay : true,
+          videoDuration: videoDuration || 5,
+          imageDuration: imageDuration || 4
+        };
+
+        if (!config) {
+          config = await SystemConfig.create({ key: 'hero_settings', value: newSettings });
+        } else {
+          config.value = newSettings;
+          config.changed('value', true);
+          await config.save();
+        }
+
+        await AdminLog.create({
+          adminId: req.adminUser.id,
+          action: 'UPDATE_HERO_CONFIG',
+          targetType: 'config',
+          changes: newSettings,
+          ipAddress: req.ip
+        });
+
+        io.emit('heroUpdated', config.value);
+        res.json({ message: 'Hero configuration updated successfully.', config: config.value });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // Start Real-Time Server
     server.listen(port, hostname, () => {
-      console.log(`✅ Mwea Rice Hub Enterprise Engine successfully bound to ${hostname}:${port}`);
-      console.log(`🌐 API accessible via: http://${hostname === '0.0.0.0' ? 'localhost' : hostname}:${port}`);
+      console.log(`🚀 Server fully operational on http://${hostname}:${port}`);
     });
 
   } catch (error) {
-    console.error("❌ Fatal Database/Server Bootstrap Error:", error);
+    console.error('❌ CRITICAL BOOT FAILURE:', error);
     process.exit(1);
   }
 }
 
-// 🚀 IGNITE THE ENGINE
+// Boot application
 startServer();
