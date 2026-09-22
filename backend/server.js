@@ -2672,9 +2672,9 @@ async function startServer() {
     });
 
     // Start Real-Time Server
-    server.listen(port, hostname, () => {
-      console.log(`🚀 Server fully operational on http://${hostname}:${port}`);
-    });
+  server.listen(port, '0.0.0.0', () => {
+  console.log(`🚀 Server fully operational on port ${port}`);
+});
 
   } catch (error) {
     console.error('❌ CRITICAL BOOT FAILURE:', error);
