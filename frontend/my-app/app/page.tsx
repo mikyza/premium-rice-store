@@ -5000,12 +5000,10 @@ export default function PremiumRiceStore() {
           </div>
         </div>
 
-        <div className="container mx-auto px-4 border-t border-slate-900 mt-8 pt-6 text-center text-slate-600 text-[10px]">
+     <div className="container mx-auto px-4 border-t border-slate-900 mt-8 pt-6 text-center text-slate-600 text-[10px]">
           © {new Date().getFullYear()} Mwea Rice Hub. All Rights Reserved. Pure Kenyan Harvest.
         </div>
       </footer>
-
     </main>
   );
-    }
-            
+}  
