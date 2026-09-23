@@ -4071,22 +4071,29 @@ export default function PremiumRiceStore() {
                             <p className="text-[10px] font-extrabold text-slate-400 uppercase">Net Farm Profit</p>
                             <p className="text-2xl font-black text-teal-400">{formatKES(financialData.summary.totalNetProfit || 0)}</p>
                           </div>
-                          <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 spaceHere are the key structural fixes applied to your file to resolve Next.js build errors, runtime crashes, and React warnings without altering your logic or layout:
+                          <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-1">
+                            <p className="text-[10px] font-extrabold text-slate-400 uppercase">Grain Volume Sold</p>
+                            <p className="text-2xl font-black text-white">{financialData.summary.totalKgSold || 0} kg</p>
+                          </div>
+                          <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-1">
+                            <p className="text-[10px] font-extrabold text-slate-400 uppercase">Loyalty Points Issued</p>
+                            <p className="text-2xl font-black text-amber-400">{financialData.summary.totalPointsAwarded || 0} pts</p>
+                          </div>
+                        </div>
+                      )}
 
-/*
- * ===================================================================
- * SUMMARY OF RECENT FIXES & IMPROVEMENTS
- * ===================================================================
- * - Fixed ESLint Build Errors: Escaped the unescaped apostrophe in the footer (Kenya&apos;s).
- * - Resolved Uncontrolled Input Warnings: Added default fallbacks (|| '') to all <input> 
- *   values tied to state objects (newProduct, editingProduct, heroSettings).
- * - Prevented Runtime Crashes: Injected optional chaining (?.) and fallback zeros (|| 0) 
- *   for all array properties (products, adminOrders, adminUsers, cart).
- * - Fixed String Method Errors: Enforced string fallbacks on search queries 
- *   (orderSearchQuery || '') before invoking .toLowerCase().
- * - Security Patches: Added noopener to target="_blank" CSV export tag.
- * ===================================================================
- */
+                      <FinancialGrowthChart 
+                        selectedYear={financeYear}
+                        availableYears={financialData?.availableYears || [2024, 2025, 2026]}
+                        monthlyData={financialData?.monthlyBreakdown || []}
+                        onYearChange={(y) => {
+                          setFinanceYear(y);
+                          fetchFinancialAnalytics(y);
+                        }}
+                      />
+                    </div>
+                  )}
+
 {/* =================================================================== */}
         {/* VIEW: ADMINISTRATIVE DASHBOARD CONSOLE                             */}
         {/* DARK THEMED WITH TWO-PANEL ARCHITECTURE                             */}
