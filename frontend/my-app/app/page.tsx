@@ -4614,232 +4614,231 @@ export default function PremiumRiceStore() {
                     </div>
                   )}
 
-                  {/* SUB-PANEL: REGIONAL FREIGHT LOGISTICS MANAGER */}
-                  {adminTab === 'config' && (
-                    <div className="space-y-6">
-                      <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800 space-y-4">
-                        <h3 className="text-lg font-black text-white flex items-center gap-2">
-                          <MapPin className="w-5 h-5 text-emerald-400"/> Regional Freight Fee Overrides (47 Counties)
-                        </h3>
+         {/* SUB-PANEL: REGIONAL FREIGHT LOGISTICS MANAGER */}
+{adminTab === 'config' && (
+  <div className="space-y-6">
+    <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800 space-y-4">
+      <h3 className="text-lg font-black text-white flex items-center gap-2">
+        <MapPin className="w-5 h-5 text-emerald-400"/> Regional Freight Fee Overrides (47 Counties)
+      </h3>
 
-                        <form onSubmit={handleSaveCountyOverride} className="flex flex-col sm:flex-row items-end gap-4 text-xs">
-                          <div className="flex-1">
-                            <label className="block font-bold text-slate-400 mb-1">Select County</label>
-                            <select 
-                              value={countyOverrideForm?.county || ''}
-                              onChange={(e) => setCountyOverrideForm(prev => ({ ...prev, county: e.target.value }))}
-                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold cursor-pointer"
-                            >
-                              {ALL_47_COUNTIES?.map(c => (
-                                <option key={c} value={c}>{c}</option>
-                              ))}
-                            </select>
-                          </div>
+      <form onSubmit={handleSaveCountyOverride} className="flex flex-col sm:flex-row items-end gap-4 text-xs">
+        <div className="flex-1 w-full">
+          <label className="block font-bold text-slate-400 mb-1">Select County</label>
+          <select 
+            value={countyOverrideForm?.county || ''}
+            onChange={(e) => setCountyOverrideForm(prev => ({ ...prev, county: e.target.value }))}
+            className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold cursor-pointer"
+          >
+            <option value="" disabled>Select a county...</option>
+            {ALL_47_COUNTIES?.map(c => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
 
-                          <div className="flex-1">
-                            <label className="block font-bold text-slate-400 mb-1">Custom Transport Fee (KES)</label>
-                            <input 
-                              type="number" 
-                              required 
-                              value={countyOverrideForm?.fee || ''}
-                              onChange={(e) => setCountyOverrideForm(prev => ({ ...prev, fee: e.target.value }))}
-                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold"
-                              placeholder="e.g. 450"
-                            />
-                          </div>
+        <div className="flex-1 w-full">
+          <label className="block font-bold text-slate-400 mb-1">Custom Transport Fee (KES)</label>
+          <input 
+            type="number" 
+            required 
+            value={countyOverrideForm?.fee || ''}
+            onChange={(e) => setCountyOverrideForm(prev => ({ ...prev, fee: e.target.value }))}
+            className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold"
+            placeholder="e.g. 450"
+          />
+        </div>
 
-                          <button type="submit" className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs cursor-pointer">
-                            Save County Freight Rate
-                          </button>
-                        </form>
-                      </div>
+        <button type="submit" className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs cursor-pointer w-full sm:w-auto">
+          Save County Freight Rate
+        </button>
+      </form>
+    </div>
 
-                      {/* Overrides List */}
-                      <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800 space-y-3">
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Active Freight Rates Overview</h4>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                          {ALL_47_COUNTIES?.slice(0, 16).map(county => {
-                            const customFee = countyOverrides[county];
+    {/* Overrides List */}
+    <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800 space-y-3">
+      <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Active Freight Rates Overview (47 Counties)</h4>
+      <div className="max-h-96 overflow-y-auto pr-2 custom-scrollbar">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          {ALL_47_COUNTIES?.map(county => {
+            const customFee = countyOverrides?.[county];
 
-                            return (
-                              <div key={county} className="p-3 rounded-2xl bg-slate-950 border border-slate-800 flex justify-between items-center text-xs">
-                                <span className="font-bold text-slate-200">{county}</span>
-                                <span className="font-mono font-black text-emerald-400">
-                                  {customFee !== undefined ? formatKES(customFee) : formatKES(baseTransportFee)}
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* SUB-PANEL: HERO BACKDROP CONFIGURATION (10 EXPLICIT SETTINGS) */}
-                  {adminTab === 'carousel' && (
-                    <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800 space-y-6">
-                      <h3 className="text-lg font-black text-white flex items-center gap-2">
-                        <Sliders className="w-5 h-5 text-emerald-400"/> Hero Backdrop & Advert Controls (10 Settings)
-                      </h3>
-
-                      <form onSubmit={handleSaveHeroSettings} className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                        <div>
-                          <label className="block font-bold text-slate-400 mb-1">1. Main Hero Headline Title</label>
-                          <input 
-                            type="text" 
-                            value={heroSettings?.title || ''} 
-                            onChange={(e) => setHeroSettings(prev => ({ ...prev, title: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-400 mb-1">2. Subtitle Tagline Text</label>
-                          <input 
-                            type="text" 
-                            value={heroSettings?.subtitle || ''} 
-                            onChange={(e) => setHeroSettings(prev => ({ ...prev, subtitle: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-400 mb-1">3. Badge Label Text</label>
-                          <input 
-                            type="text" 
-                            value={heroSettings?.badgeText || ''} 
-                            onChange={(e) => setHeroSettings(prev => ({ ...prev, badgeText: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-400 mb-1">4. Primary CTA Button Text</label>
-                          <input 
-                            type="text" 
-                            value={heroSettings?.ctaButtonText || ''} 
-                            onChange={(e) => setHeroSettings(prev => ({ ...prev, ctaButtonText: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-400 mb-1">5. Live Announcement Ticker Bar</label>
-                          <input 
-                            type="text" 
-                            value={heroSettings?.announcementTicker || ''} 
-                            onChange={(e) => setHeroSettings(prev => ({ ...prev, announcementTicker: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-400 mb-1">6. Support Hotline Display</label>
-                          <input 
-                            type="text" 
-                            value={heroSettings?.supportHotlineDisplay || ''} 
-                            onChange={(e) => setHeroSettings(prev => ({ ...prev, supportHotlineDisplay: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-400 mb-1">7. Background Video Embed 1 (YouTube URL)</label>
-                          <input 
-                            type="text" 
-                            value={heroSettings?.video1 || ''} 
-                            onChange={(e) => setHeroSettings(prev => ({ ...prev, video1: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-400 mb-1">8. Background Backdrop Image URL 1</label>
-                          <input 
-                            type="text" 
-                            value={heroSettings?.img1 || ''} 
-                            onChange={(e) => setHeroSettings(prev => ({ ...prev, img1: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-400 mb-1">9. Dark Overlay Opacity (%)</label>
-                          <input 
-                            type="number" 
-                            value={heroSettings?.overlayOpacity || ''} 
-                            onChange={(e) => setHeroSettings(prev => ({ ...prev, overlayOpacity: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-400 mb-1">10. Express Freight Note</label>
-                          <input 
-                            type="text" 
-                            value={heroSettings?.expressLogisticsNote || ''} 
-                            onChange={(e) => setHeroSettings(prev => ({ ...prev, expressLogisticsNote: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
-                          />
-                        </div>
-
-                        <div className="sm:col-span-2 text-right pt-2">
-                          <button type="submit" className="px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-lg cursor-pointer">
-                            Save & Synchronize Hero Setup
-                          </button>
-                        </div>
-                      </form>
-                    </div>
-                  )}
-
-                  {/* SUB-PANEL: AUDIT LOGS DISPLAY WITH USER NAMES */}
-                  {adminTab === 'logs' && (
-                    <div className="space-y-6">
-                      <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
-                        <div className="p-4 border-b border-slate-800 flex justify-between items-center">
-                          <h4 className="font-extrabold text-sm text-white">System Security Audit Logs ({adminLogs?.length || 0})</h4>
-                          <span className="text-xs text-slate-400">Track user actions & administrative modifications</span>
-                        </div>
-
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left text-xs">
-                            <thead className="bg-slate-950 text-slate-400 uppercase font-black border-b border-slate-800">
-                              <tr>
-                                <th className="p-4">Timestamp</th>
-                                <th className="p-4">User Account Name</th>
-                                <th className="p-4">Action Event</th>
-                                <th className="p-4">Module</th>
-                                <th className="p-4">Details</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-800/60 font-medium">
-                              {adminLogs?.map(log => (
-                                <tr key={log.id} className="hover:bg-slate-800/40">
-                                  <td className="p-4 font-mono text-slate-400">
-                                    {new Date(log.timestamp).toLocaleString('en-KE')}
-                                  </td>
-                                  <td className="p-4 font-extrabold text-emerald-400">
-                                    {log.performedByName || 'System Auto'}
-                                  </td>
-                                  <td className="p-4 font-bold text-white">{log.action}</td>
-                                  <td className="p-4">
-                                    <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-mono text-[10px]">
-                                      {log.module}
-                                    </span>
-                                  </td>
-                                  <td className="p-4 text-slate-400 max-w-xs truncate">{log.details || '-'}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                </div>
-
+            return (
+              <div key={county} className="p-3 rounded-2xl bg-slate-950 border border-slate-800 flex justify-between items-center text-xs">
+                <span className="font-bold text-slate-200 truncate mr-2">{county}</span>
+                <span className="font-mono font-black text-emerald-400 whitespace-nowrap">
+                  {customFee !== undefined ? formatKES(customFee) : formatKES(baseTransportFee)}
+                </span>
               </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
+{/* SUB-PANEL: HERO BACKDROP CONFIGURATION (10 EXPLICIT SETTINGS) */}
+{adminTab === 'carousel' && (
+  <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800 space-y-6">
+    <h3 className="text-lg font-black text-white flex items-center gap-2">
+      <Sliders className="w-5 h-5 text-emerald-400"/> Hero Backdrop & Advert Controls (10 Settings)
+    </h3>
+
+    <form onSubmit={handleSaveHeroSettings} className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+      <div>
+        <label className="block font-bold text-slate-400 mb-1">1. Main Hero Headline Title</label>
+        <input 
+          type="text" 
+          value={heroSettings?.title || ''} 
+          onChange={(e) => setHeroSettings(prev => ({ ...prev, title: e.target.value }))}
+          className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold"
+        />
+      </div>
+
+      <div>
+        <label className="block font-bold text-slate-400 mb-1">2. Subtitle Tagline Text</label>
+        <input 
+          type="text" 
+          value={heroSettings?.subtitle || ''} 
+          onChange={(e) => setHeroSettings(prev => ({ ...prev, subtitle: e.target.value }))}
+          className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
+        />
+      </div>
+
+      <div>
+        <label className="block font-bold text-slate-400 mb-1">3. Badge Label Text</label>
+        <input 
+          type="text" 
+          value={heroSettings?.badgeText || ''} 
+          onChange={(e) => setHeroSettings(prev => ({ ...prev, badgeText: e.target.value }))}
+          className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
+        />
+      </div>
+
+      <div>
+        <label className="block font-bold text-slate-400 mb-1">4. Primary CTA Button Text</label>
+        <input 
+          type="text" 
+          value={heroSettings?.ctaButtonText || ''} 
+          onChange={(e) => setHeroSettings(prev => ({ ...prev, ctaButtonText: e.target.value }))}
+          className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
+        />
+      </div>
+
+      <div>
+        <label className="block font-bold text-slate-400 mb-1">5. Live Announcement Ticker Bar</label>
+        <input 
+          type="text" 
+          value={heroSettings?.announcementTicker || ''} 
+          onChange={(e) => setHeroSettings(prev => ({ ...prev, announcementTicker: e.target.value }))}
+          className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
+        />
+      </div>
+
+      <div>
+        <label className="block font-bold text-slate-400 mb-1">6. Support Hotline Display</label>
+        <input 
+          type="text" 
+          value={heroSettings?.supportHotlineDisplay || ''} 
+          onChange={(e) => setHeroSettings(prev => ({ ...prev, supportHotlineDisplay: e.target.value }))}
+          className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
+        />
+      </div>
+
+      <div>
+        <label className="block font-bold text-slate-400 mb-1">7. Background Video Embed 1 (YouTube URL)</label>
+        <input 
+          type="text" 
+          value={heroSettings?.video1 || ''} 
+          onChange={(e) => setHeroSettings(prev => ({ ...prev, video1: e.target.value }))}
+          className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono"
+        />
+      </div>
+
+      <div>
+        <label className="block font-bold text-slate-400 mb-1">8. Background Backdrop Image URL 1</label>
+        <input 
+          type="text" 
+          value={heroSettings?.img1 || ''} 
+          onChange={(e) => setHeroSettings(prev => ({ ...prev, img1: e.target.value }))}
+          className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono"
+        />
+      </div>
+
+      <div>
+        <label className="block font-bold text-slate-400 mb-1">9. Dark Overlay Opacity (%)</label>
+        <input 
+          type="number" 
+          value={heroSettings?.overlayOpacity || ''} 
+          onChange={(e) => setHeroSettings(prev => ({ ...prev, overlayOpacity: e.target.value }))}
+          className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold"
+        />
+      </div>
+
+      <div>
+        <label className="block font-bold text-slate-400 mb-1">10. Express Freight Note</label>
+        <input 
+          type="text" 
+          value={heroSettings?.expressLogisticsNote || ''} 
+          onChange={(e) => setHeroSettings(prev => ({ ...prev, expressLogisticsNote: e.target.value }))}
+          className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
+        />
+      </div>
+
+      <div className="sm:col-span-2 text-right pt-2">
+        <button type="submit" className="px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-lg cursor-pointer">
+          Save & Synchronize Hero Setup
+        </button>
+      </div>
+    </form>
+  </div>
+)}
+
+{/* SUB-PANEL: AUDIT LOGS DISPLAY WITH USER NAMES */}
+{adminTab === 'logs' && (
+  <div className="space-y-6">
+    <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
+      <div className="p-4 border-b border-slate-800 flex justify-between items-center flex-wrap gap-2">
+        <h4 className="font-extrabold text-sm text-white">System Security Audit Logs ({adminLogs?.length || 0})</h4>
+        <span className="text-xs text-slate-400">Track user actions & administrative modifications</span>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead className="bg-slate-950 text-slate-400 uppercase font-black border-b border-slate-800">
+            <tr>
+              <th className="p-4">Timestamp</th>
+              <th className="p-4">User Account Name</th>
+              <th className="p-4">Action Event</th>
+              <th className="p-4">Module</th>
+              <th className="p-4">Details</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800/60 font-medium">
+            {adminLogs?.map(log => (
+              <tr key={log.id} className="hover:bg-slate-800/40">
+                <td className="p-4 font-mono text-slate-400 whitespace-nowrap">
+                  {new Date(log.timestamp).toLocaleString('en-KE')}
+                </td>
+                <td className="p-4 font-extrabold text-emerald-400 whitespace-nowrap">
+                  {log.performedByName || 'System Auto'}
+                </td>
+                <td className="p-4 font-bold text-white whitespace-nowrap">{log.action}</td>
+                <td className="p-4 whitespace-nowrap">
+                  <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-mono text-[10px]">
+                    {log.module}
+                  </span>
+                </td>
+                <td className="p-4 text-slate-400 max-w-xs truncate">{log.details || '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+)}
 
             </div>
           </div>
