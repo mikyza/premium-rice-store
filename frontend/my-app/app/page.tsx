@@ -1153,6 +1153,57 @@ export interface FinancialGrowthChartProps {
   isLoading?: boolean;
 }
 
+import { 
+  TrendingUp, 
+  Calendar, 
+  RefreshCw, 
+  BarChart2, 
+  DollarSign, 
+  Package, 
+  Award, 
+  ShoppingBag 
+} from 'lucide-react';
+
+// ============================================================================
+// TYPES & INTERFACES
+// ============================================================================
+
+export interface FinancialMonth {
+  monthIndex: number; // 0 = Jan, 11 = Dec
+  monthName: string;
+  year: number;
+  totalRevenue: number;
+  totalBuyingCost: number;
+  netProfit: number;
+  totalKgSold: number;
+  orderCount: number;
+}
+
+export interface FinancialAnalyticsResponse {
+  year: number;
+  availableYears: number[];
+  monthlyBreakdown: FinancialMonth[];
+  summary: {
+    totalMoneyReceived: number;
+    totalBuyingCosts: number;
+    totalNetProfit: number;
+    totalKgSold: number;
+    totalOrdersCount: number;
+    totalPointsAwarded: number;
+  };
+}
+
+export interface FinancialGrowthChartProps {
+  /** Complete API response object */
+  data?: FinancialAnalyticsResponse;
+  /** Direct individual props as fallback */
+  monthlyData?: FinancialMonth[];
+  selectedYear?: number;
+  availableYears?: number[];
+  onYearChange: (year: number) => void;
+  isLoading?: boolean;
+}
+
 const MONTH_NAMES_SHORT = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
@@ -1163,24 +1214,31 @@ const formatKES = (val: number): string => {
 };
 
 // ============================================================================
-// 4. CUSTOM FINANCIAL GROWTH CHART COMPONENT (SVG-BASED)
-// Dynamic graph showing real monthly growth from database with empty month visualizers
+// FINANCIAL GROWTH CHART COMPONENT (SVG-BASED)
+// Dynamic graph & summary dashboard powered by FinancialAnalyticsResponse
 // ============================================================================
 
 export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
-  monthlyData,
-  selectedYear,
-  availableYears = [2024, 2025, 2026, 2027],
+  data,
+  monthlyData: explicitMonthlyData,
+  selectedYear: explicitSelectedYear,
+  availableYears: explicitAvailableYears,
   onYearChange,
   isLoading = false
 }) => {
   const [metric, setMetric] = useState<'revenue' | 'profit' | 'kg'>('revenue');
 
+  // Unified resolution of data sources (supports either whole object or individual props)
+  const monthlyData = data?.monthlyBreakdown || explicitMonthlyData || [];
+  const selectedYear = data?.year ?? explicitSelectedYear ?? new Date().getFullYear();
+  const availableYears = data?.availableYears || explicitAvailableYears || [2024, 2025, 2026, 2027];
+  const summary = data?.summary;
+
   // Normalize 12 months array ensuring all 12 months (Jan - Dec) exist even if empty
   const fullYearMonths = useMemo(() => {
     const list: FinancialMonth[] = [];
     for (let i = 0; i < 12; i++) {
-      const found = monthlyData?.find(m => m.monthIndex === i);
+      const found = monthlyData.find(m => m.monthIndex === i);
       if (found) {
         list.push(found);
       } else {
@@ -1199,7 +1257,7 @@ export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
     return list;
   }, [monthlyData, selectedYear]);
 
-  // Compute maximum values for SVG height scaling
+  // Compute maximum value for Y-axis scaling
   const maxValue = useMemo(() => {
     let max = 0;
     fullYearMonths.forEach(m => {
@@ -1216,11 +1274,11 @@ export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
   const graphWidth = svgWidth - paddingX * 2;
   const graphHeight = svgHeight - paddingY * 2;
 
-  // Generate SVG Points for Line / Area Chart
+  // Generate SVG Coordinates
   const points = useMemo(() => {
     return fullYearMonths.map((m, idx) => {
       const rawVal = metric === 'revenue' ? m.totalRevenue : metric === 'profit' ? m.netProfit : m.totalKgSold;
-      const val = Math.max(0, rawVal); // Guard against negative rendering clip
+      const val = Math.max(0, rawVal); // Guard against negative values breaking scale
       const x = paddingX + (idx / 11) * graphWidth;
       const y = svgHeight - paddingY - (val / maxValue) * graphHeight;
       return { x, y, val: rawVal, month: m.monthName, orders: m.orderCount, data: m };
@@ -1242,35 +1300,35 @@ export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
   return (
     <div className="bg-slate-900 text-slate-100 rounded-3xl p-6 border border-emerald-900/60 shadow-2xl space-y-6">
       
-      {/* Top Controls & Header */}
+      {/* Top Header & Year / Metric Controls */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
         <div>
           <div className="flex items-center gap-2">
             <TrendingUp className="w-5 h-5 text-emerald-400" />
-            <h3 className="text-xl font-black text-white">Database Financial Growth Engine</h3>
+            <h3 className="text-xl font-black text-white">Financial Growth Analytics</h3>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
-            Real-time monthly aggregation from verified paid customer orders.
+            Real-time monthly revenue, net profit, and grain volume aggregation.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Year Switcher Dropdown */}
+          {/* Year Selector */}
           <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700 text-xs font-bold">
             <Calendar className="w-4 h-4 text-emerald-400" />
-            <span className="text-slate-300">Select Year:</span>
+            <span className="text-slate-300">Year:</span>
             <select 
               value={selectedYear}
               onChange={(e) => onYearChange(Number(e.target.value))}
               className="bg-slate-900 text-emerald-400 font-extrabold px-2 py-1 rounded-lg border border-emerald-500/30 focus:outline-none cursor-pointer"
             >
-              {(availableYears.length > 0 ? availableYears : [2024, 2025, 2026, 2027]).map(y => (
+              {availableYears.map(y => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
           </div>
 
-          {/* Metric Selector Pills */}
+          {/* Metric Selector Buttons */}
           <div className="flex items-center bg-slate-800/80 p-1 rounded-xl border border-slate-700 text-xs font-bold">
             <button 
               type="button"
@@ -1300,12 +1358,77 @@ export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
         </div>
       </div>
 
+      {/* Analytics Summary Badges (Rendered automatically if summary object is provided) */}
+      {summary && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-3">
+            <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-bold">
+              <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Money Received</span>
+            </div>
+            <div className="text-sm font-black text-white mt-1">
+              {formatKES(summary.totalMoneyReceived)}
+            </div>
+          </div>
+
+          <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-3">
+            <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-bold">
+              <BarChart2 className="w-3.5 h-3.5 text-teal-400" />
+              <span>Net Profit</span>
+            </div>
+            <div className="text-sm font-black text-teal-300 mt-1">
+              {formatKES(summary.totalNetProfit)}
+            </div>
+          </div>
+
+          <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-3">
+            <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-bold">
+              <DollarSign className="w-3.5 h-3.5 text-rose-400" />
+              <span>Buying Costs</span>
+            </div>
+            <div className="text-sm font-black text-rose-300 mt-1">
+              {formatKES(summary.totalBuyingCosts)}
+            </div>
+          </div>
+
+          <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-3">
+            <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-bold">
+              <Package className="w-3.5 h-3.5 text-amber-400" />
+              <span>Total Volume</span>
+            </div>
+            <div className="text-sm font-black text-amber-300 mt-1">
+              {summary.totalKgSold.toLocaleString()} Kg
+            </div>
+          </div>
+
+          <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-3">
+            <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-bold">
+              <ShoppingBag className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Total Orders</span>
+            </div>
+            <div className="text-sm font-black text-cyan-300 mt-1">
+              {summary.totalOrdersCount.toLocaleString()}
+            </div>
+          </div>
+
+          <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-3">
+            <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-bold">
+              <Award className="w-3.5 h-3.5 text-purple-400" />
+              <span>Points Awarded</span>
+            </div>
+            <div className="text-sm font-black text-purple-300 mt-1">
+              {summary.totalPointsAwarded.toLocaleString()} pts
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* SVG Chart Graphics */}
       <div className="relative w-full overflow-x-auto">
         {isLoading ? (
           <div className="h-64 flex items-center justify-center text-slate-400 gap-3">
             <RefreshCw className="w-6 h-6 animate-spin text-emerald-500" />
-            <span>Retrieving real-time purchase logs from database...</span>
+            <span>Fetching updated ledger details...</span>
           </div>
         ) : (
           <div className="min-w-[650px]">
@@ -1325,7 +1448,7 @@ export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                 </linearGradient>
               </defs>
 
-              {/* Horizontal Grid lines */}
+              {/* Horizontal Y-Axis Grid Lines */}
               {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
                 const yVal = svgHeight - paddingY - ratio * graphHeight;
                 const gridVal = Math.round(ratio * maxValue);
@@ -1354,13 +1477,13 @@ export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                 );
               })}
 
-              {/* Shaded Area Fill */}
+              {/* Gradient Area Fill */}
               <path 
                 d={areaD} 
                 fill={metric === 'revenue' ? "url(#emeraldGrad)" : metric === 'profit' ? "url(#tealGrad)" : "url(#amberGrad)"} 
               />
 
-              {/* Chart Line */}
+              {/* Chart Main Line */}
               <path 
                 d={pathD} 
                 fill="none" 
@@ -1370,11 +1493,11 @@ export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                 strokeLinejoin="round" 
               />
 
-              {/* Month Data Points & Empty Indicators */}
+              {/* Data Points and Interactivity */}
               {points.map((p, idx) => {
                 const isEmpty = p.val === 0;
 
-                // Clamp tooltip X position to prevent clipping at boundaries
+                // Clamp Tooltip X inside view boundaries
                 const tooltipWidth = 130;
                 const minX = tooltipWidth / 2 + 10;
                 const maxX = svgWidth - tooltipWidth / 2 - 10;
@@ -1382,7 +1505,7 @@ export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
 
                 return (
                   <g key={idx} className="group cursor-pointer">
-                    {/* Invisible Wide Hitbox for Effortless Hovering */}
+                    {/* Transparent Hitbox for smooth hover */}
                     <rect
                       x={p.x - graphWidth / 24}
                       y={paddingY}
@@ -1391,7 +1514,7 @@ export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                       fill="transparent"
                     />
 
-                    {/* Vertical Guideline */}
+                    {/* Vertical Guide Line */}
                     <line 
                       x1={p.x} 
                       y1={paddingY} 
@@ -1402,9 +1525,8 @@ export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                       className="group-hover:stroke-slate-500 transition-colors"
                     />
 
-                    {/* Data Point Marker */}
+                    {/* Data Marker */}
                     {isEmpty ? (
-                      /* Empty Month Visual Tag */
                       <g>
                         <circle 
                           cx={p.x} 
@@ -1426,7 +1548,6 @@ export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                         </text>
                       </g>
                     ) : (
-                      /* Active Month Data Marker */
                       <circle 
                         cx={p.x} 
                         cy={p.y} 
@@ -1438,7 +1559,7 @@ export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                       />
                     )}
 
-                    {/* X-Axis Month Name Label */}
+                    {/* X-Axis Month Label */}
                     <text 
                       x={p.x} 
                       y={svgHeight - paddingY + 20} 
@@ -1450,7 +1571,7 @@ export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                       {p.month}
                     </text>
 
-                    {/* Hover Tooltip Popup */}
+                    {/* Tooltip Hover Overlay */}
                     <g className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                       <rect 
                         x={clampedTooltipX - tooltipWidth / 2} 
@@ -1491,7 +1612,7 @@ export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
         )}
       </div>
 
-      {/* Monthly Data Matrix Table (Highlights Zero Value / Empty Months) */}
+      {/* Monthly Ledger Matrix */}
       <div className="pt-4 border-t border-slate-800">
         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">
           Monthly Ledger Breakdown ({selectedYear})
@@ -1544,7 +1665,6 @@ export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
 };
 
 export default FinancialGrowthChart;
-
 // ============================================================================
 // 5. REUSABLE PRODUCT CARD COMPONENT
 // Prioritizes phone screen priority (2 items per row on small devices, 4 on desktop)
