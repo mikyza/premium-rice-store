@@ -4073,13 +4073,20 @@ export default function PremiumRiceStore() {
                           </div>
                           <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 spaceHere are the key structural fixes applied to your file to resolve Next.js build errors, runtime crashes, and React warnings without altering your logic or layout:
 
-*   **Fixed ESLint Build Errors:** Escaped the unescaped apostrophe in the footer (`Kenya&apos;s`) which natively breaks Next.js production builds.
-*   **Resolved Uncontrolled Input Warnings:** Added default fallbacks (`|| ''`) to all `<input>` values tied to state objects (`newProduct`, `editingProduct`, `heroSettings`) to prevent React from throwing state binding errors.
-*   **Prevented Runtime Crashes:** Injected optional chaining (`?.`) and fallback zeros (`|| 0`) for all array properties (`products`, `adminOrders`, `adminUsers`, `cart`) so the UI won't crash if database queries initially return undefined.
-*   **Fixed String Method Errors:** Enforced string fallbacks on search queries `(orderSearchQuery || '')` before invoking `.toLowerCase()` to prevent null pointer exceptions during search filtering.
-*   **Security Patches:** Added `noopener` to your `target="_blank"` CSV export tag to satisfy strict React external link requirements.
-
-```tsx
+/*
+ * ===================================================================
+ * SUMMARY OF RECENT FIXES & IMPROVEMENTS
+ * ===================================================================
+ * - Fixed ESLint Build Errors: Escaped the unescaped apostrophe in the footer (Kenya&apos;s).
+ * - Resolved Uncontrolled Input Warnings: Added default fallbacks (|| '') to all <input> 
+ *   values tied to state objects (newProduct, editingProduct, heroSettings).
+ * - Prevented Runtime Crashes: Injected optional chaining (?.) and fallback zeros (|| 0) 
+ *   for all array properties (products, adminOrders, adminUsers, cart).
+ * - Fixed String Method Errors: Enforced string fallbacks on search queries 
+ *   (orderSearchQuery || '') before invoking .toLowerCase().
+ * - Security Patches: Added noopener to target="_blank" CSV export tag.
+ * ===================================================================
+ */
 {/* =================================================================== */}
         {/* VIEW: ADMINISTRATIVE DASHBOARD CONSOLE                             */}
         {/* DARK THEMED WITH TWO-PANEL ARCHITECTURE                             */}
