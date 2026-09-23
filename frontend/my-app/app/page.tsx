@@ -102,6 +102,10 @@ export interface AuditLog {
   timestamp: string;
 }
 
+/ ============================================================================
+// UPDATED TYPES & INTERFACES
+// ============================================================================
+
 export interface FinancialMonth {
   monthIndex: number; // 0 = Jan, 11 = Dec
   monthName: string;
@@ -127,6 +131,15 @@ export interface FinancialAnalyticsResponse {
   };
 }
 
+export interface FinancialGrowthChartProps {
+  /** Entire API response object or individual props fallback */
+  data?: FinancialAnalyticsResponse;
+  monthlyData?: FinancialMonth[];
+  selectedYear?: number;
+  availableYears?: number[];
+  onYearChange: (year: number) => void;
+  isLoading?: boolean;
+}
 export interface HeroSettings {
   title: string;
   subtitle: string;
