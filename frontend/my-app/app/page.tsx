@@ -3671,6 +3671,7 @@ export default function PremiumRiceStore() {
         )}
 
         {/* =================================================================== */}
+     {/* =================================================================== */}
         {/* VIEW: ADMINISTRATIVE DASHBOARD CONSOLE                             */}
         {/* DARK THEMED WITH TWO-PANEL ARCHITECTURE                             */}
         {/* =================================================================== */}
@@ -3690,13 +3691,13 @@ export default function PremiumRiceStore() {
 
                 <div className="flex items-center gap-3">
                   <button 
-                    onClick={() => handleToggleFlashSale(!flashSale.active, 24)}
+                    onClick={() => handleToggleFlashSale(!flashSale?.active, 24)}
                     className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                      flashSale.active ? 'bg-rose-600 text-white animate-pulse' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      flashSale?.active ? 'bg-rose-600 text-white animate-pulse' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                     }`}
                   >
                     <Zap className="w-4 h-4" />
-                    <span>{flashSale.active ? 'Flash Sale ACTIVE' : 'Start Flash Sale'}</span>
+                    <span>{flashSale?.active ? 'Flash Sale ACTIVE' : 'Start Flash Sale'}</span>
                   </button>
                 </div>
               </div>
@@ -3750,15 +3751,15 @@ export default function PremiumRiceStore() {
                     <div className="space-y-1 text-xs">
                       <div className="flex justify-between text-slate-400">
                         <span>Catalog Items:</span>
-                        <span className="font-extrabold text-white">{products.length}</span>
+                        <span className="font-extrabold text-white">{products?.length || 0}</span>
                       </div>
                       <div className="flex justify-between text-slate-400">
                         <span>Total Registered Users:</span>
-                        <span className="font-extrabold text-emerald-400">{adminUsers.length}</span>
+                        <span className="font-extrabold text-emerald-400">{adminUsers?.length || 0}</span>
                       </div>
                       <div className="flex justify-between text-slate-400">
                         <span>Dispatched Orders:</span>
-                        <span className="font-extrabold text-teal-400">{adminOrders.length}</span>
+                        <span className="font-extrabold text-teal-400">{adminOrders?.length || 0}</span>
                       </div>
                     </div>
                   </div>
@@ -3783,7 +3784,7 @@ export default function PremiumRiceStore() {
                             <input 
                               type="text" 
                               required 
-                              value={newProduct.brandName} 
+                              value={newProduct?.brandName || ''} 
                               onChange={(e) => setNewProduct(prev => ({ ...prev, brandName: e.target.value }))}
                               className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
                               placeholder="Pure Mwea Pishori Grade 1"
@@ -3795,7 +3796,7 @@ export default function PremiumRiceStore() {
                             <input 
                               type="text" 
                               required 
-                              value={newProduct.variety} 
+                              value={newProduct?.variety || ''} 
                               onChange={(e) => setNewProduct(prev => ({ ...prev, variety: e.target.value }))}
                               className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
                               placeholder="Aromatic Pishori"
@@ -3807,7 +3808,7 @@ export default function PremiumRiceStore() {
                             <input 
                               type="number" 
                               required 
-                              value={newProduct.weightKg} 
+                              value={newProduct?.weightKg || ''} 
                               onChange={(e) => setNewProduct(prev => ({ ...prev, weightKg: e.target.value }))}
                               className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
                               placeholder="25"
@@ -3819,7 +3820,7 @@ export default function PremiumRiceStore() {
                             <input 
                               type="number" 
                               required 
-                              value={newProduct.basePrice} 
+                              value={newProduct?.basePrice || ''} 
                               onChange={(e) => setNewProduct(prev => ({ ...prev, basePrice: e.target.value }))}
                               className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
                               placeholder="3200"
@@ -3830,7 +3831,7 @@ export default function PremiumRiceStore() {
                             <label className="block font-bold text-slate-400 mb-1">Buying Price (KES)</label>
                             <input 
                               type="number" 
-                              value={newProduct.buyingPrice} 
+                              value={newProduct?.buyingPrice || ''} 
                               onChange={(e) => setNewProduct(prev => ({ ...prev, buyingPrice: e.target.value }))}
                               className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
                               placeholder="2400"
@@ -3841,7 +3842,7 @@ export default function PremiumRiceStore() {
                             <label className="block font-bold text-slate-400 mb-1">Flash Sale Price</label>
                             <input 
                               type="number" 
-                              value={newProduct.flashSalePrice} 
+                              value={newProduct?.flashSalePrice || ''} 
                               onChange={(e) => setNewProduct(prev => ({ ...prev, flashSalePrice: e.target.value }))}
                               className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
                               placeholder="2900"
@@ -3853,7 +3854,7 @@ export default function PremiumRiceStore() {
                             <input 
                               type="number" 
                               required 
-                              value={newProduct.stockQuantity} 
+                              value={newProduct?.stockQuantity || ''} 
                               onChange={(e) => setNewProduct(prev => ({ ...prev, stockQuantity: e.target.value }))}
                               className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
                               placeholder="100"
@@ -3864,7 +3865,7 @@ export default function PremiumRiceStore() {
                             <label className="block font-bold text-slate-400 mb-1">Image URL</label>
                             <input 
                               type="text" 
-                              value={newProduct.imageUrl} 
+                              value={newProduct?.imageUrl || ''} 
                               onChange={(e) => setNewProduct(prev => ({ ...prev, imageUrl: e.target.value }))}
                               className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
                               placeholder="https://..."
@@ -3882,7 +3883,7 @@ export default function PremiumRiceStore() {
                       {/* Grain Catalog Table with Capability to Edit ALL Products */}
                       <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
                         <div className="p-4 border-b border-slate-800 flex justify-between items-center">
-                          <h4 className="font-extrabold text-sm text-white">Full Product Inventory ({products.length})</h4>
+                          <h4 className="font-extrabold text-sm text-white">Full Product Inventory ({products?.length || 0})</h4>
                           <span className="text-xs text-slate-400">Admin can edit every product detail</span>
                         </div>
 
@@ -3900,7 +3901,7 @@ export default function PremiumRiceStore() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800/60 font-medium">
-                              {products.map(p => (
+                              {products?.map(p => (
                                 <tr key={p.id} className="hover:bg-slate-800/40">
                                   <td className="p-4 font-mono font-bold text-slate-500">#{p.id}</td>
                                   <td className="p-4 font-extrabold text-white">
@@ -3910,8 +3911,8 @@ export default function PremiumRiceStore() {
                                   <td className="p-4 font-black text-emerald-400">{formatKES(p.basePrice || p.price || 0)}</td>
                                   <td className="p-4 text-slate-400">{formatKES(p.buyingPrice || 0)}</td>
                                   <td className="p-4">
-                                    <span className={`px-2.5 py-0.5 rounded-full font-bold ${p.stockQuantity <= 10 ? 'bg-rose-950 text-rose-300 border border-rose-800' : 'bg-emerald-950 text-emerald-300 border border-emerald-800'}`}>
-                                      {p.stockQuantity} units
+                                    <span className={`px-2.5 py-0.5 rounded-full font-bold ${(p.stockQuantity || 0) <= 10 ? 'bg-rose-950 text-rose-300 border border-rose-800' : 'bg-emerald-950 text-emerald-300 border border-emerald-800'}`}>
+                                      {p.stockQuantity || 0} units
                                     </span>
                                   </td>
                                   <td className="p-4 text-right space-x-2">
@@ -3946,7 +3947,7 @@ export default function PremiumRiceStore() {
                         <input 
                           type="text"
                           placeholder="Search by Order ID, Customer Name, or County..."
-                          value={orderSearchQuery}
+                          value={orderSearchQuery || ''}
                           onChange={(e) => setOrderSearchQuery(e.target.value)}
                           className="px-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white w-full sm:w-80"
                         />
@@ -3976,11 +3977,13 @@ export default function PremiumRiceStore() {
                             </thead>
                             <tbody className="divide-y divide-slate-800/60 font-medium">
                               {adminOrders
-                                .filter(o => 
-                                  String(o.id).includes(orderSearchQuery) ||
-                                  (o.User?.fullName || '').toLowerCase().includes(orderSearchQuery.toLowerCase()) ||
-                                  (o.county || '').toLowerCase().includes(orderSearchQuery.toLowerCase())
-                                )
+                                ?.filter(o => {
+                                  const query = (orderSearchQuery || '').toLowerCase();
+                                  const orderIdStr = String(o?.id || '');
+                                  const customerName = (o?.User?.fullName || '').toLowerCase();
+                                  const countyStr = (o?.county || '').toLowerCase();
+                                  return orderIdStr.includes(query) || customerName.includes(query) || countyStr.includes(query);
+                                })
                                 .map(order => {
                                   const payInfo = extractPaymentInfo(order);
 
@@ -4004,7 +4007,7 @@ export default function PremiumRiceStore() {
                                         </button>
                                       </td>
 
-                                      <td className="p-4 font-black text-emerald-400">{formatKES(order.grandTotal)}</td>
+                                      <td className="p-4 font-black text-emerald-400">{formatKES(order.grandTotal || 0)}</td>
 
                                       {/* CLICKABLE PAYMENT TAG IN ADMIN TABLE */}
                                       <td className="p-4">
@@ -4022,7 +4025,414 @@ export default function PremiumRiceStore() {
 
                                       <td className="p-4">
                                         <select 
-                                          value={order.status}
+                                          value={order.status || 'pending'}
+                                          onChange={(e) => handleUpdateOrderStatus(order.id, e.target.value)}
+                                          className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs font-bold text-white cursor-pointer"
+                                        >
+                                          <option value="pending">Pending</option>
+                                          <option value="processing">Processing</option>
+                                          <option value="dispatched">Dispatched</option>
+                                          <option value="delivered">Delivered</option>
+                                          <option value="cancelled">Cancelled</option>
+                                        </select>
+                                      </td>
+                                      <td className="p-4 text-right space-x-1">
+                                        {payInfo.status !== 'PAID' && (
+                                          <button 
+                                            onClick={() => handleManualPaymentOverride(order.id, true, 'PAID')}
+                                            className="px-2.5 py-1 rounded-md bg-emerald-700 text-white font-bold text-[10px] cursor-pointer"
+                                          >
+                                            Override Paid
+                                          </button>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SUB-PANEL: FINANCIAL ENGINE & REAL DATABASE GRAPH */}
+                  {adminTab === 'finances' && (
+                    <div className="space-y-6">
+                      
+                      {/* SUMMARY METRICS CARDS PLACED ON TOP ABOVE THE GRAPH */}
+                      {financialData?.summary && (
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                          <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-1">
+                            <p className="text-[10px] font-extrabold text-slate-400 uppercase">Total Revenue Received</p>
+                            <p className="text-2xl font-black text-emerald-400">{formatKES(financialData.summary.totalMoneyReceived || 0)}</p>
+                          </div>
+                          <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-1">
+                            <p className="text-[10px] font-extrabold text-slate-400 uppercase">Net Farm Profit</p>
+                            <p className="text-2xl font-black text-teal-400">{formatKES(financialData.summary.totalNetProfit || 0)}</p>
+                          </div>
+                          <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 spaceHere are the key structural fixes applied to your file to resolve Next.js build errors, runtime crashes, and React warnings without altering your logic or layout:
+
+*   **Fixed ESLint Build Errors:** Escaped the unescaped apostrophe in the footer (`Kenya&apos;s`) which natively breaks Next.js production builds.
+*   **Resolved Uncontrolled Input Warnings:** Added default fallbacks (`|| ''`) to all `<input>` values tied to state objects (`newProduct`, `editingProduct`, `heroSettings`) to prevent React from throwing state binding errors.
+*   **Prevented Runtime Crashes:** Injected optional chaining (`?.`) and fallback zeros (`|| 0`) for all array properties (`products`, `adminOrders`, `adminUsers`, `cart`) so the UI won't crash if database queries initially return undefined.
+*   **Fixed String Method Errors:** Enforced string fallbacks on search queries `(orderSearchQuery || '')` before invoking `.toLowerCase()` to prevent null pointer exceptions during search filtering.
+*   **Security Patches:** Added `noopener` to your `target="_blank"` CSV export tag to satisfy strict React external link requirements.
+
+```tsx
+{/* =================================================================== */}
+        {/* VIEW: ADMINISTRATIVE DASHBOARD CONSOLE                             */}
+        {/* DARK THEMED WITH TWO-PANEL ARCHITECTURE                             */}
+        {/* =================================================================== */}
+        {view === 'admin' && user?.role === 'admin' && (
+          <div className="min-h-[85vh] bg-slate-950 text-slate-100 p-4 sm:p-6 lg:p-8">
+            <div className="container mx-auto space-y-6">
+              
+              {/* ADMIN CONSOLE HEADER */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-amber-500"/>
+                    <span className="text-xs font-black text-amber-500 uppercase tracking-widest">Admin Control System</span>
+                  </div>
+                  <h2 className="text-2xl sm:text-3xl font-black text-white">Storefront Console</h2>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={() => handleToggleFlashSale(!flashSale?.active, 24)}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                      flashSale?.active ? 'bg-rose-600 text-white animate-pulse' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    <Zap className="w-4 h-4"/>
+                    <span>{flashSale?.active ? 'Flash Sale ACTIVE' : 'Start Flash Sale'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* TWO-PANEL ARCHITECTURE WITH STICKY SIDEBAR NAVIGATION */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                
+                {/* PANEL 1: STICKY DARK SIDEBAR NAVIGATION & QUICK CONTROL (3 Columns) */}
+                <div className="lg:col-span-3 bg-slate-900/90 rounded-3xl p-5 border border-slate-800 space-y-6 lg:sticky lg:top-24 lg:self-start z-30">
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Navigation Panel</p>
+                    <nav className="space-y-1.5">
+                      {[
+                        { id: 'inventory', label: 'Grain Catalog', icon: Package, desc: 'Edit all products' },
+                        { id: 'orders', label: 'Order Dispatch', icon: ShoppingBag, desc: 'Real-time pipeline' },
+                        { id: 'finances', label: 'Financial Engine', icon: DollarSign, desc: 'Real DB growth graph' },
+                        { id: 'users', label: 'User Clearance', icon: Users, desc: 'Edit, suspend, delete' },
+                        { id: 'config', label: 'Regional Freight', icon: MapPin, desc: '47 county shipping rates' },
+                        { id: 'carousel', label: 'Hero Backdrop', icon: Sliders, desc: 'UI/UX & advert control' },
+                        { id: 'logs', label: 'Audit Logs', icon: FileText, desc: 'User account logs' }
+                      ].map(tab => {
+                        const Icon = tab.icon;
+                        const isActive = adminTab === tab.id;
+
+                        return (
+                          <button 
+                            key={tab.id}
+                            onClick={() => setAdminTab(tab.id as any)}
+                            className={`w-full p-3 rounded-2xl text-left transition-all flex items-center gap-3 cursor-pointer ${
+                              isActive 
+                                ? 'bg-gradient-to-r from-emerald-800 to-teal-800 text-white font-extrabold shadow-lg border border-emerald-600/40' 
+                                : 'text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
+                            }`}
+                          >
+                            <div className={`p-2 rounded-xl ${isActive ? 'bg-emerald-950 text-emerald-300' : 'bg-slate-800 text-slate-400'}`}>
+                              <Icon className="w-4 h-4"/>
+                            </div>
+                            <div>
+                              <p className="text-xs font-bold leading-none">{tab.label}</p>
+                              <p className="text-[9px] text-slate-400 mt-1">{tab.desc}</p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </nav>
+                  </div>
+
+                  {/* System Live Metrics Capsule */}
+                  <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800/80 space-y-2">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Live Store Stats</p>
+                    <div className="space-y-1 text-xs">
+                      <div className="flex justify-between text-slate-400">
+                        <span>Catalog Items:</span>
+                        <span className="font-extrabold text-white">{products?.length || 0}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-400">
+                        <span>Total Registered Users:</span>
+                        <span className="font-extrabold text-emerald-400">{adminUsers?.length || 0}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-400">
+                        <span>Dispatched Orders:</span>
+                        <span className="font-extrabold text-teal-400">{adminOrders?.length || 0}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* PANEL 2: MAIN WORKSPACE PANEL (9 Columns) */}
+                <div className="lg:col-span-9 space-y-6">
+
+                  {/* SUB-PANEL: INVENTORY CATALOG & ALL PRODUCTS EDITING */}
+                  {adminTab === 'inventory' && (
+                    <div className="space-y-6">
+                      
+                      {/* Add Product Form */}
+                      <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800 space-y-4">
+                        <h3 className="text-lg font-black text-white flex items-center gap-2">
+                          <Plus className="w-5 h-5 text-emerald-400"/> Add New Grain Product
+                        </h3>
+
+                        <form onSubmit={handleCreateProduct} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                          <div>
+                            <label className="block font-bold text-slate-400 mb-1">Brand Name</label>
+                            <input 
+                              type="text" 
+                              required 
+                              value={newProduct?.brandName || ''} 
+                              onChange={(e) => setNewProduct(prev => ({ ...prev, brandName: e.target.value }))}
+                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
+                              placeholder="Pure Mwea Pishori Grade 1"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-bold text-slate-400 mb-1">Variety</label>
+                            <input 
+                              type="text" 
+                              required 
+                              value={newProduct?.variety || ''} 
+                              onChange={(e) => setNewProduct(prev => ({ ...prev, variety: e.target.value }))}
+                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
+                              placeholder="Aromatic Pishori"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-bold text-slate-400 mb-1">Sack Weight (kg)</label>
+                            <input 
+                              type="number" 
+                              required 
+                              value={newProduct?.weightKg || ''} 
+                              onChange={(e) => setNewProduct(prev => ({ ...prev, weightKg: e.target.value }))}
+                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
+                              placeholder="25"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-bold text-slate-400 mb-1">Selling Price (KES)</label>
+                            <input 
+                              type="number" 
+                              required 
+                              value={newProduct?.basePrice || ''} 
+                              onChange={(e) => setNewProduct(prev => ({ ...prev, basePrice: e.target.value }))}
+                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
+                              placeholder="3200"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-bold text-slate-400 mb-1">Buying Price (KES)</label>
+                            <input 
+                              type="number" 
+                              value={newProduct?.buyingPrice || ''} 
+                              onChange={(e) => setNewProduct(prev => ({ ...prev, buyingPrice: e.target.value }))}
+                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
+                              placeholder="2400"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-bold text-slate-400 mb-1">Flash Sale Price</label>
+                            <input 
+                              type="number" 
+                              value={newProduct?.flashSalePrice || ''} 
+                              onChange={(e) => setNewProduct(prev => ({ ...prev, flashSalePrice: e.target.value }))}
+                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
+                              placeholder="2900"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-bold text-slate-400 mb-1">Stock Quantity</label>
+                            <input 
+                              type="number" 
+                              required 
+                              value={newProduct?.stockQuantity || ''} 
+                              onChange={(e) => setNewProduct(prev => ({ ...prev, stockQuantity: e.target.value }))}
+                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
+                              placeholder="100"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-bold text-slate-400 mb-1">Image URL</label>
+                            <input 
+                              type="text" 
+                              value={newProduct?.imageUrl || ''} 
+                              onChange={(e) => setNewProduct(prev => ({ ...prev, imageUrl: e.target.value }))}
+                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
+                              placeholder="https://..."
+                            />
+                          </div>
+
+                          <div className="sm:col-span-2 lg:col-span-4 text-right">
+                            <button type="submit" className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs cursor-pointer">
+                              Create Catalog Entry
+                            </button>
+                          </div>
+                        </form>
+                      </div>
+
+                      {/* Grain Catalog Table with Capability to Edit ALL Products */}
+                      <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
+                        <div className="p-4 border-b border-slate-800 flex justify-between items-center">
+                          <h4 className="font-extrabold text-sm text-white">Full Product Inventory ({products?.length || 0})</h4>
+                          <span className="text-xs text-slate-400">Admin can edit every product detail</span>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-950 text-slate-400 uppercase font-black border-b border-slate-800">
+                              <tr>
+                                <th className="p-4">ID</th>
+                                <th className="p-4">Brand Name</th>
+                                <th className="p-4">Weight</th>
+                                <th className="p-4">Selling Price</th>
+                                <th className="p-4">Buying Cost</th>
+                                <th className="p-4">Stock</th>
+                                <th className="p-4 text-right">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/60 font-medium">
+                              {products?.map(p => (
+                                <tr key={p.id} className="hover:bg-slate-800/40">
+                                  <td className="p-4 font-mono font-bold text-slate-500">#{p.id}</td>
+                                  <td className="p-4 font-extrabold text-white">
+                                    {p.brandName} <span className="text-slate-400 font-normal">({p.variety})</span>
+                                  </td>
+                                  <td className="p-4 text-slate-300">{p.weightKg} kg</td>
+                                  <td className="p-4 font-black text-emerald-400">{formatKES(p.basePrice ?? p.price ?? 0)}</td>
+                                  <td className="p-4 text-slate-400">{formatKES(p.buyingPrice ?? 0)}</td>
+                                  <td className="p-4">
+                                    <span className={`px-2.5 py-0.5 rounded-full font-bold ${p.stockQuantity <= 10 ? 'bg-rose-950 text-rose-300 border border-rose-800' : 'bg-emerald-950 text-emerald-300 border border-emerald-800'}`}>
+                                      {p.stockQuantity} units
+                                    </span>
+                                  </td>
+                                  <td className="p-4 text-right space-x-2">
+                                    <button 
+                                      onClick={() => setEditingProduct(p)} 
+                                      className="px-3 py-1.5 rounded-lg bg-emerald-900/60 hover:bg-emerald-800 text-emerald-300 font-bold border border-emerald-700/50 cursor-pointer"
+                                    >
+                                      Edit Product
+                                    </button>
+                                    <button 
+                                      onClick={() => handleDeleteProduct(p.id)} 
+                                      className="p-1.5 text-slate-500 hover:text-rose-400 cursor-pointer"
+                                      title="Delete"
+                                    >
+                                      <Trash2 className="w-4 h-4"/>
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                    </div>
+                  )}
+
+                  {/* SUB-PANEL: ORDER DISPATCH & PAYMENT VERIFICATION */}
+                  {adminTab === 'orders' && (
+                    <div className="space-y-6">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 p-4 rounded-2xl border border-slate-800">
+                        <input 
+                          type="text"
+                          placeholder="Search by Order ID, Customer Name, or County..."
+                          value={orderSearchQuery || ''}
+                          onChange={(e) => setOrderSearchQuery(e.target.value)}
+                          className="px-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white w-full sm:w-80"
+                        />
+                        <a 
+                          href={`${API_BASE_URL}/admin/orders/export/csv`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-2 w-fit"
+                        >
+                          <Download className="w-4 h-4"/> Export Orders CSV
+                        </a>
+                      </div>
+
+                      <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-950 text-slate-400 uppercase font-black border-b border-slate-800">
+                              <tr>
+                                <th className="p-4">Order</th>
+                                <th className="p-4">Customer</th>
+                                <th className="p-4">Shipping Address</th>
+                                <th className="p-4">Grand Total</th>
+                                <th className="p-4">Payment Tag</th>
+                                <th className="p-4">Dispatch Status</th>
+                                <th className="p-4 text-right">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/60 font-medium">
+                              {adminOrders
+                                ?.filter(o => 
+                                  String(o.id).includes(orderSearchQuery || '') ||
+                                  (o.User?.fullName || '').toLowerCase().includes((orderSearchQuery || '').toLowerCase()) ||
+                                  (o.county || '').toLowerCase().includes((orderSearchQuery || '').toLowerCase())
+                                )
+                                .map(order => {
+                                  const payInfo = extractPaymentInfo(order);
+
+                                  return (
+                                    <tr key={order.id} className="hover:bg-slate-800/40">
+                                      <td className="p-4 font-mono font-bold text-white">#{order.id}</td>
+                                      <td className="p-4">
+                                        <p className="font-bold text-slate-200">{order.User?.fullName || 'Guest Customer'}</p>
+                                        <p className="text-[10px] text-slate-400">{order.User?.phoneNumber || 'N/A'}</p>
+                                      </td>
+
+                                      {/* CLICKABLE SHIPPING ADDRESS IN ADMIN TABLE */}
+                                      <td className="p-4 max-w-xs truncate text-slate-300">
+                                        <button 
+                                          onClick={() => setViewAddressModal(order)}
+                                          className="text-left hover:text-emerald-400 font-medium underline decoration-dotted underline-offset-2 flex items-center gap-1 cursor-pointer"
+                                          title="Click to view full county, town, and sublocation breakdown"
+                                        >
+                                          <MapPin className="w-3 h-3 text-emerald-500 shrink-0"/>
+                                          <span className="truncate">{formatShippingAddress(order.shippingAddress || order.county || '')}</span>
+                                        </button>
+                                      </td>
+
+                                      <td className="p-4 font-black text-emerald-400">{formatKES(order.grandTotal)}</td>
+
+                                      {/* CLICKABLE PAYMENT TAG IN ADMIN TABLE */}
+                                      <td className="p-4">
+                                        <button 
+                                          onClick={() => setViewPaymentDetailsModal(order)}
+                                          className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1 cursor-pointer hover:scale-105 transition-transform ${
+                                            payInfo.status === 'PAID' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'
+                                          }`}
+                                          title="Click to view payment logs, failure reasons & dates"
+                                        >
+                                          <span>{payInfo.status} {payInfo.receipt ? `(${payInfo.receipt})` : ''}</span>
+                                          <Eye className="w-3 h-3 text-slate-400"/>
+                                        </button>
+                                      </td>
+
+                                      <td className="p-4">
+                                        <select 
+                                          value={order.status || ''}
                                           onChange={(e) => handleUpdateOrderStatus(order.id, e.target.value)}
                                           className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs font-bold text-white cursor-pointer"
                                         >
@@ -4080,11 +4490,7 @@ export default function PremiumRiceStore() {
                       )}
 
                       {/* FINANCIAL GROWTH SVG CHART */}
-                      <FinancialGrowthChart 
-                        monthlyData={financialData?.monthlyBreakdown || []}
-                        selectedYear={financeYear}
-                        availableYears={financialData?.availableYears || [2024, 2025, 2026, 2027]}
-                        onYearChange={(y) => {
+                      <FinancialGrowthChart 2025, 2026, 2027]} [2024, []} availableYears="{financialData?.availableYears" monthlyData="{financialData?.monthlyBreakdown" onYearChange="{(y)" selectedYear="{financeYear}" ||> {
                           setFinanceYear(y);
                           fetchFinancialAnalytics(y);
                         }}
@@ -4100,12 +4506,12 @@ export default function PremiumRiceStore() {
                         <input 
                           type="text"
                           placeholder="Search users by name, email, or phone number..."
-                          value={userSearchQuery}
+                          value={userSearchQuery || ''}
                           onChange={(e) => setUserSearchQuery(e.target.value)}
                           className="px-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white w-full sm:w-80"
                         />
                         <span className="text-xs font-bold text-slate-400">
-                          Total Account Directory: {adminUsers.length} Users
+                          Total Account Directory: {adminUsers?.length || 0} Users
                         </span>
                       </div>
 
@@ -4125,10 +4531,10 @@ export default function PremiumRiceStore() {
                             </thead>
                             <tbody className="divide-y divide-slate-800/60 font-medium">
                               {adminUsers
-                                .filter(u => 
-                                  u.fullName?.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
-                                  u.phoneNumber?.includes(userSearchQuery) ||
-                                  (u.email || '').toLowerCase().includes(userSearchQuery.toLowerCase())
+                                ?.filter(u => 
+                                  (u.fullName || '').toLowerCase().includes((userSearchQuery || '').toLowerCase()) ||
+                                  (u.phoneNumber || '').includes(userSearchQuery || '') ||
+                                  (u.email || '').toLowerCase().includes((userSearchQuery || '').toLowerCase())
                                 )
                                 .map(u => (
                                   <tr key={u.id} className="hover:bg-slate-800/40">
@@ -4164,7 +4570,7 @@ export default function PremiumRiceStore() {
                                         className="p-1.5 text-slate-400 hover:text-emerald-400 cursor-pointer"
                                         title="Edit User Details"
                                       >
-                                        <Edit className="w-4 h-4" />
+                                        <Edit className="w-4 h-4"/>
                                       </button>
 
                                       {/* Suspend / Reactivate */}
@@ -4173,7 +4579,7 @@ export default function PremiumRiceStore() {
                                         className={`p-1.5 cursor-pointer ${u.isSuspended ? 'text-emerald-400 hover:text-emerald-300' : 'text-amber-400 hover:text-amber-300'}`}
                                         title={u.isSuspended ? 'Reactivate Account' : 'Suspend Account'}
                                       >
-                                        {u.isSuspended ? <UserCheck className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
+                                        {u.isSuspended ? <UserCheck className="w-4 h-4"/> : <Ban className="w-4 h-4"/>}
                                       </button>
 
                                       {/* Delete Account */}
@@ -4182,7 +4588,7 @@ export default function PremiumRiceStore() {
                                         className="p-1.5 text-slate-500 hover:text-rose-400 cursor-pointer"
                                         title="Delete Account"
                                       >
-                                        <Trash2 className="w-4 h-4" />
+                                        <Trash2 className="w-4 h-4"/>
                                       </button>
                                     </td>
                                   </tr>
@@ -4199,18 +4605,18 @@ export default function PremiumRiceStore() {
                     <div className="space-y-6">
                       <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800 space-y-4">
                         <h3 className="text-lg font-black text-white flex items-center gap-2">
-                          <MapPin className="w-5 h-5 text-emerald-400" /> Regional Freight Fee Overrides (47 Counties)
+                          <MapPin className="w-5 h-5 text-emerald-400"/> Regional Freight Fee Overrides (47 Counties)
                         </h3>
 
                         <form onSubmit={handleSaveCountyOverride} className="flex flex-col sm:flex-row items-end gap-4 text-xs">
                           <div className="flex-1">
                             <label className="block font-bold text-slate-400 mb-1">Select County</label>
                             <select 
-                              value={countyOverrideForm.county}
+                              value={countyOverrideForm?.county || ''}
                               onChange={(e) => setCountyOverrideForm(prev => ({ ...prev, county: e.target.value }))}
                               className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold cursor-pointer"
                             >
-                              {ALL_47_COUNTIES.map(c => (
+                              {ALL_47_COUNTIES?.map(c => (
                                 <option key={c} value={c}>{c}</option>
                               ))}
                             </select>
@@ -4221,7 +4627,7 @@ export default function PremiumRiceStore() {
                             <input 
                               type="number" 
                               required 
-                              value={countyOverrideForm.fee}
+                              value={countyOverrideForm?.fee || ''}
                               onChange={(e) => setCountyOverrideForm(prev => ({ ...prev, fee: e.target.value }))}
                               className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold"
                               placeholder="e.g. 450"
@@ -4238,7 +4644,7 @@ export default function PremiumRiceStore() {
                       <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800 space-y-3">
                         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Active Freight Rates Overview</h4>
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                          {ALL_47_COUNTIES.slice(0, 16).map(county => {
+                          {ALL_47_COUNTIES?.slice(0, 16).map(county => {
                             const customFee = countyOverrides[county];
 
                             return (
@@ -4259,7 +4665,7 @@ export default function PremiumRiceStore() {
                   {adminTab === 'carousel' && (
                     <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800 space-y-6">
                       <h3 className="text-lg font-black text-white flex items-center gap-2">
-                        <Sliders className="w-5 h-5 text-emerald-400" /> Hero Backdrop & Advert Controls (10 Settings)
+                        <Sliders className="w-5 h-5 text-emerald-400"/> Hero Backdrop & Advert Controls (10 Settings)
                       </h3>
 
                       <form onSubmit={handleSaveHeroSettings} className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
@@ -4267,7 +4673,7 @@ export default function PremiumRiceStore() {
                           <label className="block font-bold text-slate-400 mb-1">1. Main Hero Headline Title</label>
                           <input 
                             type="text" 
-                            value={heroSettings.title} 
+                            value={heroSettings?.title || ''} 
                             onChange={(e) => setHeroSettings(prev => ({ ...prev, title: e.target.value }))}
                             className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold"
                           />
@@ -4277,7 +4683,7 @@ export default function PremiumRiceStore() {
                           <label className="block font-bold text-slate-400 mb-1">2. Subtitle Tagline Text</label>
                           <input 
                             type="text" 
-                            value={heroSettings.subtitle} 
+                            value={heroSettings?.subtitle || ''} 
                             onChange={(e) => setHeroSettings(prev => ({ ...prev, subtitle: e.target.value }))}
                             className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
                           />
@@ -4287,7 +4693,7 @@ export default function PremiumRiceStore() {
                           <label className="block font-bold text-slate-400 mb-1">3. Badge Label Text</label>
                           <input 
                             type="text" 
-                            value={heroSettings.badgeText} 
+                            value={heroSettings?.badgeText || ''} 
                             onChange={(e) => setHeroSettings(prev => ({ ...prev, badgeText: e.target.value }))}
                             className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
                           />
@@ -4297,7 +4703,7 @@ export default function PremiumRiceStore() {
                           <label className="block font-bold text-slate-400 mb-1">4. Primary CTA Button Text</label>
                           <input 
                             type="text" 
-                            value={heroSettings.ctaButtonText} 
+                            value={heroSettings?.ctaButtonText || ''} 
                             onChange={(e) => setHeroSettings(prev => ({ ...prev, ctaButtonText: e.target.value }))}
                             className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
                           />
@@ -4307,7 +4713,7 @@ export default function PremiumRiceStore() {
                           <label className="block font-bold text-slate-400 mb-1">5. Live Announcement Ticker Bar</label>
                           <input 
                             type="text" 
-                            value={heroSettings.announcementTicker} 
+                            value={heroSettings?.announcementTicker || ''} 
                             onChange={(e) => setHeroSettings(prev => ({ ...prev, announcementTicker: e.target.value }))}
                             className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
                           />
@@ -4317,7 +4723,7 @@ export default function PremiumRiceStore() {
                           <label className="block font-bold text-slate-400 mb-1">6. Support Hotline Display</label>
                           <input 
                             type="text" 
-                            value={heroSettings.supportHotlineDisplay} 
+                            value={heroSettings?.supportHotlineDisplay || ''} 
                             onChange={(e) => setHeroSettings(prev => ({ ...prev, supportHotlineDisplay: e.target.value }))}
                             className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
                           />
@@ -4327,7 +4733,7 @@ export default function PremiumRiceStore() {
                           <label className="block font-bold text-slate-400 mb-1">7. Background Video Embed 1 (YouTube URL)</label>
                           <input 
                             type="text" 
-                            value={heroSettings.video1} 
+                            value={heroSettings?.video1 || ''} 
                             onChange={(e) => setHeroSettings(prev => ({ ...prev, video1: e.target.value }))}
                             className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono"
                           />
@@ -4337,7 +4743,7 @@ export default function PremiumRiceStore() {
                           <label className="block font-bold text-slate-400 mb-1">8. Background Backdrop Image URL 1</label>
                           <input 
                             type="text" 
-                            value={heroSettings.img1} 
+                            value={heroSettings?.img1 || ''} 
                             onChange={(e) => setHeroSettings(prev => ({ ...prev, img1: e.target.value }))}
                             className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono"
                           />
@@ -4347,7 +4753,7 @@ export default function PremiumRiceStore() {
                           <label className="block font-bold text-slate-400 mb-1">9. Dark Overlay Opacity (%)</label>
                           <input 
                             type="number" 
-                            value={heroSettings.overlayOpacity} 
+                            value={heroSettings?.overlayOpacity || ''} 
                             onChange={(e) => setHeroSettings(prev => ({ ...prev, overlayOpacity: e.target.value }))}
                             className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold"
                           />
@@ -4357,7 +4763,7 @@ export default function PremiumRiceStore() {
                           <label className="block font-bold text-slate-400 mb-1">10. Express Freight Note</label>
                           <input 
                             type="text" 
-                            value={heroSettings.expressLogisticsNote} 
+                            value={heroSettings?.expressLogisticsNote || ''} 
                             onChange={(e) => setHeroSettings(prev => ({ ...prev, expressLogisticsNote: e.target.value }))}
                             className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold"
                           />
@@ -4377,7 +4783,7 @@ export default function PremiumRiceStore() {
                     <div className="space-y-6">
                       <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
                         <div className="p-4 border-b border-slate-800 flex justify-between items-center">
-                          <h4 className="font-extrabold text-sm text-white">System Security Audit Logs ({adminLogs.length})</h4>
+                          <h4 className="font-extrabold text-sm text-white">System Security Audit Logs ({adminLogs?.length || 0})</h4>
                           <span className="text-xs text-slate-400">Track user actions & administrative modifications</span>
                         </div>
 
@@ -4393,7 +4799,7 @@ export default function PremiumRiceStore() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800/60 font-medium">
-                              {adminLogs.map(log => (
+                              {adminLogs?.map(log => (
                                 <tr key={log.id} className="hover:bg-slate-800/40">
                                   <td className="p-4 font-mono text-slate-400">
                                     {new Date(log.timestamp).toLocaleString('en-KE')}
@@ -4427,7 +4833,7 @@ export default function PremiumRiceStore() {
 {/* =================================================================== */}
       {/* MODAL 1: PAYHERO REAL-TIME PAYMENT VERIFICATION OVERLAY             */}
       {/* =================================================================== */}
-      {activePaymentModal.isOpen && (
+      {activePaymentModal?.isOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-emerald-100 text-center space-y-6 animate-in zoom-in-95">
             
@@ -4435,7 +4841,7 @@ export default function PremiumRiceStore() {
             {activePaymentModal.status === 'PENDING' && (
               <div className="space-y-4">
                 <div className="w-16 h-16 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto border-4 border-amber-100">
-                  <RefreshCw className="w-8 h-8 animate-spin" />
+                  <RefreshCw className="w-8 h-8 animate-spin"/>
                 </div>
                 <div className="space-y-1">
                   <h3 className="text-xl font-black text-slate-900">Awaiting M-Pesa PIN</h3>
@@ -4453,7 +4859,7 @@ export default function PremiumRiceStore() {
             {activePaymentModal.status === 'PAID' && (
               <div className="space-y-4">
                 <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto border-4 border-emerald-200">
-                  <CheckCircle className="w-8 h-8" />
+                  <CheckCircle className="w-8 h-8"/>
                 </div>
                 <div className="space-y-1">
                   <h3 className="text-xl font-black text-emerald-800">Payment Verified!</h3>
@@ -4477,7 +4883,7 @@ export default function PremiumRiceStore() {
             {activePaymentModal.status === 'FAILED' && (
               <div className="space-y-4">
                 <div className="w-16 h-16 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto border-4 border-rose-200">
-                  <XCircle className="w-8 h-8" />
+                  <XCircle className="w-8 h-8"/>
                 </div>
                 <div className="space-y-1">
                   <h3 className="text-xl font-black text-rose-700">Payment Unsuccessful</h3>
@@ -4515,7 +4921,7 @@ export default function PremiumRiceStore() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div className="flex items-center gap-2">
                 <div className="p-2.5 rounded-2xl bg-emerald-50 text-emerald-700">
-                  <MapPin className="w-6 h-6" />
+                  <MapPin className="w-6 h-6"/>
                 </div>
                 <div>
                   <h3 className="text-lg font-black text-slate-900">Freight Delivery Location</h3>
@@ -4526,7 +4932,7 @@ export default function PremiumRiceStore() {
                 onClick={() => setViewAddressModal(null)}
                 className="p-2 rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-5 h-5"/>
               </button>
             </div>
 
@@ -4577,6 +4983,8 @@ export default function PremiumRiceStore() {
         </div>
       )}
  
+      {/* =================================================================== */}
+      {/* MODAL 3: CLICKABLE PAYMENT STATUS & REAL-TIME AUDIT LOG */}
       {/* =================================================================== */}
       {/* MODAL 3: CLICKABLE PAYMENT STATUS & REAL-TIME AUDIT LOGS MODAL       */}
       {/* =================================================================== */}
