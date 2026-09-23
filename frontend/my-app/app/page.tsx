@@ -4431,6 +4431,7 @@ export default function PremiumRiceStore() {
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-emerald-100 text-center space-y-6 animate-in zoom-in-95">
             
+            {/* 1. PENDING STATUS */}
             {activePaymentModal.status === 'PENDING' && (
               <div className="space-y-4">
                 <div className="w-16 h-16 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto border-4 border-amber-100">
@@ -4448,13 +4449,7 @@ export default function PremiumRiceStore() {
               </div>
             )}
 
-            {/* ... rest of your modal logic/statuses (e.g. SUCCESS / FAILED) ... */}
-
-          </div>
-        </div>
-      )}
-
-    </main> {/* <-- Close </main> HERE after all modals */}
+            {/* 2. PAID STATUS */}
             {activePaymentModal.status === 'PAID' && (
               <div className="space-y-4">
                 <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto border-4 border-emerald-200">
@@ -4478,6 +4473,7 @@ export default function PremiumRiceStore() {
               </div>
             )}
 
+            {/* 3. FAILED STATUS */}
             {activePaymentModal.status === 'FAILED' && (
               <div className="space-y-4">
                 <div className="w-16 h-16 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto border-4 border-rose-200">
@@ -4507,6 +4503,8 @@ export default function PremiumRiceStore() {
           </div>
         </div>
       )}
+
+    </main>
 
       {/* =================================================================== */}
       {/* MODAL 2: CLICKABLE FREIGHT SHIPPING ADDRESS DETAILS MODAL          */}
