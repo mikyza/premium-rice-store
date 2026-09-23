@@ -4424,10 +4424,7 @@ export default function PremiumRiceStore() {
             </div>
           </div>
         )}
-
-      </main>
-
-      {/* =================================================================== */}
+{/* =================================================================== */}
       {/* MODAL 1: PAYHERO REAL-TIME PAYMENT VERIFICATION OVERLAY             */}
       {/* =================================================================== */}
       {activePaymentModal.isOpen && (
@@ -4451,6 +4448,13 @@ export default function PremiumRiceStore() {
               </div>
             )}
 
+            {/* ... rest of your modal logic/statuses (e.g. SUCCESS / FAILED) ... */}
+
+          </div>
+        </div>
+      )}
+
+    </main> {/* <-- Close </main> HERE after all modals */}
             {activePaymentModal.status === 'PAID' && (
               <div className="space-y-4">
                 <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto border-4 border-emerald-200">
