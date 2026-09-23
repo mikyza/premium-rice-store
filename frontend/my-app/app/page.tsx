@@ -4581,15 +4581,15 @@ useEffect(() => {
                           />
                         </div>
 
-                        <div className="sm:col-span-2 text-right pt-2">
+                     <div className="sm:col-span-2 text-right pt-2">
                           <button type="submit" className="px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-lg cursor-pointer">
                             Save & Synchronize Hero Setup
                           </button>
                         </div>
-                      </form>
-                    </div>
-                  )}
-
+                      </div>
+                    </form>
+                  </div>
+                )}
                   {/* SUB-PANEL: AUDIT LOGS DISPLAY WITH VISUAL ENHANCEMENTS */}
                   {adminTab === 'logs' && (
                     <div className="space-y-6">
