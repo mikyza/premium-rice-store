@@ -1082,12 +1082,52 @@ const formatKES = (amount: number) => {
   return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', maximumFractionDigits: 0 }).format(amount || 0);
 };
 
-const formatShippingAddress = (addr: any) => {
+export interface ShippingAddressObject {
+  county?: string;
+  town?: string;
+  location?: string;
+  sublocation?: string;
+  streetAddress?: string;
+  details?: string;
+  [key: string]: unknown;
+}
+
+export type ShippingAddressInput = string | ShippingAddressObject | null | undefined;
+
+export const formatShippingAddress = (addr: ShippingAddressInput): string => {
   if (!addr) return 'Standard Regional Delivery';
-  if (typeof addr === 'string') return addr;
-  if (typeof addr === 'object') {
-    return addr.streetAddress || addr.details || addr.location || [addr.town, addr.county].filter(Boolean).join(', ') || JSON.stringify(addr);
+
+  if (typeof addr === 'string') {
+    return addr.trim() || 'Standard Regional Delivery';
   }
+
+  if (typeof addr === 'object') {
+    // Extract location hierarchy from specific to broad
+    const parts = [
+      addr.streetAddress,
+      addr.sublocation,
+      addr.location,
+      addr.town,
+      addr.county,
+    ]
+      .filter((part): part is string => typeof part === 'string' && part.trim() !== '' && part !== 'Not Specified')
+      .map((part) => part.trim());
+
+    // Join granular address fields if present
+    if (parts.length > 0) {
+      return parts.join(', ');
+    }
+
+    // Fallback to pre-formatted details string if granular fields are missing
+    if (typeof addr.details === 'string' && addr.details.trim()) {
+      return addr.details.trim();
+    }
+
+    // Edge case guard for empty objects ({}) to prevent displaying "{}"
+    const serialized = JSON.stringify(addr);
+    return serialized !== '{}' ? serialized : 'Standard Regional Delivery';
+  }
+
   return String(addr);
 };
 
