@@ -4503,16 +4503,16 @@ export default function PremiumRiceStore() {
                         </div>
                       )}
 
-                      {/* FINANCIAL GROWTH SVG CHART */}
-                      <FinancialGrowthChart 2025, 2026, 2027]} [2024, []} availableYears="{financialData?.availableYears" monthlyData="{financialData?.monthlyBreakdown" onYearChange="{(y)" selectedYear="{financeYear}" ||> {
-                          setFinanceYear(y);
-                          fetchFinancialAnalytics(y);
-                        }}
-                      />
-
-                    </div>
-                  )}
-
+                   {/* FINANCIAL GROWTH SVG CHART */}
+<FinancialGrowthChart 
+  selectedYear={financeYear}
+  availableYears={financialData?.availableYears || [2024, 2025, 2026]}
+  monthlyData={financialData?.monthlyBreakdown || []}
+  onYearChange={(y) => {
+    setFinanceYear(y);
+    fetchFinancialAnalytics(y);
+  }}
+/>
                   {/* SUB-PANEL: USER CLEARANCE (DISPLAY ALL USERS, EDIT, SUSPEND, DELETE) */}
                   {adminTab === 'users' && (
                     <div className="space-y-6">
