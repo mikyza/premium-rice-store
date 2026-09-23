@@ -4586,10 +4586,9 @@ useEffect(() => {
                             Save & Synchronize Hero Setup
                           </button>
                         </div>
-                      </div> {/* 👈 FIXED: Added missing grid container closing tag */}
-                    </form>
-                  </div> {/* Closes tab section container */}
-                )}
+                      </form>
+                    </div>
+                  )}
 
                   {/* SUB-PANEL: AUDIT LOGS DISPLAY WITH VISUAL ENHANCEMENTS */}
                   {adminTab === 'logs' && (
