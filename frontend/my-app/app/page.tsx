@@ -3603,7 +3603,7 @@ export default function PremiumRiceStore() {
           </div>
         )}
 
-        {/* =================================================================== */}
+     {/* =================================================================== */}
         {/* VIEW: ADMINISTRATIVE DASHBOARD CONSOLE                             */}
         {/* DARK THEMED WITH TWO-PANEL ARCHITECTURE                             */}
         {/* =================================================================== */}
@@ -3900,7 +3900,7 @@ export default function PremiumRiceStore() {
                               <tr>
                                 <th className="p-4">Order</th>
                                 <th className="p-4">Customer</th>
-                                <th className="p-4">Shipping Address</th>
+                                <th className="p-4">Comprehensive Shipping Address</th>
                                 <th className="p-4">Grand Total</th>
                                 <th className="p-4">Payment Tag</th>
                                 <th className="p-4">Dispatch Status</th>
@@ -3925,16 +3925,23 @@ export default function PremiumRiceStore() {
                                         <p className="text-[10px] text-slate-400">{order.User?.phoneNumber || 'N/A'}</p>
                                       </td>
 
-                                      {/* CLICKABLE SHIPPING ADDRESS IN ADMIN TABLE */}
-                                      <td className="p-4 max-w-xs truncate text-slate-300">
-                                        <button 
-                                          onClick={() => setViewAddressModal(order)}
-                                          className="text-left hover:text-emerald-400 font-medium underline decoration-dotted underline-offset-2 flex items-center gap-1 cursor-pointer"
-                                          title="Click to view full county, town, and sublocation breakdown"
-                                        >
-                                          <MapPin className="w-3 h-3 text-emerald-500 shrink-0" />
-                                          <span className="truncate">{formatShippingAddress(order.shippingAddress || order.county)}</span>
-                                        </button>
+                                      {/* COMPREHENSIVE SHIPPING ADDRESS */}
+                                      <td className="p-4 max-w-sm text-slate-300">
+                                        <div className="flex flex-col gap-0.5">
+                                          <div className="flex items-center gap-1">
+                                            <MapPin className="w-3 h-3 text-emerald-500 shrink-0" />
+                                            <span className="font-bold text-emerald-400">{order.county || 'N/A County'}</span>
+                                          </div>
+                                          <span className="text-[11px] font-semibold text-slate-200 pl-4">
+                                            {order.town || 'N/A Town'}, {order.location || 'N/A Location'}
+                                          </span>
+                                          <span className="text-[10px] text-slate-400 pl-4">
+                                            {order.sublocation || 'N/A Sublocation'} — {order.streetAddress || 'N/A Street'}
+                                          </span>
+                                          <span className="text-[9px] text-slate-500 italic pl-4 truncate mt-1">
+                                            Raw: {formatShippingAddress(order.shippingAddress)}
+                                          </span>
+                                        </div>
                                       </td>
 
                                       <td className="p-4 font-black text-emerald-400">{formatKES(order.grandTotal)}</td>
@@ -4022,6 +4029,44 @@ export default function PremiumRiceStore() {
                           fetchFinancialAnalytics(y);
                         }}
                       />
+
+                      {/* REAL-TIME MONTHLY PURCHASE AMOUNTS (SUCCESSFUL ORDERS) */}
+                      {financialData?.monthlyBreakdown && (
+                        <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
+                          <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950">
+                            <div>
+                              <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
+                                <Activity className="w-4 h-4 text-emerald-400" /> Monthly Financial Ledger ({financeYear})
+                              </h4>
+                              <p className="text-[10px] text-slate-400 mt-1">Real-time compilation of successful orders based on timestamps</p>
+                            </div>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left text-xs">
+                              <thead className="bg-slate-900 text-slate-400 uppercase font-black border-b border-slate-800">
+                                <tr>
+                                  <th className="p-4">Month</th>
+                                  <th className="p-4">Successful Orders</th>
+                                  <th className="p-4">Volume Sold</th>
+                                  <th className="p-4">Total Revenue</th>
+                                  <th className="p-4 text-right">Net Profit</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/60 font-medium">
+                                {financialData.monthlyBreakdown.map((month, idx) => (
+                                  <tr key={idx} className="hover:bg-slate-800/40">
+                                    <td className="p-4 font-bold text-white">{month.monthName}</td>
+                                    <td className="p-4 text-slate-300">{month.orderCount} Orders</td>
+                                    <td className="p-4 text-slate-300">{month.totalKgSold} kg</td>
+                                    <td className="p-4 font-black text-emerald-400">{formatKES(month.totalRevenue)}</td>
+                                    <td className="p-4 text-right font-black text-teal-400">{formatKES(month.netProfit)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
 
                     </div>
                   )}
@@ -4305,18 +4350,18 @@ export default function PremiumRiceStore() {
                     </div>
                   )}
 
-                  {/* SUB-PANEL: AUDIT LOGS DISPLAY WITH USER NAMES */}
+                  {/* SUB-PANEL: AUDIT LOGS DISPLAY WITH VISUAL ENHANCEMENTS */}
                   {adminTab === 'logs' && (
                     <div className="space-y-6">
                       <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
-                        <div className="p-4 border-b border-slate-800 flex justify-between items-center">
+                        <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950">
                           <h4 className="font-extrabold text-sm text-white">System Security Audit Logs ({adminLogs.length})</h4>
                           <span className="text-xs text-slate-400">Track user actions & administrative modifications</span>
                         </div>
 
                         <div className="overflow-x-auto">
                           <table className="w-full text-left text-xs">
-                            <thead className="bg-slate-950 text-slate-400 uppercase font-black border-b border-slate-800">
+                            <thead className="bg-slate-900 text-slate-400 uppercase font-black border-b border-slate-800">
                               <tr>
                                 <th className="p-4">Timestamp</th>
                                 <th className="p-4">User Account Name</th>
@@ -4326,23 +4371,41 @@ export default function PremiumRiceStore() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800/60 font-medium">
-                              {adminLogs.map(log => (
-                                <tr key={log.id} className="hover:bg-slate-800/40">
-                                  <td className="p-4 font-mono text-slate-400">
-                                    {new Date(log.timestamp).toLocaleString('en-KE')}
-                                  </td>
-                                  <td className="p-4 font-extrabold text-emerald-400">
-                                    {log.performedByName || 'System Auto'}
-                                  </td>
-                                  <td className="p-4 font-bold text-white">{log.action}</td>
-                                  <td className="p-4">
-                                    <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-mono text-[10px]">
-                                      {log.module}
-                                    </span>
-                                  </td>
-                                  <td className="p-4 text-slate-400 max-w-xs truncate">{log.details || '-'}</td>
-                                </tr>
-                              ))}
+                              {adminLogs.map(log => {
+                                // Determine badge color based on action type
+                                const isDelete = log.action.toUpperCase().includes('DELETE') || log.action.toUpperCase().includes('REMOVE');
+                                const isUpdate = log.action.toUpperCase().includes('UPDATE') || log.action.toUpperCase().includes('EDIT');
+                                const isCreate = log.action.toUpperCase().includes('CREATE') || log.action.toUpperCase().includes('ADD');
+
+                                return (
+                                  <tr key={log.id} className="hover:bg-slate-800/40">
+                                    <td className="p-4 font-mono text-slate-400 whitespace-nowrap">
+                                      {new Date(log.timestamp).toLocaleString('en-KE')}
+                                    </td>
+                                    <td className="p-4 font-extrabold text-emerald-400">
+                                      {log.performedByName || 'System Auto'}
+                                    </td>
+                                    <td className="p-4">
+                                      <span className={`px-2.5 py-1 rounded-md font-bold text-[10px] uppercase tracking-wider ${
+                                        isDelete ? 'bg-rose-950/60 text-rose-400 border border-rose-800/50' :
+                                        isUpdate ? 'bg-amber-950/60 text-amber-400 border border-amber-800/50' :
+                                        isCreate ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/50' :
+                                        'bg-slate-800 text-slate-300 border border-slate-700'
+                                      }`}>
+                                        {log.action}
+                                      </span>
+                                    </td>
+                                    <td className="p-4">
+                                      <span className="px-2 py-0.5 rounded-md bg-slate-950 border border-slate-800 text-slate-300 font-mono text-[10px]">
+                                        {log.module}
+                                      </span>
+                                    </td>
+                                    <td className="p-4 text-slate-400 max-w-sm">
+                                      <p className="truncate" title={log.details || '-'}>{log.details || '-'}</p>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                             </tbody>
                           </table>
                         </div>
