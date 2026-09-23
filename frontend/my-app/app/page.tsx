@@ -1683,6 +1683,52 @@ export default function PremiumRiceStore() {
   // CATALOG & STORE DATA STATES
   const [products, setProducts] = useState<Product[]>([]);
   const [carousel, setCarousel] = useState<any[]>([]);
+
+
+  const [financeYear, setFinanceYear] = useState<number>(new Date().getFullYear());
+const [financeSelectedProductId, setFinanceSelectedProductId] = useState<number | 'ALL'>('ALL');
+const [productSearchQuery, setProductSearchQuery] = useState<string>('');
+const [expandedMonthIndex, setExpandedMonthIndex] = useState<number | null>(null);
+const [loadingFinancials, setLoadingFinancials] = useState<boolean>(false);
+const [financialData, setFinancialData] = useState<FinancialAnalyticsResponse | null>(null);
+
+// Fetch financial analytics from API
+const fetchFinancialAnalytics = useCallback(async (year: number) => {
+  try {
+    setLoadingFinancials(true);
+    const res = await fetch(`${API_BASE_URL}/admin/financial-analytics?year=${year}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setFinancialData(data);
+    }
+  } catch (err) {
+    console.error('Failed fetching financial analytics:', err);
+  } finally {
+    setLoadingFinancials(false);
+  }
+}, [token]);
+
+// Real-Time Socket Listener for instant DB recalculation when customer pays/buys
+useEffect(() => {
+  if (!socket) return;
+
+  const handleOrderUpdate = () => {
+    // Automatically re-fetch graph data whenever a new successful order or payment lands
+    fetchFinancialAnalytics(financeYear);
+  };
+
+  socket.on('order_created', handleOrderUpdate);
+  socket.on('payment_received', handleOrderUpdate);
+  socket.on('order_status_updated', handleOrderUpdate);
+
+  return () => {
+    socket.off('order_created', handleOrderUpdate);
+    socket.off('payment_received', handleOrderUpdate);
+    socket.off('order_status_updated', handleOrderUpdate);
+  };
+}, [socket, financeYear, fetchFinancialAnalytics]);
   
   // HERO BACKDROP CONFIGURATION (10 EXPLICIT SETTINGS FOR FULL CONTROL)
   const [heroSettings, setHeroSettings] = useState<HeroSettings>({
