@@ -4885,7 +4885,7 @@ export default function PremiumRiceStore() {
         </div>
       )}
 
-      {/* =================================================================== */}
+     {/* =================================================================== */}
       {/* MODAL 6: QUICK VIEW PRODUCT DETAILS MODAL                           */}
       {/* =================================================================== */}
       {quickViewProduct && (
@@ -4972,7 +4972,7 @@ export default function PremiumRiceStore() {
               <span className="text-base font-black text-white">MWEA RICE HUB</span>
             </div>
             <p className="text-slate-500 leading-relaxed text-[11px]">
-               Kenya's premier authentic Mwea long-grain aromatic rice store. Directly harvested, milled, and delivered to your doorstep.
+              Kenya's premier authentic Mwea long-grain aromatic rice store. Directly harvested, milled, and delivered to your doorstep.
             </p>
           </div>
 
@@ -5005,8 +5005,7 @@ export default function PremiumRiceStore() {
         </div>
       </footer>
 
-    </div>
-                         </main>
+    </main>
   );
 }
             
