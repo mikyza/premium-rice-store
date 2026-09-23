@@ -102,10 +102,9 @@ export interface AuditLog {
   timestamp: string;
 }
 
-/ ============================================================================
+// ============================================================================
 // UPDATED TYPES & INTERFACES
 // ============================================================================
-
 export interface FinancialMonth {
   monthIndex: number; // 0 = Jan, 11 = Dec
   monthName: string;
