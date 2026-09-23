@@ -4571,7 +4571,7 @@ useEffect(() => {
                           />
                         </div>
 
-                        <div>
+                     <div>
                           <label className="block font-bold text-slate-400 mb-1">10. Express Freight Note</label>
                           <input 
                             type="text" 
@@ -4586,9 +4586,10 @@ useEffect(() => {
                             Save & Synchronize Hero Setup
                           </button>
                         </div>
-                      </form>
-                    </div>
-                  )}
+                      </div> {/* 👈 FIXED: Added missing grid container closing tag */}
+                    </form>
+                  </div> {/* Closes tab section container */}
+                )}
 
                   {/* SUB-PANEL: AUDIT LOGS DISPLAY WITH VISUAL ENHANCEMENTS */}
                   {adminTab === 'logs' && (
