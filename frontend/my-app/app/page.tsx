@@ -5007,5 +5007,5 @@ export default function PremiumRiceStore() {
 
     </main>
   );
-}
+
             
