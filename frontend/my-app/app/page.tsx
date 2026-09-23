@@ -4504,7 +4504,7 @@ export default function PremiumRiceStore() {
         </div>
       )}
 
-    </main>
+  
 
       {/* =================================================================== */}
       {/* MODAL 2: CLICKABLE FREIGHT SHIPPING ADDRESS DETAILS MODAL          */}
@@ -4576,7 +4576,7 @@ export default function PremiumRiceStore() {
           </div>
         </div>
       )}
-
+  </main>
       {/* =================================================================== */}
       {/* MODAL 3: CLICKABLE PAYMENT STATUS & REAL-TIME AUDIT LOGS MODAL       */}
       {/* =================================================================== */}
