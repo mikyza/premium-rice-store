@@ -3407,46 +3407,73 @@ export default function PremiumRiceStore() {
                             </ul>
                           </div>
 
-                          {/* CLICKABLE FREIGHT SHIPPING ADDRESS BLOCK */}
-                          <div 
-                            onClick={() => setViewAddressModal(order)}
-                            className="space-y-1 bg-slate-50 p-4 rounded-2xl border border-slate-100 cursor-pointer hover:bg-slate-100/80 transition-colors group relative"
-                            title="Click to view detailed county, town, and sublocation breakdown"
-                          >
-                            <div className="flex items-center justify-between">
-                              <p className="font-bold text-slate-700 flex items-center gap-1">
-                                <MapPin className="w-3.5 h-3.5 text-emerald-600" /> Freight Delivery Address:
-                              </p>
-                              <span className="text-[10px] font-bold text-emerald-600 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
-                                View Location <Eye className="w-3 h-3" />
-                              </span>
-                            </div>
-                            
-                            <p className="text-slate-600 font-medium underline decoration-dotted underline-offset-4">
-                              {formatShippingAddress(order.shippingAddress || order.county)}
-                            </p>
-                            
-                            <div className="pt-2 border-t border-slate-200 mt-2 space-y-0.5">
-                              {payInfo.receipt && (
-                                <p className="text-emerald-700 font-black">M-Pesa Code: {payInfo.receipt}</p>
-                              )}
-                              {payInfo.reason && (
-                                <p className="text-rose-600 font-semibold">Note: {payInfo.reason}</p>
-                              )}
-                              <p className="font-black text-slate-900 text-sm mt-1">Total: {formatKES(order.grandTotal)}</p>
-                            </div>
-                          </div>
-                        </div>
+                         {/* CLICKABLE FREIGHT SHIPPING ADDRESS BLOCK */}
+<div 
+  onClick={() => setViewAddressModal(order)}
+  className="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-100 cursor-pointer hover:bg-slate-100/80 transition-colors group relative"
+  title="Click to view detailed county, town, location, and sublocation breakdown"
+>
+  <div className="flex items-center justify-between">
+    <p className="font-bold text-slate-700 flex items-center gap-1.5 text-xs uppercase tracking-wide">
+      <MapPin className="w-4 h-4 text-emerald-600 shrink-0" /> 
+      Freight Delivery Address
+    </p>
+    <span className="text-[11px] font-bold text-emerald-600 group-hover:text-emerald-700 transition-colors flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200/60">
+      View Details <Eye className="w-3 h-3" />
+    </span>
+  </div>
+  
+  {/* Primary Address String / Summary */}
+  <p className="text-slate-800 font-medium text-sm leading-snug underline decoration-dotted underline-offset-4">
+    {typeof order.shippingAddress === 'object' && order.shippingAddress?.details
+      ? order.shippingAddress.details
+      : typeof order.shippingAddress === 'string'
+      ? order.shippingAddress
+      : [order.streetAddress, order.sublocation, order.location, order.town, order.county].filter(Boolean).join(', ') || 'Address details available in modal'}
+  </p>
 
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
+  {/* Keyed-In Location Breakdown Pills */}
+  <div className="flex flex-wrap gap-1.5 pt-1">
+    {(order.shippingAddress?.county || order.county) && (
+      <span className="inline-flex items-center text-[11px] bg-slate-200/70 text-slate-700 font-semibold px-2 py-0.5 rounded-md">
+        County: {order.shippingAddress?.county || order.county}
+      </span>
+    )}
+    {(order.shippingAddress?.town || order.town) && (
+      <span className="inline-flex items-center text-[11px] bg-slate-200/70 text-slate-700 font-semibold px-2 py-0.5 rounded-md">
+        Town: {order.shippingAddress?.town || order.town}
+      </span>
+    )}
+    {(order.shippingAddress?.location || order.location) && (
+      <span className="inline-flex items-center text-[11px] bg-slate-200/70 text-slate-700 font-semibold px-2 py-0.5 rounded-md">
+        Location: {order.shippingAddress?.location || order.location}
+      </span>
+    )}
+    {(order.shippingAddress?.sublocation || order.sublocation) && (
+      <span className="inline-flex items-center text-[11px] bg-slate-200/70 text-slate-700 font-semibold px-2 py-0.5 rounded-md">
+        Sublocation: {order.shippingAddress?.sublocation || order.sublocation}
+      </span>
+    )}
+    {(order.shippingAddress?.streetAddress || order.streetAddress) && (
+      <span className="inline-flex items-center text-[11px] bg-slate-200/70 text-slate-700 font-semibold px-2 py-0.5 rounded-md">
+        Street: {order.shippingAddress?.streetAddress || order.streetAddress}
+      </span>
+    )}
+  </div>
+  
+  {/* Payment & Order Summary */}
+  <div className="pt-2 border-t border-slate-200 mt-2 space-y-0.5 text-xs">
+    {payInfo?.receipt && (
+      <p className="text-emerald-700 font-black">M-Pesa Code: {payInfo.receipt}</p>
+    )}
+    {payInfo?.reason && (
+      <p className="text-rose-600 font-semibold">Note: {payInfo.reason}</p>
+    )}
+    <p className="font-black text-slate-900 text-sm mt-1">
+      Total: {formatKES(order.grandTotal)}
+    </p>
+  </div>
+</div>
         {/* =================================================================== */}
         {/* VIEW: LOGIN / SIGNUP / FORGOT PASSWORD                              */}
         {/* =================================================================== */}
