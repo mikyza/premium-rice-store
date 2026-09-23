@@ -4963,7 +4963,7 @@ export default function PremiumRiceStore() {
         </button>
       </div>
 
-      {/* FOOTER */}
+    {/* FOOTER */}
       <footer className="bg-slate-950 text-slate-400 text-xs py-12 border-t border-slate-900 mt-auto">
         <div className="container mx-auto px-4 grid grid-cols-1 md:grid-cols-4 gap-8">
           <div className="space-y-3">
