@@ -1118,11 +1118,21 @@ const formatCountdownMs = (ms: number) => {
 };
 
 // ============================================================================
-// 4. CUSTOM FINANCIAL GROWTH CHART COMPONENT (SVG-BASED)
-// Dynamic graph showing real monthly growth from database with empty month visualizers
+// TYPES & HELPER CONSTANTS
 // ============================================================================
 
-interface FinancialGrowthChartProps {
+export interface FinancialMonth {
+  monthIndex: number;
+  monthName: string;
+  year: number;
+  totalRevenue: number;
+  totalBuyingCost: number;
+  netProfit: number;
+  totalKgSold: number;
+  orderCount: number;
+}
+
+export interface FinancialGrowthChartProps {
   monthlyData: FinancialMonth[];
   selectedYear: number;
   availableYears: number[];
@@ -1130,10 +1140,24 @@ interface FinancialGrowthChartProps {
   isLoading?: boolean;
 }
 
-const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
+const MONTH_NAMES_SHORT = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+];
+
+const formatKES = (val: number): string => {
+  return `KES ${val.toLocaleString('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+};
+
+// ============================================================================
+// 4. CUSTOM FINANCIAL GROWTH CHART COMPONENT (SVG-BASED)
+// Dynamic graph showing real monthly growth from database with empty month visualizers
+// ============================================================================
+
+export const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
   monthlyData,
   selectedYear,
-  availableYears,
+  availableYears = [2024, 2025, 2026, 2027],
   onYearChange,
   isLoading = false
 }) => {
@@ -1174,7 +1198,7 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
 
   const svgWidth = 800;
   const svgHeight = 280;
-  const paddingX = 50;
+  const paddingX = 55;
   const paddingY = 40;
   const graphWidth = svgWidth - paddingX * 2;
   const graphHeight = svgHeight - paddingY * 2;
@@ -1182,10 +1206,11 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
   // Generate SVG Points for Line / Area Chart
   const points = useMemo(() => {
     return fullYearMonths.map((m, idx) => {
-      const val = metric === 'revenue' ? m.totalRevenue : metric === 'profit' ? m.netProfit : m.totalKgSold;
+      const rawVal = metric === 'revenue' ? m.totalRevenue : metric === 'profit' ? m.netProfit : m.totalKgSold;
+      const val = Math.max(0, rawVal); // Guard against negative rendering clip
       const x = paddingX + (idx / 11) * graphWidth;
       const y = svgHeight - paddingY - (val / maxValue) * graphHeight;
-      return { x, y, val, month: m.monthName, orders: m.orderCount, data: m };
+      return { x, y, val: rawVal, month: m.monthName, orders: m.orderCount, data: m };
     });
   }, [fullYearMonths, metric, maxValue, graphWidth, graphHeight]);
 
@@ -1226,7 +1251,7 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
               onChange={(e) => onYearChange(Number(e.target.value))}
               className="bg-slate-900 text-emerald-400 font-extrabold px-2 py-1 rounded-lg border border-emerald-500/30 focus:outline-none cursor-pointer"
             >
-              {(availableYears && availableYears.length > 0 ? availableYears : [2024, 2025, 2026, 2027]).map(y => (
+              {(availableYears.length > 0 ? availableYears : [2024, 2025, 2026, 2027]).map(y => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
@@ -1235,22 +1260,28 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
           {/* Metric Selector Pills */}
           <div className="flex items-center bg-slate-800/80 p-1 rounded-xl border border-slate-700 text-xs font-bold">
             <button 
+              type="button"
               onClick={() => setMetric('revenue')}
-              className={`px-3 py-1 rounded-lg transition-all ${metric === 'revenue' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg transition-all ${metric === 'revenue' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
             >
-              Revenue
+              <DollarSign className="w-3.5 h-3.5" />
+              <span>Revenue</span>
             </button>
             <button 
+              type="button"
               onClick={() => setMetric('profit')}
-              className={`px-3 py-1 rounded-lg transition-all ${metric === 'profit' ? 'bg-teal-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg transition-all ${metric === 'profit' ? 'bg-teal-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
             >
-              Net Profit
+              <BarChart2 className="w-3.5 h-3.5" />
+              <span>Net Profit</span>
             </button>
             <button 
+              type="button"
               onClick={() => setMetric('kg')}
-              className={`px-3 py-1 rounded-lg transition-all ${metric === 'kg' ? 'bg-amber-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg transition-all ${metric === 'kg' ? 'bg-amber-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
             >
-              Grain Volume (Kg)
+              <Package className="w-3.5 h-3.5" />
+              <span>Grain Volume (Kg)</span>
             </button>
           </div>
         </div>
@@ -1265,7 +1296,7 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
           </div>
         ) : (
           <div className="min-w-[650px]">
-            <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-auto overflow-visible">
+            <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-auto overflow-visible select-none">
               <defs>
                 <linearGradient id="emeraldGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#10b981" stopOpacity="0.4" />
@@ -1304,7 +1335,7 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                       textAnchor="end" 
                       fontWeight="600"
                     >
-                      {metric === 'kg' ? `${gridVal}kg` : `KES ${gridVal >= 1000 ? `${(gridVal/1000).toFixed(0)}k` : gridVal}`}
+                      {metric === 'kg' ? `${gridVal}kg` : `KES ${gridVal >= 1000 ? `${(gridVal / 1000).toFixed(0)}k` : gridVal}`}
                     </text>
                   </g>
                 );
@@ -1330,9 +1361,24 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
               {points.map((p, idx) => {
                 const isEmpty = p.val === 0;
 
+                // Clamp tooltip X position to prevent clipping at boundaries
+                const tooltipWidth = 130;
+                const minX = tooltipWidth / 2 + 10;
+                const maxX = svgWidth - tooltipWidth / 2 - 10;
+                const clampedTooltipX = Math.max(minX, Math.min(maxX, p.x));
+
                 return (
                   <g key={idx} className="group cursor-pointer">
-                    {/* Vertical guideline */}
+                    {/* Invisible Wide Hitbox for Effortless Hovering */}
+                    <rect
+                      x={p.x - graphWidth / 24}
+                      y={paddingY}
+                      width={graphWidth / 12}
+                      height={graphHeight}
+                      fill="transparent"
+                    />
+
+                    {/* Vertical Guideline */}
                     <line 
                       x1={p.x} 
                       y1={paddingY} 
@@ -1394,20 +1440,34 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
                     {/* Hover Tooltip Popup */}
                     <g className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                       <rect 
-                        x={p.x - 65} 
-                        y={p.y - 55} 
-                        width="130" 
+                        x={clampedTooltipX - tooltipWidth / 2} 
+                        y={Math.max(10, p.y - 55)} 
+                        width={tooltipWidth} 
                         height="45" 
                         rx="8" 
                         fill="#022c22" 
                         stroke="#10b981" 
                         strokeWidth="1.5" 
                       />
-                      <text x={p.x} y={p.y - 38} fill="#ffffff" fontSize="10" fontWeight="800" textAnchor="middle">
+                      <text 
+                        x={clampedTooltipX} 
+                        y={Math.max(10, p.y - 55) + 17} 
+                        fill="#ffffff" 
+                        fontSize="10" 
+                        fontWeight="800" 
+                        textAnchor="middle"
+                      >
                         {p.month} {selectedYear}
                       </text>
-                      <text x={p.x} y={p.y - 22} fill="#34d399" fontSize="11" fontWeight="900" textAnchor="middle">
-                        {isEmpty ? 'No Purchases' : metric === 'kg' ? `${p.val} kg` : formatKES(p.val)}
+                      <text 
+                        x={clampedTooltipX} 
+                        y={Math.max(10, p.y - 55) + 33} 
+                        fill="#34d399" 
+                        fontSize="11" 
+                        fontWeight="900" 
+                        textAnchor="middle"
+                      >
+                        {isEmpty ? 'No Purchases' : metric === 'kg' ? `${p.val.toLocaleString()} kg` : formatKES(p.val)}
                       </text>
                     </g>
                   </g>
@@ -1469,6 +1529,8 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
     </div>
   );
 };
+
+export default FinancialGrowthChart;
 
 // ============================================================================
 // 5. REUSABLE PRODUCT CARD COMPONENT
