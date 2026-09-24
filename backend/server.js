@@ -2555,3 +2555,50 @@ async function startServer() {
         if (isActive !== undefined) targetUserRecord.isActive = isActive;
 
         await
+} catch (err) { 
+            res.status(500).json({ error: err.message }); 
+          }
+        });
+
+        // --- ADMIN: TOGGLE USER ACCOUNT SUSPENSION ---
+        expressApp.put('/api/admin/users/:id/suspend', authenticateToken, requireAdmin, async (req, res) => {
+          try {
+            const user = await User.findByPk(req.params.id);
+            if (!user) return res.status(404).json({ error: 'User not found.' });
+            
+            user.isActive = !user.isActive;
+            await user.save();
+            
+            await AdminLog.create({
+              adminId: req.adminUser.id,
+              action: user.isActive ? 'ACTIVATE_USER' : 'SUSPEND_USER',
+              targetType: 'user',
+              targetId: user.id,
+              ipAddress: req.ip
+            });
+            
+            res.json({ message: `User account has been ${user.isActive ? 'activated' : 'suspended'}.`, user });
+          } catch (err) {
+            res.status(500).json({ error: err.message });
+          }
+        });
+
+        /**
+         * ==========================================
+         * 8. SYSTEM BOOTSTRAP & PORT LISTENER
+         * ==========================================
+         */
+        server.listen(port, hostname, () => {
+          console.log(`✅ System Active: Mwea Hub Server running on http://${hostname === '0.0.0.0' ? 'localhost' : hostname}:${port}`);
+          console.log(`✅ WebSocket Engine attached and listening for real-time events.`);
+          console.log('====================================================================');
+        });
+
+      } catch (dbError) {
+        console.error('❌ FATAL: Database initialization, migration, or synchronization failed:', dbError);
+        process.exit(1);
+      }
+}
+
+// Execute the async server bootstrap function
+startServer();
