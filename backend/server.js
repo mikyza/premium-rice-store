@@ -563,12 +563,15 @@ async function startServer() {
 
     const server = createServer(expressApp);
 
-    // Dynamic CORS configuration accepting Render domains, local clients, and mobile wrappers
+   // Dynamic CORS configuration optimized for Render production and mobile wrappers
     const corsOptions = {
       origin: (origin, callback) => {
-        if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1') || origin.endsWith('.onrender.com')) {
+        // Allow requests with no origin (mobile apps, Postman, curl, server-to-server webhooks)
+        // OR any origin ending with .onrender.com or custom production domains
+        if (!origin || origin.endsWith('.onrender.com') || origin.includes('onrender.com')) {
           callback(null, true);
         } else {
+          // Dynamically allow all other valid web/mobile origins or restrict as needed
           callback(null, true);
         }
       },
@@ -933,7 +936,6 @@ async function startServer() {
         res.status(500).json({ error: err.message || 'Internal server signup failure.' }); 
       }
     });
-
     // --- ACCOUNT CREATION OTP REQUEST ENDPOINTS ---
     const handleSignupOtpRequest = async (req, res) => {
       try {
