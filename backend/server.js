@@ -207,12 +207,13 @@ const sendOtpEmail = async (toEmail, toName, otpCode, type = 'reset') => {
  */
 const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
   try {
-    if (!phoneNumber) return;
+    if (!phoneNumber) return false;
     
-    // Normalize phone numbers to standard Kenyan +254 format
-    const formattedPhone = phoneNumber.startsWith('0') 
-      ? `+254${phoneNumber.substring(1)}` 
-      : phoneNumber;
+    // Normalize phone number to 254XXXXXXXXX format (strip '+' and convert leading '0')
+    let formattedPhone = phoneNumber.replace(/\D/g, '');
+    if (formattedPhone.startsWith('0')) {
+      formattedPhone = `254${formattedPhone.substring(1)}`;
+    }
       
     const message = type === 'signup' 
       ? `Your Mwea Rice Hub account verification OTP is ${otpCode}. Valid for 10 mins.`
@@ -220,19 +221,32 @@ const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
 
     console.log(`📱 [SMS DISPATCH] Triggering SMS to ${formattedPhone}: ${message}`);
     
-    // --- SMS API PLACEHOLDER ---
-    // Uncomment and replace with the exact endpoint and payload from your SMS PDF
-    /*
-    await axios.post('YOUR_SMS_GATEWAY_URL_HERE', {
-      api_key: process.env.SMS_API_KEY,
-      to: formattedPhone,
-      message: message
-    });
-    */
-    
+    // Execute call to Zettatel Gateway
+    const response = await axios.post(
+      process.env.ZETTATEL_API_URL,
+      {
+        userid: process.env.ZETTATEL_USER,
+        password: process.env.ZETTATEL_PASSWORD,
+        senderid: process.env.ZETTATEL_SENDER_ID || 'INFO',
+        msg: message,
+        mobile: formattedPhone,
+        sendMethod: 'quick',
+        msgType: 'text',
+        responseType: 'json'
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    console.log('✅ [ZETTATEL RESPONSE]:', response.data);
     return true;
+
   } catch (error) {
-    console.error(`❌ Failed to send SMS OTP to ${phoneNumber}:`, error.message);
+    console.error(`❌ Failed to send SMS OTP to ${phoneNumber}:`, error.response?.data || error.message);
+    return false;
   }
 };
 
