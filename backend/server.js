@@ -2544,18 +2544,29 @@ async function startServer() {
       }
     });
 
-    expressApp.put('/api/admin/users/:id/modify', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { fullName, role, isActive } = req.body || {};
-        const targetUserRecord = await User.findByPk(req.params.id);
-        if (!targetUserRecord) return res.status(404).json({ error: 'User record not found.' });
+// --- ADMIN: MODIFY USER DETAILS ---
+        expressApp.put('/api/admin/users/:id/modify', authenticateToken, requireAdmin, async (req, res) => {
+          try {
+            const { fullName, role, isActive } = req.body || {};
+            const targetUserRecord = await User.findByPk(req.params.id);
+            if (!targetUserRecord) return res.status(404).json({ error: 'User record not found.' });
 
-        if (fullName !== undefined) targetUserRecord.fullName = fullName;
-        if (role !== undefined) targetUserRecord.role = role;
-        if (isActive !== undefined) targetUserRecord.isActive = isActive;
+            if (fullName !== undefined) targetUserRecord.fullName = fullName;
+            if (role !== undefined) targetUserRecord.role = role;
+            if (isActive !== undefined) targetUserRecord.isActive = isActive;
 
-        await
-} catch (err) {
+            await targetUserRecord.save();
+
+            await AdminLog.create({
+              adminId: req.adminUser.id,
+              action: 'MODIFY_USER',
+              targetType: 'user',
+              targetId: targetUserRecord.id,
+              ipAddress: req.ip
+            });
+
+            res.json({ message: 'User record updated successfully.', user: targetUserRecord });
+          } catch (err) {
             res.status(500).json({ error: err.message });
           }
         });
