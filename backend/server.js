@@ -199,7 +199,8 @@ const sendOtpEmail = async (toEmail, toName, otpCode, type = 'reset') => {
 };
 
 /**
- * Helper function to send SMS OTP based on Zettatel Gateway logic.
+ * Helper function to send SMS OTP based on standard gateway logic.
+ * Updated for Zettatel Gateway compatibility.
  * @param {string} phoneNumber 
  * @param {string} otpCode 
  * @param {string} type - 'reset' | 'signup'
@@ -208,14 +209,12 @@ const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
   try {
     if (!phoneNumber) return false;
     
-    // Normalize phone number rigorously to 254XXXXXXXXX format
-    let formattedPhone = String(phoneNumber).replace(/\D/g, '');
+    // Normalize phone number to 254XXXXXXXXX format (strip '+' and convert leading '0')
+    let formattedPhone = phoneNumber.replace(/\D/g, '');
     if (formattedPhone.startsWith('0')) {
       formattedPhone = `254${formattedPhone.substring(1)}`;
     } else if (formattedPhone.startsWith('7') || formattedPhone.startsWith('1')) {
       formattedPhone = `254${formattedPhone}`;
-    } else if (formattedPhone.startsWith('+254')) {
-      formattedPhone = formattedPhone.replace('+', '');
     }
       
     const message = type === 'signup' 
@@ -224,36 +223,27 @@ const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
 
     console.log(`📱 [SMS DISPATCH] Triggering SMS to ${formattedPhone}: ${message}`);
     
-    // Initialize Zettatel credentials with fallback configuration
-    const zettatelUrl = process.env.ZETTATEL_API_URL || 'https://portal.zettatel.com/SMSApi/rest/send';
-    const zettatelUser = process.env.ZETTATEL_USER;
-    const zettatelPassword = process.env.ZETTATEL_PASSWORD;
-    const zettatelSenderId = process.env.ZETTATEL_SENDER_ID || 'INFO';
-
-    if (!zettatelUser || !zettatelPassword) {
-      console.warn('⚠️ WARNING: ZETTATEL_USER or ZETTATEL_PASSWORD missing in env variables.');
-    }
+    // Zettatel Gateway requires URL Encoded Form Data, not JSON.
+    const payload = new URLSearchParams({
+      userid: process.env.ZETTATEL_USER,
+      password: process.env.ZETTATEL_PASSWORD,
+      senderid: process.env.ZETTATEL_SENDER_ID || 'INFO',
+      msg: message,
+      mobile: formattedPhone,
+      sendMethod: 'quick',
+      msgType: 'text',
+      output: 'json',
+      duplicatecheck: 'true'
+    });
 
     // Execute call to Zettatel Gateway
     const response = await axios.post(
-      zettatelUrl,
-      {
-        userid: zettatelUser,
-        password: zettatelPassword,
-        senderid: zettatelSenderId,
-        msg: message,
-        mobile: formattedPhone,
-        sendMethod: 'quick',
-        msgType: 'text',
-        duplicatecheck: 'true',
-        output: 'json'
-      },
+      process.env.ZETTATEL_API_URL || 'https://portal.zettatel.com/sms/api',
+      payload.toString(),
       {
         headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        timeout: 10000 // Safely prevent backend hanging
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
       }
     );
 
@@ -2564,32 +2554,4 @@ async function startServer() {
         if (role !== undefined) targetUserRecord.role = role;
         if (isActive !== undefined) targetUserRecord.isActive = isActive;
 
-        await targetUserRecord.save();
-        
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'MODIFY_USER',
-          targetType: 'user',
-          targetId: targetUserRecord.id,
-          changes: req.body,
-          ipAddress: req.ip
-        });
-        
-        res.json({ message: 'User updated successfully.', user: targetUserRecord });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    // Start Server Listener
-    server.listen(port, hostname, () => {
-      console.log(`✅ Server successfully started on http://${hostname}:${port}`);
-    });
-  } catch (dbError) {
-    console.error('❌ CRITICAL: Failed to bootstrap server or connect to database:', dbError);
-    process.exit(1);
-  }
-}
-
-// Boot the application
-startServer();
+        await
