@@ -199,8 +199,7 @@ const sendOtpEmail = async (toEmail, toName, otpCode, type = 'reset') => {
 };
 
 /**
- * Helper function to send SMS OTP based on standard gateway logic.
- * Update the axios block with your specific SMS provider API documentation once available.
+ * Helper function to send SMS OTP based on Zettatel Gateway logic.
  * @param {string} phoneNumber 
  * @param {string} otpCode 
  * @param {string} type - 'reset' | 'signup'
@@ -209,10 +208,14 @@ const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
   try {
     if (!phoneNumber) return false;
     
-    // Normalize phone number to 254XXXXXXXXX format (strip '+' and convert leading '0')
-    let formattedPhone = phoneNumber.replace(/\D/g, '');
+    // Normalize phone number rigorously to 254XXXXXXXXX format
+    let formattedPhone = String(phoneNumber).replace(/\D/g, '');
     if (formattedPhone.startsWith('0')) {
       formattedPhone = `254${formattedPhone.substring(1)}`;
+    } else if (formattedPhone.startsWith('7') || formattedPhone.startsWith('1')) {
+      formattedPhone = `254${formattedPhone}`;
+    } else if (formattedPhone.startsWith('+254')) {
+      formattedPhone = formattedPhone.replace('+', '');
     }
       
     const message = type === 'signup' 
@@ -221,23 +224,36 @@ const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
 
     console.log(`📱 [SMS DISPATCH] Triggering SMS to ${formattedPhone}: ${message}`);
     
+    // Initialize Zettatel credentials with fallback configuration
+    const zettatelUrl = process.env.ZETTATEL_API_URL || 'https://portal.zettatel.com/SMSApi/rest/send';
+    const zettatelUser = process.env.ZETTATEL_USER;
+    const zettatelPassword = process.env.ZETTATEL_PASSWORD;
+    const zettatelSenderId = process.env.ZETTATEL_SENDER_ID || 'INFO';
+
+    if (!zettatelUser || !zettatelPassword) {
+      console.warn('⚠️ WARNING: ZETTATEL_USER or ZETTATEL_PASSWORD missing in env variables.');
+    }
+
     // Execute call to Zettatel Gateway
     const response = await axios.post(
-      process.env.ZETTATEL_API_URL,
+      zettatelUrl,
       {
-        userid: process.env.ZETTATEL_USER,
-        password: process.env.ZETTATEL_PASSWORD,
-        senderid: process.env.ZETTATEL_SENDER_ID || 'INFO',
+        userid: zettatelUser,
+        password: zettatelPassword,
+        senderid: zettatelSenderId,
         msg: message,
         mobile: formattedPhone,
         sendMethod: 'quick',
         msgType: 'text',
-        responseType: 'json'
+        duplicatecheck: 'true',
+        output: 'json'
       },
       {
         headers: {
-          'Content-Type': 'application/json'
-        }
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        timeout: 10000 // Safely prevent backend hanging
       }
     );
 
@@ -2552,149 +2568,28 @@ async function startServer() {
         
         await AdminLog.create({
           adminId: req.adminUser.id,
-          action: 'MODIFY_USER_CLEARANCE',
+          action: 'MODIFY_USER',
           targetType: 'user',
           targetId: targetUserRecord.id,
           changes: req.body,
           ipAddress: req.ip
         });
-
-        res.json({ message: 'User profile updated.', record: targetUserRecord });
-      } catch (err) { 
-        res.status(500).json({ error: err.message }); 
-      }
-    });
-
-    expressApp.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const targetUserRecord = await User.findByPk(req.params.id);
-        if (!targetUserRecord) return res.status(404).json({ error: 'User not found.' });
-        if (targetUserRecord.id === req.user.id) return res.status(403).json({ error: 'Cannot delete active administrator session.' });
-
-        await targetUserRecord.destroy();
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'DELETE_USER',
-          targetType: 'user',
-          targetId: req.params.id,
-          ipAddress: req.ip
-        });
-
-        res.json({ message: 'User permanently deleted.' });
-      } catch (err) { 
-        res.status(500).json({ error: err.message }); 
-      }
-    });
-
-    // --- ADMIN CONFIGURATION SETTINGS ---
-    expressApp.post('/api/admin/config/carousel', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { slides } = req.body || {};
-        if (!Array.isArray(slides)) {
-          return res.status(400).json({ error: 'Slides validation failed: input must be an array.' });
-        }
-
-        const processedSlides = slides.map(slide => ({
-          ...slide,
-          duration: slide.duration || (slide.type === 'video' ? 5 : 4)
-        }));
-
-        let config = await SystemConfig.findOne({ where: { key: 'homepage_carousel' } });
-        if (!config) {
-          config = await SystemConfig.create({ key: 'homepage_carousel', value: processedSlides });
-        } else {
-          config.value = processedSlides;
-          config.changed('value', true);
-          await config.save();
-        }
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'UPDATE_CAROUSEL_CONFIG',
-          targetType: 'config',
-          changes: { slides: processedSlides },
-          ipAddress: req.ip
-        });
-
-        io.emit('carouselUpdated', config.value);
-        res.json({ message: 'Homepage carousel configuration synchronized successfully.', slides: config.value });
+        
+        res.json({ message: 'User updated successfully.', user: targetUserRecord });
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
     });
 
-    expressApp.post('/api/admin/config/hero', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const { 
-          type, 
-          url, 
-          title, 
-          subtitle, 
-          badgeText,
-          buttonText,
-          buttonLink,
-          secondaryButtonText,
-          secondaryButtonLink,
-          overlayOpacity,
-          alignment,
-          autoPlay,
-          videoDuration, 
-          imageDuration 
-        } = req.body || {};
-        
-        let config = await SystemConfig.findOne({ where: { key: 'hero_settings' } });
-        
-        const newSettings = { 
-          type: type || 'video', 
-          url: url || '', 
-          title: title || 'Direct From Mwea Paddy Fields', 
-          subtitle: subtitle || '100% Pure Aromatic Pishori Rice harvested and delivered straight to your doorstep.', 
-          badgeText: badgeText || '🌾 100% Authentic Mwea Harvest',
-          buttonText: buttonText || 'Shop Fresh Harvest Now',
-          buttonLink: buttonLink || '/catalog',
-          secondaryButtonText: secondaryButtonText || 'View Flash Deals',
-          secondaryButtonLink: secondaryButtonLink || '#flash-sales',
-          overlayOpacity: overlayOpacity !== undefined ? overlayOpacity : 0.4,
-          alignment: alignment || 'center',
-          autoPlay: autoPlay !== undefined ? autoPlay : true,
-          videoDuration: videoDuration || 5,
-          imageDuration: imageDuration || 4
-        };
-
-        if (!config) {
-          config = await SystemConfig.create({ key: 'hero_settings', value: newSettings });
-        } else {
-          config.value = newSettings;
-          config.changed('value', true);
-          await config.save();
-        }
-
-        await AdminLog.create({
-          adminId: req.adminUser.id,
-          action: 'UPDATE_HERO_CONFIG',
-          targetType: 'config',
-          changes: newSettings,
-          ipAddress: req.ip
-        });
-
-        io.emit('heroUpdated', config.value);
-        res.json({ message: 'Hero configuration updated successfully.', config: config.value });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
+    // Start Server Listener
+    server.listen(port, hostname, () => {
+      console.log(`✅ Server successfully started on http://${hostname}:${port}`);
     });
-
-    // Start Real-Time Server
-  server.listen(port, '0.0.0.0', () => {
-  console.log(`🚀 Server fully operational on port ${port}`);
-});
-
-  } catch (error) {
-    console.error('❌ CRITICAL BOOT FAILURE:', error);
+  } catch (dbError) {
+    console.error('❌ CRITICAL: Failed to bootstrap server or connect to database:', dbError);
     process.exit(1);
   }
 }
 
-// Boot application
+// Boot the application
 startServer();
