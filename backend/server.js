@@ -578,29 +578,31 @@ async function startServer() {
       optionsSuccessStatus: 204
     };
     
-    // Apply Express CORS Middleware
-    expressApp.use(cors(corsOptions));
-    
-    // Explicitly handle preflight OPTIONS across all routes
-    expressApp.options('*', cors(corsOptions));
+   // Apply Express CORS Middleware
+expressApp.use(cors(corsOptions));
 
-    // Global CORS Headers Fallback Middleware (Ensures preflights & errors receive valid headers)
-    expressApp.use((req, res, next) => {
-      const origin = req.headers.origin;
-      if (origin) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-      } else {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-      }
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+// Explicitly handle preflight OPTIONS across all routes (fixed path syntax for path-to-regexp v8+)
+expressApp.options('{*path}', cors(corsOptions));
 
-      if (req.method === 'OPTIONS') {
-        return res.sendStatus(204);
-      }
-      next();
-    });
+// Global CORS Headers Fallback Middleware (Ensures preflights & errors receive valid headers)
+expressApp.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
 
     expressApp.use(express.json({ limit: '50mb' }));
     expressApp.use(express.urlencoded({ limit: '50mb', extended: true }));
