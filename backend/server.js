@@ -3,9 +3,9 @@
  * PREMIUM RICE & GRAIN STORE - UNIFIED BACKEND ENTERPRISE ARCHITECTURE
  * ====================================================================================
  * System: Mwea Rice Hub Enterprise API Engine
- * Version: 3.6.0-ENTERPRISE-RENDER-VERCEL
+ * Version: 3.5.0-ENTERPRISE-RENDER
  * Platform: Node.js / Express / Socket.IO / Sequelize ORM / PayHero API / Nodemailer
- * Deployment: Render Cloud Infrastructure OR Vercel Serverless (auto-detected via process.env.VERCEL)
+ * Deployment: Render Cloud Infrastructure (Production Optimized)
  * 
  * Description:
  * Complete, single-file server engine handling real-time WebSocket state synchronization,
@@ -55,22 +55,13 @@ const isProduction = NODE_ENV === 'production';
 const hostname = process.env.HOSTNAME || '0.0.0.0';
 const port = parseInt(process.env.PORT || '5000', 10);
 const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
-// Vercel serverless detection (Vercel sets VERCEL=1 automatically)
-const IS_VERCEL = !!process.env.VERCEL;
-const RENDER_BASE_URL = process.env.BASE_URL
-  || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null)
-  || 'https://premium-rice-store-7.onrender.com';
+const RENDER_BASE_URL = process.env.BASE_URL || 'https://premium-rice-store-7.onrender.com';
 
 console.log('====================================================================');
 console.log('🚀 Booting Mwea Rice Hub Enterprise Architecture...');
 console.log(`🌍 Environment: ${NODE_ENV.toUpperCase()}`);
 console.log(`⚡ Execution Directory: ${__dirname}`);
 console.log(`📡 Base Deployment Target URL: ${RENDER_BASE_URL}`);
-console.log(`☁️ Runtime: ${IS_VERCEL ? 'VERCEL SERVERLESS' : 'PERSISTENT NODE SERVER'}`);
-
-if (isProduction && !process.env.JWT_SECRET) {
-  console.warn('⚠️ WARNING: JWT_SECRET env var is not set. Using the built-in default secret is unsafe in production.');
-}
 console.log('====================================================================');
 
 /**
@@ -161,10 +152,6 @@ const SENDER_NAME = 'Mwea Rice Hub Enterprise';
 
 /**
  * Helper function to send email OTP via Nodemailer for Account Creation & Password Reset
- * @param {string} toEmail 
- * @param {string} toName 
- * @param {string} otpCode 
- * @param {string} type - 'reset' | 'signup' | 'account_creation'
  */
 const sendOtpEmail = async (toEmail, toName, otpCode, type = 'reset') => {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
@@ -209,16 +196,11 @@ const sendOtpEmail = async (toEmail, toName, otpCode, type = 'reset') => {
 
 /**
  * Helper function to send SMS OTP based on standard gateway logic.
- * Updated for Zettatel Gateway compatibility.
- * @param {string} phoneNumber 
- * @param {string} otpCode 
- * @param {string} type - 'reset' | 'signup'
  */
 const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
   try {
     if (!phoneNumber) return false;
     
-    // Normalize phone number to 254XXXXXXXXX format (strip '+' and convert leading '0')
     let formattedPhone = phoneNumber.replace(/\D/g, '');
     if (formattedPhone.startsWith('0')) {
       formattedPhone = `254${formattedPhone.substring(1)}`;
@@ -230,9 +212,8 @@ const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
       ? `Your Mwea Rice Hub account verification OTP is ${otpCode}. Valid for 10 mins.`
       : `Your Mwea Rice Hub password reset OTP is ${otpCode}. Valid for 10 mins.`;
 
-    console.log(`📱 [SMS DISPATCH] Triggering SMS to ${formattedPhone} (type: ${type})`);
+    console.log(`📱 [SMS DISPATCH] Triggering SMS to ${formattedPhone}: ${message}`);
     
-    // Zettatel Gateway requires URL Encoded Form Data, not JSON.
     const payload = new URLSearchParams({
       userid: process.env.ZETTATEL_USER,
       password: process.env.ZETTATEL_PASSWORD,
@@ -245,7 +226,6 @@ const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
       duplicatecheck: 'true'
     });
 
-    // Execute call to Zettatel Gateway
     const response = await axios.post(
       process.env.ZETTATEL_API_URL || 'https://portal.zettatel.com/sms/api',
       payload.toString(),
@@ -277,10 +257,11 @@ const getPayHeroAuthHeader = () => {
     const creds = `${process.env.PAYHERO_API_KEY.trim()}:${process.env.PAYHERO_API_SECRET.trim()}`;
     return `Basic ${Buffer.from(creds).toString('base64')}`;
   }
-  // SECURITY: the previously hard-coded fallback credential was removed from source code.
-  // Set PAYHERO_BASIC_AUTH (or PAYHERO_API_KEY + PAYHERO_API_SECRET) in your environment variables.
-  console.warn('⚠️ WARNING: PayHero credentials are missing. Set PAYHERO_BASIC_AUTH or PAYHERO_API_KEY/PAYHERO_API_SECRET.');
-  return '';
+  const fallbackRaw = 'Basic cnBqZHU3YWJyWG03SWdqcDBI\\nBF:NHFvR\\nV32XR99cDq\\nGf3igKB3R0A5vRtgTMJ7Jpfm'
+    .replace(/\\[rn]/g, '')
+    .replace(/[\r\n]+/g, '')
+    .trim();
+  return fallbackRaw.startsWith('Basic ') ? fallbackRaw : `Basic ${fallbackRaw.replace(/^Basic/i, '').trim()}`;
 };
 
 const PAYHERO_CHANNEL_ID = Number(process.env.PAYHERO_CHANNEL_ID || 11668);
@@ -293,40 +274,32 @@ const PAYHERO_CHANNEL_ID = Number(process.env.PAYHERO_CHANNEL_ID || 11668);
 const uploadDir = path.join(__dirname, 'public', 'uploads');
 const imagesDir = path.join(__dirname, 'public', 'images');
 
-// Vercel's filesystem is read-only (except /tmp) so folders are only created on persistent hosts.
-if (!IS_VERCEL) {
-  try {
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-      console.log('📁 Created missing upload directory at:', uploadDir);
-    }
-
-    if (!fs.existsSync(imagesDir)) {
-      fs.mkdirSync(imagesDir, { recursive: true });
-      console.log('📁 Created missing images directory at:', imagesDir);
-    }
-  } catch (fsErr) {
-    console.error('❌ Failed to verify or build static public storage directories:', fsErr.message);
+try {
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+    console.log('📁 Created missing upload directory at:', uploadDir);
   }
+
+  if (!fs.existsSync(imagesDir)) {
+    fs.mkdirSync(imagesDir, { recursive: true });
+    console.log('📁 Created missing images directory at:', imagesDir);
+  }
+} catch (fsErr) {
+  console.error('❌ Failed to verify or build static public storage directories:', fsErr.message);
 }
 
 // Multer Storage Configuration for File Uploads
-// - Persistent hosts (Render/local): files are written to public/uploads (original behaviour).
-// - Vercel: files are kept in memory, then pushed to Vercel Blob (see persistUploadedFile).
-const storage = IS_VERCEL
-  ? multer.memoryStorage()
-  : multer.diskStorage({
-      destination: (req, file, cb) => cb(null, uploadDir),
-      filename: (req, file, cb) => {
-        const cleanFileName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-        cb(null, `${Date.now()}-${cleanFileName}`);
-      }
-    });
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const cleanFileName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    cb(null, `${Date.now()}-${cleanFileName}`);
+  }
+});
 
 const upload = multer({ 
   storage,
-  // Vercel functions reject request bodies larger than ~4.5MB, so cap slightly below that there.
-  limits: { fileSize: (IS_VERCEL ? 4 : 15) * 1024 * 1024 },
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB file upload limit
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
@@ -335,28 +308,6 @@ const upload = multer({
     }
   }
 });
-
-/**
- * Returns the public URL for an uploaded image.
- * On Vercel the image is stored in Vercel Blob (needs BLOB_READ_WRITE_TOKEN);
- * without that token it falls back to an inline data URL so uploads still work.
- */
-async function persistUploadedFile(file) {
-  if (!IS_VERCEL) {
-    return `/uploads/${file.filename}`;
-  }
-  const cleanFileName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-  if (process.env.BLOB_READ_WRITE_TOKEN) {
-    const { put } = await import('@vercel/blob');
-    const blob = await put(`uploads/${Date.now()}-${cleanFileName}`, file.buffer, {
-      access: 'public',
-      contentType: file.mimetype
-    });
-    return blob.url;
-  }
-  console.warn('⚠️ BLOB_READ_WRITE_TOKEN missing: returning inline data URL for uploaded image.');
-  return `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
-}
 
 /**
  * ==========================================
@@ -410,10 +361,10 @@ const Cart = sequelize.models.Cart || sequelize.define('Cart', {
 });
 
 // Define Relational Model Associations
-if (Cart && RiceProduct && !Cart.associations.product) {
+if (Cart && RiceProduct && !Cart.associations.RiceProduct) {
   Cart.belongsTo(RiceProduct, { foreignKey: 'productId', as: 'product', onDelete: 'CASCADE' });
 }
-if (Cart && User && !Cart.associations.user) {
+if (Cart && User && !Cart.associations.User) {
   Cart.belongsTo(User, { foreignKey: 'userId', as: 'user', onDelete: 'CASCADE' });
 }
 
@@ -428,25 +379,6 @@ let flashSaleState = {
   countdownIntervalId: null
 };
 
-// LIKE operator: case-insensitive on Postgres (Aiven), plain LIKE elsewhere
-const LIKE_OP = sequelize.getDialect() === 'postgres' ? Op.iLike : Op.like;
-
-// Serverless-safe flash sale sync: no timers, state is derived from the DB (cached for 5s).
-let lastFlashSaleSync = 0;
-async function syncFlashSaleFromDb(force = false) {
-  if (!force && Date.now() - lastFlashSaleSync < 5000) return;
-  lastFlashSaleSync = Date.now();
-  try {
-    const config = await SystemConfig.findOne({ where: { key: 'black_friday' } });
-    const v = config && config.value;
-    const running = !!(v && v.active && v.endTime && new Date(v.endTime).getTime() > Date.now());
-    flashSaleState.active = running;
-    flashSaleState.endTime = running ? v.endTime : null;
-  } catch (err) {
-    console.error('❌ Failed to sync Flash Sale state:', err.message);
-  }
-}
-
 function initializeFlashSaleEngine(io) {
   SystemConfig.findOne({ where: { key: 'black_friday' } }).then((config) => {
     if (config && config.value && config.value.active) {
@@ -459,7 +391,7 @@ function initializeFlashSaleEngine(io) {
       } else {
         config.value = { ...config.value, active: false };
         config.changed('value', true);
-        config.save().catch(saveErr => console.error('❌ Failed to persist expired flash sale state:', saveErr.message));
+        config.save();
         console.log('🏁 Expired Flash Harvest Sale state automatically deactivated in DB.');
       }
     }
@@ -483,9 +415,9 @@ function startFlashSaleCountdown(io) {
         if (config) {
           config.value = { ...config.value, active: false };
           config.changed('value', true);
-          return config.save();
+          config.save();
         }
-      }).catch(saveErr => console.error('❌ Failed to close flash sale in DB:', saveErr.message));
+      });
       console.log('🏁 Flash Harvest Sale window has officially closed.');
     } else {
       io.emit('blackFridayTick', {
@@ -554,73 +486,6 @@ const requireAdmin = async (req, res, next) => {
  * 5. CORE SERVER & DATABASE BOOTSTRAP ENGINE
  * ==========================================
  */
-
-// Express app is created at module level so Vercel can import and export it as the request handler.
-const expressApp = express();
-expressApp.set('trust proxy', true);
-
-// HTTP server + WebSockets only exist on persistent hosts. Vercel serverless cannot hold WebSocket connections.
-const server = IS_VERCEL ? null : createServer(expressApp);
-
-// Dynamic CORS configuration optimized for Render/Vercel production and mobile wrappers
-const corsOptions = {
-  origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, Postman, curl, server-to-server webhooks)
-    // OR any origin ending with .onrender.com / .vercel.app or custom production domains
-    if (!origin || origin.endsWith('.onrender.com') || origin.includes('onrender.com') || origin.endsWith('.vercel.app')) {
-      callback(null, true);
-    } else {
-      // Dynamically allow all other valid web/mobile origins or restrict as needed
-      callback(null, true);
-    }
-  },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-  credentials: true
-};
-
-expressApp.use(cors(corsOptions));
-expressApp.use(express.json({ limit: '50mb' }));
-expressApp.use(express.urlencoded({ limit: '50mb', extended: true }));
-
-// Serve static files from public, uploads, and images directories
-expressApp.use(express.static(path.join(__dirname, 'public')));
-expressApp.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
-expressApp.use('/images', express.static(path.join(__dirname, 'public', 'images')));
-
-// Socket.IO placeholder: replaced by a real SocketIOServer on persistent hosts.
-// On Vercel every io.emit / io.to().emit call becomes a safe no-op instead of crashing.
-let io = {
-  emit: () => false,
-  to: () => ({ emit: () => false }),
-  on: () => {}
-};
-
-// Readiness gate: every request waits for DB + route bootstrap (runs once per warm instance).
-let bootstrapPromise = null;
-function ensureBootstrapped() {
-  if (!bootstrapPromise) {
-    bootstrapPromise = startServer().catch((err) => {
-      bootstrapPromise = null; // allow a retry on the next request
-      throw err;
-    });
-  }
-  return bootstrapPromise;
-}
-
-expressApp.use(async (req, res, next) => {
-  try {
-    await ensureBootstrapped();
-    if (IS_VERCEL && req.path.startsWith('/api/')) {
-      await syncFlashSaleFromDb();
-    }
-    next();
-  } catch (bootErr) {
-    console.error('❌ Bootstrap failure while handling request:', bootErr.message);
-    res.status(503).json({ error: 'Service is starting up or the database is unreachable. Please retry shortly.' });
-  }
-});
-
 async function startServer() {
   try {
     // Authenticate database connectivity
@@ -682,6 +547,69 @@ async function startServer() {
     const currentMode = process.env.DB_MODE === 'cloud' ? '☁️ AIVEN / CLOUD POSTGRES' : '🏠 RENDER / LOCAL DB';
     console.log(`🍃 Database Connected Successfully! Running Mode: [ ${currentMode} ]`);
 
+    const expressApp = express();
+    expressApp.set('trust proxy', true);
+
+    const server = createServer(expressApp);
+
+    /**
+     * ==========================================
+     * ENHANCED & OPTIMIZED CORS CONFIGURATION
+     * ==========================================
+     */
+    const corsOptions = {
+      origin: (origin, callback) => {
+        // Dynamically allow requesting origin (or allow server-to-server / non-browser calls)
+        // Returning origin or true reflects the incoming Origin header, which is required when credentials: true
+        callback(null, origin || true);
+      },
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-Requested-With',
+        'Accept',
+        'Origin',
+        'Access-Control-Request-Method',
+        'Access-Control-Request-Headers'
+      ],
+      exposedHeaders: ['Authorization'],
+      credentials: true,
+      optionsSuccessStatus: 204
+    };
+    
+    // Apply Express CORS Middleware
+    expressApp.use(cors(corsOptions));
+    
+    // Explicitly handle preflight OPTIONS across all routes
+    expressApp.options('*', cors(corsOptions));
+
+    // Global CORS Headers Fallback Middleware (Ensures preflights & errors receive valid headers)
+    expressApp.use((req, res, next) => {
+      const origin = req.headers.origin;
+      if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+      } else {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+      }
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+
+      if (req.method === 'OPTIONS') {
+        return res.sendStatus(204);
+      }
+      next();
+    });
+
+    expressApp.use(express.json({ limit: '50mb' }));
+    expressApp.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+    // Serve static files from public, uploads, and images directories
+    expressApp.use(express.static(path.join(__dirname, 'public')));
+    expressApp.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
+    expressApp.use('/images', express.static(path.join(__dirname, 'public', 'images')));
+
     // Initialize Default System Configuration Entries
     await SystemConfig.findOrCreate({ where: { key: 'transport_fee' }, defaults: { value: 250 } });
     await SystemConfig.findOrCreate({ where: { key: 'black_friday' }, defaults: { value: { active: false, endTime: null } } });
@@ -713,7 +641,6 @@ async function startServer() {
       defaults: { value: logisticsHierarchy } 
     });
 
-    // Save full JSON dataset in SystemConfig if available for deep front-end search
     if (rawJsonData) {
       await SystemConfig.findOrCreate({
         where: { key: 'kenya_locations_full' },
@@ -721,7 +648,7 @@ async function startServer() {
       });
     }
 
-    // --- EXPANDED 10-FIELD HERO CONFIGURATION DEFAULT ---
+    // Default Hero Configuration
     await SystemConfig.findOrCreate({
       where: { key: 'hero_settings' },
       defaults: {
@@ -867,43 +794,26 @@ async function startServer() {
       }
     });
 
-    // Real-Time Socket.IO Server Setup (persistent hosts only)
-    if (!IS_VERCEL) {
-      io = new SocketIOServer(server, { 
-        cors: corsOptions
-      });
+    // Real-Time Socket.IO Server Setup with CORS alignment
+    const io = new SocketIOServer(server, { 
+      cors: corsOptions
+    });
 
-      initializeFlashSaleEngine(io);
+    initializeFlashSaleEngine(io);
 
-      io.on('connection', (socket) => {
-        if (flashSaleState.active) {
-          socket.emit('blackFridayTick', { active: true, endTime: flashSaleState.endTime });
-        }
-        
-        socket.on('joinAdminChannel', (token) => {
-          jwt.verify(token, JWT_SECRET, async (err, decoded) => {
-            if (!err && decoded && decoded.role === 'admin') {
-              socket.join('admin-dashboard-room');
-              console.log(`DEBUG: Admin connected to real-time broadcast room. User ID: ${decoded.id}`);
-            }
-          });
+    io.on('connection', (socket) => {
+      if (flashSaleState.active) {
+        socket.emit('blackFridayTick', { active: true, endTime: flashSaleState.endTime });
+      }
+      
+      socket.on('joinAdminChannel', (token) => {
+        jwt.verify(token, JWT_SECRET, async (err, decoded) => {
+          if (!err && decoded && decoded.role === 'admin') {
+            socket.join('admin-dashboard-room');
+            console.log(`DEBUG: Admin connected to real-time broadcast room. User ID: ${decoded.id}`);
+          }
         });
       });
-    } else {
-      // Serverless: no timers or sockets. Flash sale state is refreshed from the DB per request.
-      await syncFlashSaleFromDb(true);
-      console.log('ℹ️ Vercel mode: Socket.IO disabled, clients should poll /api/config/flash-sale and order status endpoints.');
-    }
-
-    // Flash sale polling endpoint (used by Vercel deployments in place of WebSocket ticks)
-    expressApp.get('/api/config/flash-sale', async (req, res) => {
-      try {
-        await syncFlashSaleFromDb(true);
-        const msRemaining = flashSaleState.endTime ? Math.max(0, new Date(flashSaleState.endTime).getTime() - Date.now()) : 0;
-        res.json({ active: flashSaleState.active, endTime: flashSaleState.endTime, msRemaining });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
     });
 
     /**
@@ -934,7 +844,6 @@ async function startServer() {
 
         const existingUser = await User.findOne({ where: { [Op.or]: searchCondition } });
 
-        // If OTP code is submitted alongside signup payload, verify it
         if (inputOtp && existingUser && existingUser.verificationOtp) {
           if (existingUser.verificationOtp !== String(inputOtp).trim() || new Date(existingUser.verificationOtpExpires).getTime() < Date.now()) {
             return res.status(400).json({ error: 'Invalid or expired account verification OTP.' });
@@ -964,14 +873,12 @@ async function startServer() {
           });
         }
 
-        // If user already exists and is fully verified/active
         if (existingUser && existingUser.isVerified !== false && existingUser.password) {
           return res.status(409).json({ error: 'An account with this phone number or email address already exists.' });
         }
 
         const hashedPassword = await bcrypt.hash(password, 12);
 
-        // If explicitly requested to send OTP during signup step
         if (requireOtp || sendOtp) {
           const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
           const tokenExpiration = Date.now() + 10 * 60 * 1000;
@@ -1011,7 +918,6 @@ async function startServer() {
           });
         }
 
-        // Standard direct signup creation (backward compatible)
         let newUser;
         if (existingUser) {
           existingUser.password = hashedPassword;
@@ -1046,6 +952,7 @@ async function startServer() {
         res.status(500).json({ error: err.message || 'Internal server signup failure.' }); 
       }
     });
+
     // --- ACCOUNT CREATION OTP REQUEST ENDPOINTS ---
     const handleSignupOtpRequest = async (req, res) => {
       try {
@@ -1066,7 +973,7 @@ async function startServer() {
         }
 
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const tokenExpiration = Date.now() + 10 * 60 * 1000; // 10 mins
+        const tokenExpiration = Date.now() + 10 * 60 * 1000;
         let hashedPassword = existingUser ? existingUser.password : null;
         if (password) {
           hashedPassword = await bcrypt.hash(password, 12);
@@ -1345,7 +1252,7 @@ async function startServer() {
       }
     });
 
-    // --- FORGOT PASSWORD (OTP GENERATION & SMTP/SMS DISPATCH) ---
+    // --- FORGOT PASSWORD ---
     const handleForgotPasswordRequest = async (req, res) => {
       try {
         const { email, phoneNumber } = req.body || {};
@@ -1371,7 +1278,7 @@ async function startServer() {
         }
 
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const tokenExpiration = Date.now() + 10 * 60 * 1000; // 10 minutes validity
+        const tokenExpiration = Date.now() + 10 * 60 * 1000;
 
         user.resetToken = otpCode;
         user.resetTokenExpires = tokenExpiration;
@@ -1605,8 +1512,8 @@ async function startServer() {
         }
         if (search) {
           whereCondition[Op.or] = [
-            { brandName: { [LIKE_OP]: `%${search}%` } },
-            { variety: { [LIKE_OP]: `%${search}%` } }
+            { brandName: { [Op.like]: `%${search}%` } },
+            { variety: { [Op.like]: `%${search}%` } }
           ];
         }
 
@@ -1678,7 +1585,6 @@ async function startServer() {
       }
     });
 
-    // Dynamic County Shipping Overrides API (Backed by kenya_locations.json)
     expressApp.get('/api/config/counties', async (req, res) => {
       try {
         const config = await SystemConfig.findOne({ where: { key: 'county_overrides' } });
@@ -1688,7 +1594,6 @@ async function startServer() {
       }
     });
 
-    // Dynamic Logistics Locations Hierarchy API (Backed by kenya_locations.json)
     expressApp.get('/api/config/locations', async (req, res) => {
       try {
         const config = await SystemConfig.findOne({ where: { key: 'logistics_hierarchy' } });
@@ -1698,7 +1603,6 @@ async function startServer() {
       }
     });
 
-    // Full Raw Location Dataset Endpoint for Advanced Frontend Multi-Select UI
     expressApp.get('/api/config/locations-full', async (req, res) => {
       try {
         const config = await SystemConfig.findOne({ where: { key: 'kenya_locations_full' } });
@@ -1826,19 +1730,6 @@ async function startServer() {
         
         if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
           return res.status(400).json({ error: 'Shopping cart items cannot be empty.' });
-        }
-
-        // Pre-validate every line BEFORE any stock is deducted, so a failing line cannot leave earlier lines half-processed.
-        for (const preItem of cartItems) {
-          const preId = preItem.productId || preItem.laptopId || preItem.id;
-          const preQty = Number(preItem.quantity);
-          if (!Number.isFinite(preQty) || preQty <= 0) {
-            return res.status(400).json({ error: `Invalid quantity supplied for product ID: ${preId}.` });
-          }
-          const preProduct = await RiceProduct.findByPk(preId);
-          if (!preProduct || preProduct.stockQuantity < preQty) {
-            return res.status(422).json({ error: `Insufficient stock for product ID: ${preId} (${preProduct ? preProduct.brandName : 'Unknown Item'}).` });
-          }
         }
 
         let calculatedSubtotal = 0;
@@ -2099,15 +1990,12 @@ async function startServer() {
                 rawCallback: body
               };
 
-              // Credit 0.2 points per kg bought to customer (only once, even if the callback repeats or the status poll already credited it)
-              if (existingPaymentDetails.isPaid !== true) {
-                const totalKg = order.totalWeightKg || 0;
-                const points = Number((totalKg * 0.2).toFixed(2));
-                const user = await User.findByPk(order.userId);
-                if (user && points > 0) {
-                  user.rewardPoints = Number(((user.rewardPoints || 0) + points).toFixed(2));
-                  await user.save();
-                }
+              const totalKg = order.totalWeightKg || 0;
+              const points = Number((totalKg * 0.2).toFixed(2));
+              const user = await User.findByPk(order.userId);
+              if (user && points > 0) {
+                user.rewardPoints = Number(((user.rewardPoints || 0) + points).toFixed(2));
+                await user.save();
               }
 
               console.log(`🎉 Payment VERIFIED for Order #${order.id}. M-Pesa Receipt: ${mpesaReceipt}`);
@@ -2192,7 +2080,6 @@ async function startServer() {
           const orderYear = createdAt.getFullYear();
           yearsSet.add(orderYear);
 
-          // RECEIVED MONEY CONDITION: ONLY SUCCEEDED/PAID TRANSACTIONS
           const isPaid = order.paymentDetails && (order.paymentDetails.isPaid === true || order.paymentDetails.paidTag === 'PAID' || order.status === 'paid' || order.status === 'completed' || order.status === 'delivered');
 
           if (isPaid) {
@@ -2357,10 +2244,10 @@ async function startServer() {
     });
 
     // --- ADMIN FILE / IMAGE UPLOAD ROUTE ---
-    expressApp.post('/api/admin/upload', authenticateToken, requireAdmin, upload.single('image'), async (req, res) => {
+    expressApp.post('/api/admin/upload', authenticateToken, requireAdmin, upload.single('image'), (req, res) => {
       try {
         if (!req.file) return res.status(400).json({ error: 'No file buffered to stream.' });
-        const fileUrl = await persistUploadedFile(req.file);
+        const fileUrl = `/uploads/${req.file.filename}`;
         res.json({ url: fileUrl, imageUrl: fileUrl });
       } catch (err) { 
         res.status(500).json({ error: err.message }); 
@@ -2370,7 +2257,7 @@ async function startServer() {
     // --- PRODUCT MANAGEMENT CONTROLLERS ---
     const addProductHandler = async (req, res) => {
       try {
-        console.log("DEBUG: Raw Product Creation Payload:", JSON.stringify(req.body || {}).slice(0, 500)); 
+        console.log("DEBUG: Raw Product Creation Payload:", req.body); 
         const payload = {
           ...req.body,
           brandName: req.body.brandName || req.body.brand || 'Premium Rice',
@@ -2478,19 +2365,14 @@ async function startServer() {
         
         if (search && search.trim() !== '') {
           const searchStr = `%${search.trim()}%`;
-          // Postgres cannot run LIKE against an INTEGER id, so cast it to text first
-          const orderIdSearchClause = sequelize.getDialect() === 'postgres'
-            ? sequelize.where(sequelize.cast(sequelize.col('Order.id'), 'TEXT'), { [LIKE_OP]: searchStr })
-            : { id: { [Op.like]: searchStr } };
-
           whereCondition[Op.or] = [
-            orderIdSearchClause,
-            { county: { [LIKE_OP]: searchStr } },
-            { town: { [LIKE_OP]: searchStr } },
-            { location: { [LIKE_OP]: searchStr } },
-            { '$User.fullName$': { [LIKE_OP]: searchStr } },
-            { '$User.phoneNumber$': { [LIKE_OP]: searchStr } },
-            { '$User.email$': { [LIKE_OP]: searchStr } }
+            { id: { [Op.like]: searchStr } },
+            { county: { [Op.like]: searchStr } },
+            { town: { [Op.like]: searchStr } },
+            { location: { [Op.like]: searchStr } },
+            { '$User.fullName$': { [Op.like]: searchStr } },
+            { '$User.phoneNumber$': { [Op.like]: searchStr } },
+            { '$User.email$': { [Op.like]: searchStr } }
           ];
         }
 
@@ -2574,7 +2456,7 @@ async function startServer() {
         let csv = 'Order ID,Customer Name,Phone Number,Email,County,Town,Location,Sublocation,Street Address,Grand Total (KES),Payment Status,M-Pesa Receipt,Delivery Status,Order Date\n';
         
         orders.forEach(o => {
-          const customerName = o.User ? String(o.User.fullName || 'N/A').replace(/,/g, ' ') : 'N/A';
+          const customerName = o.User ? o.User.fullName.replace(/,/g, ' ') : 'N/A';
           const phone = o.User ? o.User.phoneNumber : 'N/A';
           const email = o.User ? o.User.email || 'N/A' : 'N/A';
           const county = (o.county || '').replace(/,/g, ' ');
@@ -2666,104 +2548,16 @@ async function startServer() {
       }
     });
 
-    // --- USER CLEARANCE MANAGEMENT ---
-    expressApp.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
-      try {
-        const systemRegisteredUsers = await User.findAll({ attributes: { exclude: ['password'] } });
-        res.json(systemRegisteredUsers);
-      } catch (err) { 
-        res.status(500).json({ error: err.message }); 
-      }
+    // Start listening on HTTP server
+    server.listen(port, hostname, () => {
+      console.log(`🚀 Mwea Rice Hub Engine listening on http://${hostname}:${port}`);
     });
 
-// --- ADMIN: MODIFY USER DETAILS ---
-        expressApp.put('/api/admin/users/:id/modify', authenticateToken, requireAdmin, async (req, res) => {
-          try {
-            const { fullName, role, isActive } = req.body || {};
-            const targetUserRecord = await User.findByPk(req.params.id);
-            if (!targetUserRecord) return res.status(404).json({ error: 'User record not found.' });
-
-            if (fullName !== undefined) targetUserRecord.fullName = fullName;
-            if (role !== undefined) targetUserRecord.role = role;
-            if (isActive !== undefined) targetUserRecord.isActive = isActive;
-
-            await targetUserRecord.save();
-
-            await AdminLog.create({
-              adminId: req.adminUser.id,
-              action: 'MODIFY_USER',
-              targetType: 'user',
-              targetId: targetUserRecord.id,
-              ipAddress: req.ip
-            });
-
-            res.json({ message: 'User record updated successfully.', user: targetUserRecord });
-          } catch (err) {
-            res.status(500).json({ error: err.message });
-          }
-        });
-
-        // --- ADMIN: TOGGLE USER ACCOUNT SUSPENSION ---
-        expressApp.put('/api/admin/users/:id/suspend', authenticateToken, requireAdmin, async (req, res) => {
-          try {
-            const user = await User.findByPk(req.params.id);
-            if (!user) return res.status(404).json({ error: 'User not found.' });
-            
-            user.isActive = !user.isActive;
-            await user.save();
-            
-            await AdminLog.create({
-              adminId: req.adminUser.id,
-              action: user.isActive ? 'ACTIVATE_USER' : 'SUSPEND_USER',
-              targetType: 'user',
-              targetId: user.id,
-              ipAddress: req.ip
-            });
-            
-            res.json({ message: `User account has been ${user.isActive ? 'activated' : 'suspended'}.`, user });
-          } catch (err) {
-            res.status(500).json({ error: err.message });
-          }
-        });
-
-        /**
-         * ==========================================
-         * 8. SYSTEM BOOTSTRAP & PORT LISTENER
-         * ==========================================
-         */
-        // JSON error handler (also catches multer upload errors such as wrong file type / file too large)
-        expressApp.use((err, req, res, next) => {
-          if (res.headersSent) return next(err);
-          console.error('❌ Unhandled request error:', err.message);
-          const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : (err.status || err.statusCode || 400);
-          res.status(status).json({ error: err.message || 'Unexpected server error.' });
-        });
-
-        if (!IS_VERCEL) {
-          server.listen(port, hostname, () => {
-            console.log(`✅ System Active: Mwea Hub Server running on http://${hostname === '0.0.0.0' ? 'localhost' : hostname}:${port}`);
-            console.log(`✅ WebSocket Engine attached and listening for real-time events.`);
-            console.log('====================================================================');
-          });
-        } else {
-          console.log('✅ System Active: Mwea Hub API ready on Vercel serverless runtime.');
-          console.log('====================================================================');
-        }
-
-      } catch (dbError) {
-        console.error('❌ FATAL: Database initialization, migration, or synchronization failed:', dbError);
-        if (!IS_VERCEL) {
-          process.exit(1);
-        }
-        // On Vercel never kill the runtime: surface the error so the readiness gate returns 503 and retries.
-        throw dbError;
-      }
+  } catch (error) {
+    console.error('❌ Failed to launch server engine:', error);
+    process.exit(1);
+  }
 }
 
-// Execute the async server bootstrap function
-ensureBootstrapped().catch((err) => {
-  console.error('❌ Initial bootstrap failed:', err.message);
-});
-
-// Vercel imports this file and uses the exported Express app as the request handler.
-export default expressApp;
+// Execute server bootstrapper
+startServer();
