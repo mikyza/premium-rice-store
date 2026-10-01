@@ -60,7 +60,8 @@ const __dirname = dirname(__filename);
 
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const isProduction = NODE_ENV === 'production';
-const hostname = process.env.HOSTNAME || '0.0.0.0';
+// Always bind all interfaces: Render auto-sets HOSTNAME to the container name, which makes the proxy return 502.
+const hostname = '0.0.0.0';
 const port = parseInt(process.env.PORT || '5000', 10);
 const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
 // Vercel serverless detection (Vercel sets VERCEL=1 automatically)
