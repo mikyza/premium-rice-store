@@ -2225,7 +2225,7 @@ export default function PremiumRiceStore() {
           showToast(data.message || 'OTP sent to your phone or email.', 'success');
           setResetStep('reset');
         } else {
-          showToast(data.error || 'Failed to request OTP', 'error');
+          showToast((data.error || 'Failed to request OTP') + (data.detail ? ` (${data.detail})` : ''), 'error');
         }
       } catch (err: any) {
         showToast(err.message || 'Failed to dispatch password reset request', 'error');
