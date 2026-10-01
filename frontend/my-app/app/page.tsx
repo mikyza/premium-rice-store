@@ -1685,6 +1685,8 @@ export default function PremiumRiceStore() {
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [resetStep, setResetStep] = useState<'request' | 'reset'>('request');
   const [formData, setFormData] = useState({ phoneNumber: '', email: '', password: '', fullName: '', resetToken: '', newPassword: '' });
+  const [signupOtpStep, setSignupOtpStep] = useState(false);
+  const [signupOtp, setSignupOtp] = useState('');
   
   // ADMIN PANEL NAVIGATION & DATA STATES
   const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'finances' | 'users' | 'config' | 'carousel' | 'logs'>('inventory');
@@ -1812,7 +1814,7 @@ export default function PremiumRiceStore() {
 
     let newSocket: Socket | null = null;
     try {
-      newSocket = io(SOCKET_URL);
+      newSocket = io(SOCKET_URL, { transports: ['websocket', 'polling'], reconnectionDelayMax: 10000 });
       setSocket(newSocket);
 
       newSocket.on('blackFridayTick', (data: any) => {
@@ -2135,17 +2137,43 @@ export default function PremiumRiceStore() {
   }, [totalCartWeightKg]);
 
   // AUTH HANDLERS
+  // Splits the single "phone or email" box into the field the backend expects
+  const buildIdentityPayload = (raw: string) => {
+    const value = (raw || '').trim();
+    return value.includes('@') ? { email: value } : { phoneNumber: value };
+  };
+
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const endpoint = isLogin ? '/user/login' : '/user/signup';
+    const identifier = (formData.phoneNumber || formData.email || '').trim();
+    const identity = buildIdentityPayload(identifier);
     
     try {
+      let endpoint = '/user/login';
+      let payload: any = { ...identity, identifier, password: formData.password };
+
+      if (!isLogin) {
+        if (signupOtpStep) {
+          endpoint = '/user/signup/verify-otp';
+          payload = { ...identity, otp: signupOtp.trim() };
+        } else {
+          endpoint = '/user/signup';
+          payload = { ...identity, password: formData.password, fullName: formData.fullName, requireOtp: true };
+        }
+      }
+
       const res = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
+
+      if (res.ok && data.requiresOtp) {
+        setSignupOtpStep(true);
+        showToast(data.message || 'Verification code sent. Check your phone or email.', 'success');
+        return;
+      }
       
       if (res.ok && data.token) {
         setToken(data.token);
@@ -2153,12 +2181,33 @@ export default function PremiumRiceStore() {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user));
         showToast(isLogin ? `Welcome back, ${data.user.fullName}!` : 'Account created successfully!', 'success');
+        setSignupOtpStep(false);
+        setSignupOtp('');
         setView(data.user.role === 'admin' ? 'admin' : 'home');
       } else {
         showToast(data.error || 'Authentication failed', 'error');
       }
     } catch (err: any) {
       showToast(err.message || 'Server authentication error', 'error');
+    }
+  };
+
+  const handleResendSignupOtp = async () => {
+    const identifier = (formData.phoneNumber || formData.email || '').trim();
+    try {
+      const res = await fetch(`${API_BASE_URL}/user/signup/resend-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildIdentityPayload(identifier))
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || 'A fresh verification code has been sent.', 'success');
+      } else {
+        showToast(data.error || 'Failed to resend code', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to resend verification code', 'error');
     }
   };
 
@@ -2169,11 +2218,11 @@ export default function PremiumRiceStore() {
         const res = await fetch(`${API_BASE_URL}/user/forgot-password`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: formData.email })
+          body: JSON.stringify(buildIdentityPayload(formData.email || formData.phoneNumber))
         });
         const data = await res.json();
         if (res.ok) {
-          showToast(data.message || 'OTP sent to your email address.', 'success');
+          showToast(data.message || 'OTP sent to your phone or email.', 'success');
           setResetStep('reset');
         } else {
           showToast(data.error || 'Failed to request OTP', 'error');
@@ -2187,7 +2236,7 @@ export default function PremiumRiceStore() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            email: formData.email,
+            ...buildIdentityPayload(formData.email || formData.phoneNumber),
             otp: formData.resetToken,
             newPassword: formData.newPassword
           })
@@ -3467,7 +3516,7 @@ export default function PremiumRiceStore() {
                 </h2>
                 <p className="text-xs text-slate-500">
                   {isForgotPassword 
-                    ? 'Enter your registered email to receive an OTP reset code' 
+                    ? 'Enter your registered phone number or email to receive an OTP reset code' 
                     : isLogin 
                     ? 'Sign in to place agricultural grain orders' 
                     : 'Join Mwea Rice Hub for loyalty reward points'}
@@ -3478,14 +3527,14 @@ export default function PremiumRiceStore() {
                 <form onSubmit={handleForgotPasswordSubmit} className="space-y-4 text-xs">
                   {resetStep === 'request' ? (
                     <div>
-                      <label className="block font-bold text-slate-700 mb-1">Email Address</label>
+                      <label className="block font-bold text-slate-700 mb-1">Phone Number or Email</label>
                       <input 
-                        type="email"
+                        type="text"
                         required
-                        value={formData.email}
-                        onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                        value={formData.email || formData.phoneNumber}
+                        onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value, phoneNumber: e.target.value }))}
                         className="w-full px-4 py-3 rounded-xl border border-slate-200 text-xs font-semibold focus:ring-2 focus:ring-emerald-500"
-                        placeholder="yourname@gmail.com"
+                        placeholder="0712345678 or name@example.com"
                       />
                     </div>
                   ) : (
@@ -3568,6 +3617,29 @@ export default function PremiumRiceStore() {
                     />
                   </div>
 
+                  {!isLogin && signupOtpStep && (
+                    <div className="space-y-2">
+                      <label className="block font-bold text-slate-700 mb-1">6-Digit Verification Code</label>
+                      <input 
+                        type="text"
+                        required
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={signupOtp}
+                        onChange={(e) => setSignupOtp(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 text-xs font-mono font-bold tracking-widest text-center focus:ring-2 focus:ring-emerald-500"
+                        placeholder="123456"
+                      />
+                      <button 
+                        type="button"
+                        onClick={handleResendSignupOtp}
+                        className="text-emerald-600 font-bold hover:underline cursor-pointer"
+                      >
+                        Resend code
+                      </button>
+                    </div>
+                  )}
+
                   {isLogin && (
                     <div className="text-right">
                       <button 
@@ -3584,13 +3656,13 @@ export default function PremiumRiceStore() {
                     type="submit"
                     className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-md shadow-emerald-600/20 cursor-pointer"
                   >
-                    {isLogin ? 'Sign In' : 'Register Account'}
+                    {isLogin ? 'Sign In' : (signupOtpStep ? 'Verify & Create Account' : 'Register Account')}
                   </button>
 
                   <div className="text-center pt-2">
                     <button 
                       type="button"
-                      onClick={() => setIsLogin(!isLogin)}
+                      onClick={() => { setIsLogin(!isLogin); setSignupOtpStep(false); setSignupOtp(''); }}
                       className="text-xs font-bold text-slate-600 hover:text-emerald-600 cursor-pointer"
                     >
                       {isLogin ? "Don't have an account? Sign Up" : "Already registered? Sign In"}
