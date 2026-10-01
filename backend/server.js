@@ -764,9 +764,9 @@ async function startServer() {
     // Auto migration checks for dynamic reward points, buying prices & account verification columns
     try {
       const queryInterface = sequelize.getQueryInterface();
-      const userTable = await queryInterface.describeTable('Users');
+      const userTable = await queryInterface.describeTable(User.getTableName());
       if (!userTable.rewardPoints) {
-        await queryInterface.addColumn('Users', 'rewardPoints', {
+        await queryInterface.addColumn(User.getTableName(), 'rewardPoints', {
           type: DataTypes.FLOAT,
           defaultValue: 0,
           allowNull: false
@@ -775,7 +775,7 @@ async function startServer() {
       }
 
       if (!userTable.isVerified) {
-        await queryInterface.addColumn('Users', 'isVerified', {
+        await queryInterface.addColumn(User.getTableName(), 'isVerified', {
           type: DataTypes.BOOLEAN,
           defaultValue: true,
           allowNull: false
@@ -784,7 +784,7 @@ async function startServer() {
       }
 
       if (!userTable.verificationOtp) {
-        await queryInterface.addColumn('Users', 'verificationOtp', {
+        await queryInterface.addColumn(User.getTableName(), 'verificationOtp', {
           type: DataTypes.STRING,
           allowNull: true
         });
@@ -792,7 +792,7 @@ async function startServer() {
       }
 
       if (!userTable.verificationOtpExpires) {
-        await queryInterface.addColumn('Users', 'verificationOtpExpires', {
+        await queryInterface.addColumn(User.getTableName(), 'verificationOtpExpires', {
           type: DataTypes.DATE,
           allowNull: true
         });
@@ -800,7 +800,7 @@ async function startServer() {
       }
       
       if (!userTable.resetToken) {
-        await queryInterface.addColumn('Users', 'resetToken', {
+        await queryInterface.addColumn(User.getTableName(), 'resetToken', {
           type: DataTypes.STRING,
           allowNull: true
         });
@@ -808,16 +808,16 @@ async function startServer() {
       }
 
       if (!userTable.resetTokenExpires) {
-        await queryInterface.addColumn('Users', 'resetTokenExpires', {
+        await queryInterface.addColumn(User.getTableName(), 'resetTokenExpires', {
           type: DataTypes.DATE,
           allowNull: true
         });
         console.log('✅ Synchronized database column: Users.resetTokenExpires');
       }
 
-      const productTable = await queryInterface.describeTable('RiceProducts');
+      const productTable = await queryInterface.describeTable(RiceProduct.getTableName());
       if (!productTable.buyingPrice) {
-        await queryInterface.addColumn('RiceProducts', 'buyingPrice', {
+        await queryInterface.addColumn(RiceProduct.getTableName(), 'buyingPrice', {
           type: DataTypes.FLOAT,
           defaultValue: 0,
           allowNull: true
@@ -825,7 +825,7 @@ async function startServer() {
         console.log('✅ Synchronized database column: RiceProducts.buyingPrice');
       }
     } catch (colErr) {
-      console.log('DEBUG: Database table structure sync verified.');
+      console.error('⚠️ Column auto-migration problem:', colErr.message);
     }
 
     await sequelize.sync();
