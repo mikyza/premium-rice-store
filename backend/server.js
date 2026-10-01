@@ -799,6 +799,22 @@ async function startServer() {
         console.log('✅ Synchronized database column: Users.verificationOtpExpires');
       }
       
+      if (!userTable.resetToken) {
+        await queryInterface.addColumn('Users', 'resetToken', {
+          type: DataTypes.STRING,
+          allowNull: true
+        });
+        console.log('✅ Synchronized database column: Users.resetToken');
+      }
+
+      if (!userTable.resetTokenExpires) {
+        await queryInterface.addColumn('Users', 'resetTokenExpires', {
+          type: DataTypes.DATE,
+          allowNull: true
+        });
+        console.log('✅ Synchronized database column: Users.resetTokenExpires');
+      }
+
       const productTable = await queryInterface.describeTable('RiceProducts');
       if (!productTable.buyingPrice) {
         await queryInterface.addColumn('RiceProducts', 'buyingPrice', {
@@ -1500,8 +1516,8 @@ async function startServer() {
 
         res.status(200).json({ message: 'If an account exists, a password reset OTP code has been dispatched.' });
       } catch (err) {
-        console.error('❌ Forgot Password OTP Error:', err.message);
-        res.status(500).json({ error: 'Failed to dispatch password reset OTP.' });
+        console.error('❌ Forgot Password OTP Error:', err);
+        res.status(500).json({ error: 'Failed to dispatch password reset OTP.', detail: err.message });
       }
     };
 
@@ -2769,6 +2785,42 @@ async function startServer() {
         io.emit('orderStatusUpdated', order);
         res.json(order);
       } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- ADMIN AUDIT LOGS ---
+    expressApp.get('/api/admin/logs', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const logs = await AdminLog.findAll({ order: [['createdAt', 'DESC']], limit: 500 });
+        const adminIds = Array.from(new Set(logs.map((l) => l.adminId).filter(Boolean)));
+        const admins = adminIds.length
+          ? await User.findAll({ where: { id: adminIds }, attributes: ['id', 'fullName', 'email'] })
+          : [];
+        const adminMap = {};
+        admins.forEach((a) => { adminMap[a.id] = a; });
+
+        res.json(logs.map((l) => {
+          const o = l.toJSON();
+          const admin = adminMap[o.adminId];
+          let details = '';
+          if (o.changes !== undefined && o.changes !== null) {
+            details = typeof o.changes === 'string' ? o.changes : JSON.stringify(o.changes);
+          }
+          return {
+            id: o.id,
+            action: o.action,
+            performedByUserId: o.adminId,
+            performedByName: admin ? admin.fullName : 'System',
+            performedByEmail: admin ? admin.email : undefined,
+            module: o.targetType || 'system',
+            details: o.targetId ? `${o.targetType || 'item'} #${o.targetId}${details ? ' - ' + details : ''}` : details,
+            ipAddress: o.ipAddress,
+            timestamp: o.createdAt
+          };
+        }));
+      } catch (err) {
+        console.error('DEBUG: Admin Logs Error:', err);
         res.status(500).json({ error: err.message });
       }
     });
