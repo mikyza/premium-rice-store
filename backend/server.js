@@ -3,9 +3,9 @@
  * PREMIUM RICE & GRAIN STORE - UNIFIED BACKEND ENTERPRISE ARCHITECTURE
  * ====================================================================================
  * System: Mwea Rice Hub Enterprise API Engine
- * Version: 3.5.0-ENTERPRISE-RENDER
+ * Version: 3.6.0-ENTERPRISE-RENDER-VERCEL
  * Platform: Node.js / Express / Socket.IO / Sequelize ORM / PayHero API / Nodemailer
- * Deployment: Render Cloud Infrastructure (Production Optimized)
+ * Deployment: Render Cloud Infrastructure OR Vercel Serverless (auto-detected via process.env.VERCEL)
  * 
  * Description:
  * Complete, single-file server engine handling real-time WebSocket state synchronization,
@@ -42,6 +42,14 @@ import { initiatePayHeroPayment } from './controllers/paymentController.js';
 // Initialize environment variables from .env file
 dotenv.config();
 
+// Never let a stray async error kill the process: a dead process = Render 502 = browser reports a CORS error.
+process.on('unhandledRejection', (reason) => {
+  console.error('❌ Unhandled promise rejection:', reason && reason.message ? reason.message : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught exception:', err && err.stack ? err.stack : err);
+});
+
 /**
  * ==========================================
  * 0. SYSTEM INITIALIZATION, PATHS & CONSTANTS
@@ -55,13 +63,22 @@ const isProduction = NODE_ENV === 'production';
 const hostname = process.env.HOSTNAME || '0.0.0.0';
 const port = parseInt(process.env.PORT || '5000', 10);
 const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
-const RENDER_BASE_URL = process.env.BASE_URL || 'https://premium-rice-store-7.onrender.com';
+// Vercel serverless detection (Vercel sets VERCEL=1 automatically)
+const IS_VERCEL = !!process.env.VERCEL;
+const RENDER_BASE_URL = process.env.BASE_URL
+  || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null)
+  || 'https://premium-rice-store-7.onrender.com';
 
 console.log('====================================================================');
 console.log('🚀 Booting Mwea Rice Hub Enterprise Architecture...');
 console.log(`🌍 Environment: ${NODE_ENV.toUpperCase()}`);
 console.log(`⚡ Execution Directory: ${__dirname}`);
 console.log(`📡 Base Deployment Target URL: ${RENDER_BASE_URL}`);
+console.log(`☁️ Runtime: ${IS_VERCEL ? 'VERCEL SERVERLESS' : 'PERSISTENT NODE SERVER'}`);
+
+if (isProduction && !process.env.JWT_SECRET) {
+  console.warn('⚠️ WARNING: JWT_SECRET env var is not set. Using the built-in default secret is unsafe in production.');
+}
 console.log('====================================================================');
 
 /**
@@ -142,6 +159,9 @@ const transporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 15000,
   tls: {
     rejectUnauthorized: false // Tolerant TLS handshake for cloud hosting environments
   }
@@ -152,6 +172,10 @@ const SENDER_NAME = 'Mwea Rice Hub Enterprise';
 
 /**
  * Helper function to send email OTP via Nodemailer for Account Creation & Password Reset
+ * @param {string} toEmail 
+ * @param {string} toName 
+ * @param {string} otpCode 
+ * @param {string} type - 'reset' | 'signup' | 'account_creation'
  */
 const sendOtpEmail = async (toEmail, toName, otpCode, type = 'reset') => {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
@@ -195,25 +219,83 @@ const sendOtpEmail = async (toEmail, toName, otpCode, type = 'reset') => {
 };
 
 /**
- * Helper function to send SMS OTP based on standard gateway logic.
+ * Normalizes any Kenyan phone format (0712..., 0112..., 712..., +254712..., 254712...) to 254XXXXXXXXX.
+ * Returns null when the value is not a valid Kenyan mobile number (or is an email address).
+ */
+const normalizeKenyanPhone = (raw) => {
+  if (raw === undefined || raw === null) return null;
+  const str = String(raw).trim();
+  if (!str || str.includes('@')) return null;
+  let digits = str.replace(/\D/g, '');
+  if (digits.startsWith('2540') && digits.length === 13) digits = `254${digits.slice(4)}`;
+  if (digits.startsWith('254') && digits.length === 12) return digits;
+  if (digits.startsWith('0') && digits.length === 10) return `254${digits.slice(1)}`;
+  if ((digits.startsWith('7') || digits.startsWith('1')) && digits.length === 9) return `254${digits}`;
+  return null;
+};
+
+/** All common spellings of one phone number, so lookups match however the account was originally saved. */
+const phoneVariants = (raw) => {
+  const normalized = normalizeKenyanPhone(raw);
+  if (!normalized) return raw ? [String(raw).trim()] : [];
+  const local = normalized.slice(3);
+  return Array.from(new Set([normalized, `0${local}`, `+${normalized}`, local]));
+};
+
+/**
+ * The frontend login box is a single "phone or email" field, so the same text can arrive in both
+ * `phoneNumber` and `email`. This splits it into a real email and/or a real normalized phone.
+ */
+const splitIdentity = (body = {}) => {
+  const candidates = [body.email, body.phoneNumber, body.phone, body.identifier]
+    .map((v) => (v === undefined || v === null ? '' : String(v).trim()))
+    .filter(Boolean);
+  let email = null;
+  let phone = null;
+  for (const c of candidates) {
+    if (c.includes('@')) {
+      if (!email) email = c;
+    } else if (!phone) {
+      phone = normalizeKenyanPhone(c);
+    }
+  }
+  return { email, phone };
+};
+
+/** Sequelize OR-conditions matching an email or any spelling of a phone number. */
+const identityConditions = (identifier) => {
+  const value = String(identifier || '').trim();
+  if (!value) return [];
+  if (value.includes('@')) return [{ email: value }];
+  return phoneVariants(value).map((p) => ({ phoneNumber: p }));
+};
+
+/**
+ * Helper function to send SMS OTP via the Zettatel gateway.
+ * Returns true ONLY when the gateway confirms acceptance (Zettatel answers HTTP 200 even on errors).
+ * @param {string} phoneNumber 
+ * @param {string} otpCode 
+ * @param {string} type - 'reset' | 'signup'
  */
 const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
   try {
-    if (!phoneNumber) return false;
-    
-    let formattedPhone = phoneNumber.replace(/\D/g, '');
-    if (formattedPhone.startsWith('0')) {
-      formattedPhone = `254${formattedPhone.substring(1)}`;
-    } else if (formattedPhone.startsWith('7') || formattedPhone.startsWith('1')) {
-      formattedPhone = `254${formattedPhone}`;
+    const formattedPhone = normalizeKenyanPhone(phoneNumber);
+    if (!formattedPhone) {
+      console.warn(`⚠️ [SMS] Skipped: "${phoneNumber}" is not a valid Kenyan mobile number.`);
+      return false;
     }
-      
+    if (!process.env.ZETTATEL_USER || !process.env.ZETTATEL_PASSWORD) {
+      console.error('❌ [SMS] ZETTATEL_USER / ZETTATEL_PASSWORD are not set in the environment variables.');
+      return false;
+    }
+
     const message = type === 'signup' 
       ? `Your Mwea Rice Hub account verification OTP is ${otpCode}. Valid for 10 mins.`
       : `Your Mwea Rice Hub password reset OTP is ${otpCode}. Valid for 10 mins.`;
 
-    console.log(`📱 [SMS DISPATCH] Triggering SMS to ${formattedPhone}: ${message}`);
+    console.log(`📱 [SMS DISPATCH] Triggering SMS to ${formattedPhone} (type: ${type})`);
     
+    // Zettatel Gateway requires URL Encoded Form Data, not JSON.
     const payload = new URLSearchParams({
       userid: process.env.ZETTATEL_USER,
       password: process.env.ZETTATEL_PASSWORD,
@@ -223,20 +305,36 @@ const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
       sendMethod: 'quick',
       msgType: 'text',
       output: 'json',
-      duplicatecheck: 'true'
+      duplicatecheck: 'false'
     });
 
     const response = await axios.post(
-      process.env.ZETTATEL_API_URL || 'https://portal.zettatel.com/sms/api',
+      process.env.ZETTATEL_API_URL || 'https://portal.zettatel.com/SMSApi/send',
       payload.toString(),
       {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        }
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 15000
       }
     );
 
-    console.log('✅ [ZETTATEL RESPONSE]:', response.data);
+    let data = response.data;
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch (_) { /* plain-text reply */ }
+    }
+    console.log('📨 [ZETTATEL RESPONSE]:', typeof data === 'string' ? data : JSON.stringify(data));
+
+    const status = String((data && data.status) || '').toLowerCase();
+    if (status) {
+      if (status !== 'success') {
+        console.error(`❌ [SMS] Zettatel rejected the message: ${(data && (data.reason || data.message)) || status}`);
+        return false;
+      }
+      return true;
+    }
+    if (typeof data === 'string' && /(error|fail|invalid|denied|insufficient)/i.test(data)) {
+      console.error('❌ [SMS] Zettatel returned an error response.');
+      return false;
+    }
     return true;
 
   } catch (error) {
@@ -244,6 +342,30 @@ const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
     return false;
   }
 };
+
+/**
+ * Sends the OTP on every channel the account has (email + SMS) in parallel.
+ * A failing channel (e.g. SMTP blocked on the host) can no longer stop the other one or crash the request.
+ */
+const dispatchOtp = async (user, otpCode, type = 'reset') => {
+  const hasEmail = !!user.email && String(user.email).includes('@');
+  const hasPhone = !!normalizeKenyanPhone(user.phoneNumber);
+  const [emailResult, smsResult] = await Promise.allSettled([
+    hasEmail ? sendOtpEmail(user.email, user.fullName, otpCode, type) : Promise.resolve(false),
+    hasPhone ? sendOtpSms(user.phoneNumber, otpCode, type) : Promise.resolve(false)
+  ]);
+  if (emailResult.status === 'rejected') {
+    console.error(`❌ [EMAIL] OTP email to ${user.email} failed:`, emailResult.reason && emailResult.reason.message);
+  }
+  if (smsResult.status === 'rejected') {
+    console.error(`❌ [SMS] OTP SMS to ${user.phoneNumber} failed:`, smsResult.reason && smsResult.reason.message);
+  }
+  const emailSent = emailResult.status === 'fulfilled' && !!emailResult.value;
+  const smsSent = smsResult.status === 'fulfilled' && !!smsResult.value;
+  return { emailSent, smsSent, anySent: emailSent || smsSent };
+};
+
+const OTP_DELIVERY_FAILED_MESSAGE = 'We could not deliver the verification code right now. Please check your phone number or email and try again.';
 
 /**
  * Helper function to retrieve and construct PayHero Basic Auth Headers cleanly
@@ -257,11 +379,10 @@ const getPayHeroAuthHeader = () => {
     const creds = `${process.env.PAYHERO_API_KEY.trim()}:${process.env.PAYHERO_API_SECRET.trim()}`;
     return `Basic ${Buffer.from(creds).toString('base64')}`;
   }
-  const fallbackRaw = 'Basic cnBqZHU3YWJyWG03SWdqcDBI\\nBF:NHFvR\\nV32XR99cDq\\nGf3igKB3R0A5vRtgTMJ7Jpfm'
-    .replace(/\\[rn]/g, '')
-    .replace(/[\r\n]+/g, '')
-    .trim();
-  return fallbackRaw.startsWith('Basic ') ? fallbackRaw : `Basic ${fallbackRaw.replace(/^Basic/i, '').trim()}`;
+  // SECURITY: the previously hard-coded fallback credential was removed from source code.
+  // Set PAYHERO_BASIC_AUTH (or PAYHERO_API_KEY + PAYHERO_API_SECRET) in your environment variables.
+  console.warn('⚠️ WARNING: PayHero credentials are missing. Set PAYHERO_BASIC_AUTH or PAYHERO_API_KEY/PAYHERO_API_SECRET.');
+  return '';
 };
 
 const PAYHERO_CHANNEL_ID = Number(process.env.PAYHERO_CHANNEL_ID || 11668);
@@ -274,32 +395,40 @@ const PAYHERO_CHANNEL_ID = Number(process.env.PAYHERO_CHANNEL_ID || 11668);
 const uploadDir = path.join(__dirname, 'public', 'uploads');
 const imagesDir = path.join(__dirname, 'public', 'images');
 
-try {
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-    console.log('📁 Created missing upload directory at:', uploadDir);
-  }
+// Vercel's filesystem is read-only (except /tmp) so folders are only created on persistent hosts.
+if (!IS_VERCEL) {
+  try {
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+      console.log('📁 Created missing upload directory at:', uploadDir);
+    }
 
-  if (!fs.existsSync(imagesDir)) {
-    fs.mkdirSync(imagesDir, { recursive: true });
-    console.log('📁 Created missing images directory at:', imagesDir);
+    if (!fs.existsSync(imagesDir)) {
+      fs.mkdirSync(imagesDir, { recursive: true });
+      console.log('📁 Created missing images directory at:', imagesDir);
+    }
+  } catch (fsErr) {
+    console.error('❌ Failed to verify or build static public storage directories:', fsErr.message);
   }
-} catch (fsErr) {
-  console.error('❌ Failed to verify or build static public storage directories:', fsErr.message);
 }
 
 // Multer Storage Configuration for File Uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const cleanFileName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-    cb(null, `${Date.now()}-${cleanFileName}`);
-  }
-});
+// - Persistent hosts (Render/local): files are written to public/uploads (original behaviour).
+// - Vercel: files are kept in memory, then pushed to Vercel Blob (see persistUploadedFile).
+const storage = IS_VERCEL
+  ? multer.memoryStorage()
+  : multer.diskStorage({
+      destination: (req, file, cb) => cb(null, uploadDir),
+      filename: (req, file, cb) => {
+        const cleanFileName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+        cb(null, `${Date.now()}-${cleanFileName}`);
+      }
+    });
 
 const upload = multer({ 
   storage,
-  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB file upload limit
+  // Vercel functions reject request bodies larger than ~4.5MB, so cap slightly below that there.
+  limits: { fileSize: (IS_VERCEL ? 4 : 15) * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
@@ -308,6 +437,28 @@ const upload = multer({
     }
   }
 });
+
+/**
+ * Returns the public URL for an uploaded image.
+ * On Vercel the image is stored in Vercel Blob (needs BLOB_READ_WRITE_TOKEN);
+ * without that token it falls back to an inline data URL so uploads still work.
+ */
+async function persistUploadedFile(file) {
+  if (!IS_VERCEL) {
+    return `/uploads/${file.filename}`;
+  }
+  const cleanFileName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    const { put } = await import('@vercel/blob');
+    const blob = await put(`uploads/${Date.now()}-${cleanFileName}`, file.buffer, {
+      access: 'public',
+      contentType: file.mimetype
+    });
+    return blob.url;
+  }
+  console.warn('⚠️ BLOB_READ_WRITE_TOKEN missing: returning inline data URL for uploaded image.');
+  return `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+}
 
 /**
  * ==========================================
@@ -361,10 +512,10 @@ const Cart = sequelize.models.Cart || sequelize.define('Cart', {
 });
 
 // Define Relational Model Associations
-if (Cart && RiceProduct && !Cart.associations.RiceProduct) {
+if (Cart && RiceProduct && !Cart.associations.product) {
   Cart.belongsTo(RiceProduct, { foreignKey: 'productId', as: 'product', onDelete: 'CASCADE' });
 }
-if (Cart && User && !Cart.associations.User) {
+if (Cart && User && !Cart.associations.user) {
   Cart.belongsTo(User, { foreignKey: 'userId', as: 'user', onDelete: 'CASCADE' });
 }
 
@@ -379,6 +530,25 @@ let flashSaleState = {
   countdownIntervalId: null
 };
 
+// LIKE operator: case-insensitive on Postgres (Aiven), plain LIKE elsewhere
+const LIKE_OP = sequelize.getDialect() === 'postgres' ? Op.iLike : Op.like;
+
+// Serverless-safe flash sale sync: no timers, state is derived from the DB (cached for 5s).
+let lastFlashSaleSync = 0;
+async function syncFlashSaleFromDb(force = false) {
+  if (!force && Date.now() - lastFlashSaleSync < 5000) return;
+  lastFlashSaleSync = Date.now();
+  try {
+    const config = await SystemConfig.findOne({ where: { key: 'black_friday' } });
+    const v = config && config.value;
+    const running = !!(v && v.active && v.endTime && new Date(v.endTime).getTime() > Date.now());
+    flashSaleState.active = running;
+    flashSaleState.endTime = running ? v.endTime : null;
+  } catch (err) {
+    console.error('❌ Failed to sync Flash Sale state:', err.message);
+  }
+}
+
 function initializeFlashSaleEngine(io) {
   SystemConfig.findOne({ where: { key: 'black_friday' } }).then((config) => {
     if (config && config.value && config.value.active) {
@@ -391,7 +561,7 @@ function initializeFlashSaleEngine(io) {
       } else {
         config.value = { ...config.value, active: false };
         config.changed('value', true);
-        config.save();
+        config.save().catch(saveErr => console.error('❌ Failed to persist expired flash sale state:', saveErr.message));
         console.log('🏁 Expired Flash Harvest Sale state automatically deactivated in DB.');
       }
     }
@@ -415,9 +585,9 @@ function startFlashSaleCountdown(io) {
         if (config) {
           config.value = { ...config.value, active: false };
           config.changed('value', true);
-          config.save();
+          return config.save();
         }
-      });
+      }).catch(saveErr => console.error('❌ Failed to close flash sale in DB:', saveErr.message));
       console.log('🏁 Flash Harvest Sale window has officially closed.');
     } else {
       io.emit('blackFridayTick', {
@@ -486,6 +656,105 @@ const requireAdmin = async (req, res, next) => {
  * 5. CORE SERVER & DATABASE BOOTSTRAP ENGINE
  * ==========================================
  */
+
+// Express app is created at module level so Vercel can import and export it as the request handler.
+const expressApp = express();
+expressApp.set('trust proxy', true);
+
+// HTTP server + WebSockets only exist on persistent hosts. Vercel serverless cannot hold WebSocket connections.
+const server = IS_VERCEL ? null : createServer(expressApp);
+
+// Dynamic CORS configuration optimized for Render/Vercel production and mobile wrappers
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, Postman, curl, server-to-server webhooks)
+    // OR any origin ending with .onrender.com / .vercel.app or custom production domains
+    if (!origin || origin.endsWith('.onrender.com') || origin.includes('onrender.com') || origin.endsWith('.vercel.app')) {
+      callback(null, true);
+    } else {
+      // Dynamically allow all other valid web/mobile origins or restrict as needed
+      callback(null, true);
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Cache-Control'],
+  exposedHeaders: ['Content-Disposition'],
+  credentials: true,
+  optionsSuccessStatus: 204,
+  maxAge: 86400
+};
+
+expressApp.use(cors(corsOptions));
+expressApp.use(express.json({ limit: '50mb' }));
+expressApp.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Serve static files from public, uploads, and images directories
+expressApp.use(express.static(path.join(__dirname, 'public')));
+expressApp.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
+expressApp.use('/images', express.static(path.join(__dirname, 'public', 'images')));
+
+// Socket.IO placeholder: replaced by a real SocketIOServer on persistent hosts.
+// On Vercel every io.emit / io.to().emit call becomes a safe no-op instead of crashing.
+let io = {
+  emit: () => false,
+  to: () => ({ emit: () => false }),
+  on: () => {}
+};
+
+// Socket.IO is attached immediately (same CORS rules) so the browser never sees a bare 502 on /socket.io.
+if (!IS_VERCEL && server) {
+  io = new SocketIOServer(server, { cors: corsOptions });
+}
+
+// Health endpoints answer instantly (before the DB gate) so Render marks the service live.
+expressApp.get(['/health', '/api/health'], (req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime(), ready: !!bootstrapReady });
+});
+
+// Readiness gate: every request waits for DB + route bootstrap (runs once per warm instance).
+let bootstrapPromise = null;
+let bootstrapReady = false;
+let bootstrapRetryTimer = null;
+function ensureBootstrapped() {
+  if (!bootstrapPromise) {
+    bootstrapPromise = startServer().then((result) => {
+      bootstrapReady = true;
+      return result;
+    }).catch((err) => {
+      bootstrapPromise = null; // allow a retry on the next request
+      // Persistent host: keep the process alive and keep retrying the database instead of crashing into a 502.
+      if (!IS_VERCEL && !bootstrapRetryTimer) {
+        bootstrapRetryTimer = setTimeout(() => {
+          bootstrapRetryTimer = null;
+          ensureBootstrapped().catch(() => {});
+        }, 10000);
+      }
+      throw err;
+    });
+  }
+  return bootstrapPromise;
+}
+
+// Bind the port RIGHT AWAY (before the database is ready) so Render never answers 502 while booting.
+if (!IS_VERCEL && server) {
+  server.listen(port, hostname, () => {
+    console.log(`✅ HTTP listener bound on http://${hostname === '0.0.0.0' ? 'localhost' : hostname}:${port} (database bootstrap continues in background)`);
+  });
+}
+
+expressApp.use(async (req, res, next) => {
+  try {
+    await ensureBootstrapped();
+    if (IS_VERCEL && req.path.startsWith('/api/')) {
+      await syncFlashSaleFromDb();
+    }
+    next();
+  } catch (bootErr) {
+    console.error('❌ Bootstrap failure while handling request:', bootErr.message);
+    res.status(503).json({ error: 'Service is starting up or the database is unreachable. Please retry shortly.' });
+  }
+});
+
 async function startServer() {
   try {
     // Authenticate database connectivity
@@ -547,71 +816,6 @@ async function startServer() {
     const currentMode = process.env.DB_MODE === 'cloud' ? '☁️ AIVEN / CLOUD POSTGRES' : '🏠 RENDER / LOCAL DB';
     console.log(`🍃 Database Connected Successfully! Running Mode: [ ${currentMode} ]`);
 
-    const expressApp = express();
-    expressApp.set('trust proxy', true);
-
-    const server = createServer(expressApp);
-
-    /**
-     * ==========================================
-     * ENHANCED & OPTIMIZED CORS CONFIGURATION
-     * ==========================================
-     */
-    const corsOptions = {
-      origin: (origin, callback) => {
-        // Dynamically allow requesting origin (or allow server-to-server / non-browser calls)
-        // Returning origin or true reflects the incoming Origin header, which is required when credentials: true
-        callback(null, origin || true);
-      },
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-      allowedHeaders: [
-        'Content-Type',
-        'Authorization',
-        'X-Requested-With',
-        'Accept',
-        'Origin',
-        'Access-Control-Request-Method',
-        'Access-Control-Request-Headers'
-      ],
-      exposedHeaders: ['Authorization'],
-      credentials: true,
-      optionsSuccessStatus: 204
-    };
-    
-   // Apply Express CORS Middleware
-expressApp.use(cors(corsOptions));
-
-// Explicitly handle preflight OPTIONS across all routes (fixed path syntax for path-to-regexp v8+)
-expressApp.options('{*path}', cors(corsOptions));
-
-// Global CORS Headers Fallback Middleware (Ensures preflights & errors receive valid headers)
-expressApp.use((req, res, next) => {
-  const origin = req.headers.origin;
-  
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
-
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-  next();
-});
-
-    expressApp.use(express.json({ limit: '50mb' }));
-    expressApp.use(express.urlencoded({ limit: '50mb', extended: true }));
-
-    // Serve static files from public, uploads, and images directories
-    expressApp.use(express.static(path.join(__dirname, 'public')));
-    expressApp.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
-    expressApp.use('/images', express.static(path.join(__dirname, 'public', 'images')));
-
     // Initialize Default System Configuration Entries
     await SystemConfig.findOrCreate({ where: { key: 'transport_fee' }, defaults: { value: 250 } });
     await SystemConfig.findOrCreate({ where: { key: 'black_friday' }, defaults: { value: { active: false, endTime: null } } });
@@ -643,6 +847,7 @@ expressApp.use((req, res, next) => {
       defaults: { value: logisticsHierarchy } 
     });
 
+    // Save full JSON dataset in SystemConfig if available for deep front-end search
     if (rawJsonData) {
       await SystemConfig.findOrCreate({
         where: { key: 'kenya_locations_full' },
@@ -650,7 +855,7 @@ expressApp.use((req, res, next) => {
       });
     }
 
-    // Default Hero Configuration
+    // --- EXPANDED 10-FIELD HERO CONFIGURATION DEFAULT ---
     await SystemConfig.findOrCreate({
       where: { key: 'hero_settings' },
       defaults: {
@@ -796,26 +1001,39 @@ expressApp.use((req, res, next) => {
       }
     });
 
-    // Real-Time Socket.IO Server Setup with CORS alignment
-    const io = new SocketIOServer(server, { 
-      cors: corsOptions
-    });
+    // Real-Time Socket.IO Server Setup (persistent hosts only)
+    if (!IS_VERCEL) {
+      initializeFlashSaleEngine(io);
 
-    initializeFlashSaleEngine(io);
-
-    io.on('connection', (socket) => {
-      if (flashSaleState.active) {
-        socket.emit('blackFridayTick', { active: true, endTime: flashSaleState.endTime });
-      }
-      
-      socket.on('joinAdminChannel', (token) => {
-        jwt.verify(token, JWT_SECRET, async (err, decoded) => {
-          if (!err && decoded && decoded.role === 'admin') {
-            socket.join('admin-dashboard-room');
-            console.log(`DEBUG: Admin connected to real-time broadcast room. User ID: ${decoded.id}`);
-          }
+      io.on('connection', (socket) => {
+        if (flashSaleState.active) {
+          socket.emit('blackFridayTick', { active: true, endTime: flashSaleState.endTime });
+        }
+        
+        socket.on('joinAdminChannel', (token) => {
+          jwt.verify(token, JWT_SECRET, async (err, decoded) => {
+            if (!err && decoded && decoded.role === 'admin') {
+              socket.join('admin-dashboard-room');
+              console.log(`DEBUG: Admin connected to real-time broadcast room. User ID: ${decoded.id}`);
+            }
+          });
         });
       });
+    } else {
+      // Serverless: no timers or sockets. Flash sale state is refreshed from the DB per request.
+      await syncFlashSaleFromDb(true);
+      console.log('ℹ️ Vercel mode: Socket.IO disabled, clients should poll /api/config/flash-sale and order status endpoints.');
+    }
+
+    // Flash sale polling endpoint (used by Vercel deployments in place of WebSocket ticks)
+    expressApp.get('/api/config/flash-sale', async (req, res) => {
+      try {
+        await syncFlashSaleFromDb(true);
+        const msRemaining = flashSaleState.endTime ? Math.max(0, new Date(flashSaleState.endTime).getTime() - Date.now()) : 0;
+        res.json({ active: flashSaleState.active, endTime: flashSaleState.endTime, msRemaining });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
     });
 
     /**
@@ -833,19 +1051,19 @@ expressApp.use((req, res, next) => {
     // --- USER SIGNUP / REGISTER (SUPPORTS DIRECT & OTP VERIFICATION FLOW) ---
     expressApp.post('/api/user/signup', async (req, res) => {
       try {
-        const { phoneNumber, email, password, fullName, requireOtp, sendOtp, otp, code } = req.body || {};
+        const { password, fullName, requireOtp, sendOtp, otp, code } = req.body || {};
+        const { email, phone: phoneNumber } = splitIdentity(req.body);
         const inputOtp = otp || code;
         
         if (!password || !fullName || (!phoneNumber && !email)) {
           return res.status(400).json({ error: 'Full name, password, and at least a phone number or email are required.' });
         }
 
-        const searchCondition = [];
-        if (phoneNumber) searchCondition.push({ phoneNumber });
-        if (email) searchCondition.push({ email });
+        const searchCondition = [...identityConditions(email), ...identityConditions(phoneNumber)];
 
         const existingUser = await User.findOne({ where: { [Op.or]: searchCondition } });
 
+        // If OTP code is submitted alongside signup payload, verify it
         if (inputOtp && existingUser && existingUser.verificationOtp) {
           if (existingUser.verificationOtp !== String(inputOtp).trim() || new Date(existingUser.verificationOtpExpires).getTime() < Date.now()) {
             return res.status(400).json({ error: 'Invalid or expired account verification OTP.' });
@@ -875,12 +1093,14 @@ expressApp.use((req, res, next) => {
           });
         }
 
+        // If user already exists and is fully verified/active
         if (existingUser && existingUser.isVerified !== false && existingUser.password) {
           return res.status(409).json({ error: 'An account with this phone number or email address already exists.' });
         }
 
         const hashedPassword = await bcrypt.hash(password, 12);
 
+        // If explicitly requested to send OTP during signup step
         if (requireOtp || sendOtp) {
           const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
           const tokenExpiration = Date.now() + 10 * 60 * 1000;
@@ -905,21 +1125,22 @@ expressApp.use((req, res, next) => {
             await targetUser.save();
           }
 
-          if (targetUser.email) {
-            await sendOtpEmail(targetUser.email, targetUser.fullName, otpCode, 'signup');
-          }
-          if (targetUser.phoneNumber) {
-            await sendOtpSms(targetUser.phoneNumber, otpCode, 'signup');
+          const delivery = await dispatchOtp(targetUser, otpCode, 'signup');
+          if (!delivery.anySent) {
+            return res.status(502).json({ error: OTP_DELIVERY_FAILED_MESSAGE });
           }
 
           return res.status(200).json({
             requiresOtp: true,
+            smsSent: delivery.smsSent,
+            emailSent: delivery.emailSent,
             message: 'Account creation OTP code has been dispatched to your email/phone.',
             email: targetUser.email,
             phoneNumber: targetUser.phoneNumber
           });
         }
 
+        // Standard direct signup creation (backward compatible)
         let newUser;
         if (existingUser) {
           existingUser.password = hashedPassword;
@@ -954,19 +1175,17 @@ expressApp.use((req, res, next) => {
         res.status(500).json({ error: err.message || 'Internal server signup failure.' }); 
       }
     });
-
     // --- ACCOUNT CREATION OTP REQUEST ENDPOINTS ---
     const handleSignupOtpRequest = async (req, res) => {
       try {
-        const { phoneNumber, email, password, fullName } = req.body || {};
+        const { password, fullName } = req.body || {};
+        const { email, phone: phoneNumber } = splitIdentity(req.body);
         
         if (!fullName || (!phoneNumber && !email)) {
           return res.status(400).json({ error: 'Full name and at least an email or phone number are required.' });
         }
 
-        const searchCondition = [];
-        if (phoneNumber) searchCondition.push({ phoneNumber });
-        if (email) searchCondition.push({ email });
+        const searchCondition = [...identityConditions(email), ...identityConditions(phoneNumber)];
 
         const existingUser = await User.findOne({ where: { [Op.or]: searchCondition } });
 
@@ -975,7 +1194,7 @@ expressApp.use((req, res, next) => {
         }
 
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const tokenExpiration = Date.now() + 10 * 60 * 1000;
+        const tokenExpiration = Date.now() + 10 * 60 * 1000; // 10 mins
         let hashedPassword = existingUser ? existingUser.password : null;
         if (password) {
           hashedPassword = await bcrypt.hash(password, 12);
@@ -1002,16 +1221,15 @@ expressApp.use((req, res, next) => {
           await userRecord.save();
         }
 
-        if (userRecord.email) {
-          await sendOtpEmail(userRecord.email, userRecord.fullName, otpCode, 'signup');
-          console.log(`📧 Account creation OTP sent to ${userRecord.email}`);
-        }
-        if (userRecord.phoneNumber) {
-          await sendOtpSms(userRecord.phoneNumber, otpCode, 'signup');
+        const delivery = await dispatchOtp(userRecord, otpCode, 'signup');
+        if (!delivery.anySent) {
+          return res.status(502).json({ error: OTP_DELIVERY_FAILED_MESSAGE });
         }
 
         res.status(200).json({
           success: true,
+          smsSent: delivery.smsSent,
+          emailSent: delivery.emailSent,
           message: 'Account creation OTP has been sent.',
           email: userRecord.email,
           phoneNumber: userRecord.phoneNumber,
@@ -1040,10 +1258,7 @@ expressApp.use((req, res, next) => {
 
         const user = await User.findOne({
           where: {
-            [Op.or]: [
-              { email: searchIdentifier },
-              { phoneNumber: searchIdentifier }
-            ],
+            [Op.or]: identityConditions(searchIdentifier),
             verificationOtp: inputOtp,
             verificationOtpExpires: { [Op.gt]: Date.now() }
           }
@@ -1096,10 +1311,7 @@ expressApp.use((req, res, next) => {
 
         const user = await User.findOne({
           where: {
-            [Op.or]: [
-              { email: searchIdentifier },
-              { phoneNumber: searchIdentifier }
-            ]
+            [Op.or]: identityConditions(searchIdentifier)
           }
         });
 
@@ -1118,15 +1330,15 @@ expressApp.use((req, res, next) => {
         user.verificationOtpExpires = tokenExpiration;
         await user.save();
 
-        if (user.email) {
-          await sendOtpEmail(user.email, user.fullName, otpCode, 'signup');
-        }
-        if (user.phoneNumber) {
-          await sendOtpSms(user.phoneNumber, otpCode, 'signup');
+        const delivery = await dispatchOtp(user, otpCode, 'signup');
+        if (!delivery.anySent) {
+          return res.status(502).json({ error: OTP_DELIVERY_FAILED_MESSAGE });
         }
 
         res.status(200).json({
           success: true,
+          smsSent: delivery.smsSent,
+          emailSent: delivery.emailSent,
           message: 'A fresh account verification OTP has been sent.'
         });
       } catch (err) {
@@ -1150,10 +1362,7 @@ expressApp.use((req, res, next) => {
 
         const user = await User.findOne({ 
           where: { 
-            [Op.or]: [
-              { phoneNumber: loginIdentifier },
-              { email: loginIdentifier }
-            ]
+            [Op.or]: identityConditions(loginIdentifier)
           } 
         });
 
@@ -1254,7 +1463,7 @@ expressApp.use((req, res, next) => {
       }
     });
 
-    // --- FORGOT PASSWORD ---
+    // --- FORGOT PASSWORD (OTP GENERATION & SMTP/SMS DISPATCH) ---
     const handleForgotPasswordRequest = async (req, res) => {
       try {
         const { email, phoneNumber } = req.body || {};
@@ -1266,10 +1475,7 @@ expressApp.use((req, res, next) => {
 
         const user = await User.findOne({
           where: {
-            [Op.or]: [
-              { email: searchIdentifier },
-              { phoneNumber: searchIdentifier }
-            ]
+            [Op.or]: identityConditions(searchIdentifier)
           }
         });
         
@@ -1280,18 +1486,15 @@ expressApp.use((req, res, next) => {
         }
 
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const tokenExpiration = Date.now() + 10 * 60 * 1000;
+        const tokenExpiration = Date.now() + 10 * 60 * 1000; // 10 minutes validity
 
         user.resetToken = otpCode;
         user.resetTokenExpires = tokenExpiration;
         await user.save();
 
-        if (user.email) {
-          await sendOtpEmail(user.email, user.fullName, otpCode, 'reset');
-          console.log(`📧 Password reset OTP sent to ${user.email} via SMTP.`);
-        }
-        if (user.phoneNumber) {
-          await sendOtpSms(user.phoneNumber, otpCode, 'reset');
+        const delivery = await dispatchOtp(user, otpCode, 'reset');
+        if (!delivery.anySent) {
+          return res.status(502).json({ error: OTP_DELIVERY_FAILED_MESSAGE });
         }
 
         res.status(200).json({ message: 'If an account exists, a password reset OTP code has been dispatched.' });
@@ -1318,10 +1521,7 @@ expressApp.use((req, res, next) => {
 
         const user = await User.findOne({
           where: {
-            [Op.or]: [
-              { email: searchIdentifier },
-              { phoneNumber: searchIdentifier }
-            ],
+            [Op.or]: identityConditions(searchIdentifier),
             resetToken: inputOtp,
             resetTokenExpires: { [Op.gt]: Date.now() }
           }
@@ -1363,10 +1563,7 @@ expressApp.use((req, res, next) => {
 
         const user = await User.findOne({ 
           where: { 
-            [Op.or]: [
-              { email: searchIdentifier },
-              { phoneNumber: searchIdentifier }
-            ],
+            [Op.or]: identityConditions(searchIdentifier),
             resetToken: String(verificationCode).trim(),
             resetTokenExpires: { [Op.gt]: Date.now() } 
           } 
@@ -1514,8 +1711,8 @@ expressApp.use((req, res, next) => {
         }
         if (search) {
           whereCondition[Op.or] = [
-            { brandName: { [Op.like]: `%${search}%` } },
-            { variety: { [Op.like]: `%${search}%` } }
+            { brandName: { [LIKE_OP]: `%${search}%` } },
+            { variety: { [LIKE_OP]: `%${search}%` } }
           ];
         }
 
@@ -1587,6 +1784,7 @@ expressApp.use((req, res, next) => {
       }
     });
 
+    // Dynamic County Shipping Overrides API (Backed by kenya_locations.json)
     expressApp.get('/api/config/counties', async (req, res) => {
       try {
         const config = await SystemConfig.findOne({ where: { key: 'county_overrides' } });
@@ -1596,6 +1794,7 @@ expressApp.use((req, res, next) => {
       }
     });
 
+    // Dynamic Logistics Locations Hierarchy API (Backed by kenya_locations.json)
     expressApp.get('/api/config/locations', async (req, res) => {
       try {
         const config = await SystemConfig.findOne({ where: { key: 'logistics_hierarchy' } });
@@ -1605,6 +1804,7 @@ expressApp.use((req, res, next) => {
       }
     });
 
+    // Full Raw Location Dataset Endpoint for Advanced Frontend Multi-Select UI
     expressApp.get('/api/config/locations-full', async (req, res) => {
       try {
         const config = await SystemConfig.findOne({ where: { key: 'kenya_locations_full' } });
@@ -1732,6 +1932,19 @@ expressApp.use((req, res, next) => {
         
         if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
           return res.status(400).json({ error: 'Shopping cart items cannot be empty.' });
+        }
+
+        // Pre-validate every line BEFORE any stock is deducted, so a failing line cannot leave earlier lines half-processed.
+        for (const preItem of cartItems) {
+          const preId = preItem.productId || preItem.laptopId || preItem.id;
+          const preQty = Number(preItem.quantity);
+          if (!Number.isFinite(preQty) || preQty <= 0) {
+            return res.status(400).json({ error: `Invalid quantity supplied for product ID: ${preId}.` });
+          }
+          const preProduct = await RiceProduct.findByPk(preId);
+          if (!preProduct || preProduct.stockQuantity < preQty) {
+            return res.status(422).json({ error: `Insufficient stock for product ID: ${preId} (${preProduct ? preProduct.brandName : 'Unknown Item'}).` });
+          }
         }
 
         let calculatedSubtotal = 0;
@@ -1992,12 +2205,15 @@ expressApp.use((req, res, next) => {
                 rawCallback: body
               };
 
-              const totalKg = order.totalWeightKg || 0;
-              const points = Number((totalKg * 0.2).toFixed(2));
-              const user = await User.findByPk(order.userId);
-              if (user && points > 0) {
-                user.rewardPoints = Number(((user.rewardPoints || 0) + points).toFixed(2));
-                await user.save();
+              // Credit 0.2 points per kg bought to customer (only once, even if the callback repeats or the status poll already credited it)
+              if (existingPaymentDetails.isPaid !== true) {
+                const totalKg = order.totalWeightKg || 0;
+                const points = Number((totalKg * 0.2).toFixed(2));
+                const user = await User.findByPk(order.userId);
+                if (user && points > 0) {
+                  user.rewardPoints = Number(((user.rewardPoints || 0) + points).toFixed(2));
+                  await user.save();
+                }
               }
 
               console.log(`🎉 Payment VERIFIED for Order #${order.id}. M-Pesa Receipt: ${mpesaReceipt}`);
@@ -2082,6 +2298,7 @@ expressApp.use((req, res, next) => {
           const orderYear = createdAt.getFullYear();
           yearsSet.add(orderYear);
 
+          // RECEIVED MONEY CONDITION: ONLY SUCCEEDED/PAID TRANSACTIONS
           const isPaid = order.paymentDetails && (order.paymentDetails.isPaid === true || order.paymentDetails.paidTag === 'PAID' || order.status === 'paid' || order.status === 'completed' || order.status === 'delivered');
 
           if (isPaid) {
@@ -2246,10 +2463,10 @@ expressApp.use((req, res, next) => {
     });
 
     // --- ADMIN FILE / IMAGE UPLOAD ROUTE ---
-    expressApp.post('/api/admin/upload', authenticateToken, requireAdmin, upload.single('image'), (req, res) => {
+    expressApp.post('/api/admin/upload', authenticateToken, requireAdmin, upload.single('image'), async (req, res) => {
       try {
         if (!req.file) return res.status(400).json({ error: 'No file buffered to stream.' });
-        const fileUrl = `/uploads/${req.file.filename}`;
+        const fileUrl = await persistUploadedFile(req.file);
         res.json({ url: fileUrl, imageUrl: fileUrl });
       } catch (err) { 
         res.status(500).json({ error: err.message }); 
@@ -2259,7 +2476,7 @@ expressApp.use((req, res, next) => {
     // --- PRODUCT MANAGEMENT CONTROLLERS ---
     const addProductHandler = async (req, res) => {
       try {
-        console.log("DEBUG: Raw Product Creation Payload:", req.body); 
+        console.log("DEBUG: Raw Product Creation Payload:", JSON.stringify(req.body || {}).slice(0, 500)); 
         const payload = {
           ...req.body,
           brandName: req.body.brandName || req.body.brand || 'Premium Rice',
@@ -2367,14 +2584,19 @@ expressApp.use((req, res, next) => {
         
         if (search && search.trim() !== '') {
           const searchStr = `%${search.trim()}%`;
+          // Postgres cannot run LIKE against an INTEGER id, so cast it to text first
+          const orderIdSearchClause = sequelize.getDialect() === 'postgres'
+            ? sequelize.where(sequelize.cast(sequelize.col('Order.id'), 'TEXT'), { [LIKE_OP]: searchStr })
+            : { id: { [Op.like]: searchStr } };
+
           whereCondition[Op.or] = [
-            { id: { [Op.like]: searchStr } },
-            { county: { [Op.like]: searchStr } },
-            { town: { [Op.like]: searchStr } },
-            { location: { [Op.like]: searchStr } },
-            { '$User.fullName$': { [Op.like]: searchStr } },
-            { '$User.phoneNumber$': { [Op.like]: searchStr } },
-            { '$User.email$': { [Op.like]: searchStr } }
+            orderIdSearchClause,
+            { county: { [LIKE_OP]: searchStr } },
+            { town: { [LIKE_OP]: searchStr } },
+            { location: { [LIKE_OP]: searchStr } },
+            { '$User.fullName$': { [LIKE_OP]: searchStr } },
+            { '$User.phoneNumber$': { [LIKE_OP]: searchStr } },
+            { '$User.email$': { [LIKE_OP]: searchStr } }
           ];
         }
 
@@ -2458,7 +2680,7 @@ expressApp.use((req, res, next) => {
         let csv = 'Order ID,Customer Name,Phone Number,Email,County,Town,Location,Sublocation,Street Address,Grand Total (KES),Payment Status,M-Pesa Receipt,Delivery Status,Order Date\n';
         
         orders.forEach(o => {
-          const customerName = o.User ? o.User.fullName.replace(/,/g, ' ') : 'N/A';
+          const customerName = o.User ? String(o.User.fullName || 'N/A').replace(/,/g, ' ') : 'N/A';
           const phone = o.User ? o.User.phoneNumber : 'N/A';
           const email = o.User ? o.User.email || 'N/A' : 'N/A';
           const county = (o.county || '').replace(/,/g, ' ');
@@ -2550,16 +2772,100 @@ expressApp.use((req, res, next) => {
       }
     });
 
-    // Start listening on HTTP server
-    server.listen(port, hostname, () => {
-      console.log(`🚀 Mwea Rice Hub Engine listening on http://${hostname}:${port}`);
+    // --- USER CLEARANCE MANAGEMENT ---
+    expressApp.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const systemRegisteredUsers = await User.findAll({ attributes: { exclude: ['password'] } });
+        res.json(systemRegisteredUsers);
+      } catch (err) { 
+        res.status(500).json({ error: err.message }); 
+      }
     });
 
-  } catch (error) {
-    console.error('❌ Failed to launch server engine:', error);
-    process.exit(1);
-  }
+// --- ADMIN: MODIFY USER DETAILS ---
+        expressApp.put('/api/admin/users/:id/modify', authenticateToken, requireAdmin, async (req, res) => {
+          try {
+            const { fullName, role, isActive } = req.body || {};
+            const targetUserRecord = await User.findByPk(req.params.id);
+            if (!targetUserRecord) return res.status(404).json({ error: 'User record not found.' });
+
+            if (fullName !== undefined) targetUserRecord.fullName = fullName;
+            if (role !== undefined) targetUserRecord.role = role;
+            if (isActive !== undefined) targetUserRecord.isActive = isActive;
+
+            await targetUserRecord.save();
+
+            await AdminLog.create({
+              adminId: req.adminUser.id,
+              action: 'MODIFY_USER',
+              targetType: 'user',
+              targetId: targetUserRecord.id,
+              ipAddress: req.ip
+            });
+
+            res.json({ message: 'User record updated successfully.', user: targetUserRecord });
+          } catch (err) {
+            res.status(500).json({ error: err.message });
+          }
+        });
+
+        // --- ADMIN: TOGGLE USER ACCOUNT SUSPENSION ---
+        expressApp.put('/api/admin/users/:id/suspend', authenticateToken, requireAdmin, async (req, res) => {
+          try {
+            const user = await User.findByPk(req.params.id);
+            if (!user) return res.status(404).json({ error: 'User not found.' });
+            
+            user.isActive = !user.isActive;
+            await user.save();
+            
+            await AdminLog.create({
+              adminId: req.adminUser.id,
+              action: user.isActive ? 'ACTIVATE_USER' : 'SUSPEND_USER',
+              targetType: 'user',
+              targetId: user.id,
+              ipAddress: req.ip
+            });
+            
+            res.json({ message: `User account has been ${user.isActive ? 'activated' : 'suspended'}.`, user });
+          } catch (err) {
+            res.status(500).json({ error: err.message });
+          }
+        });
+
+        /**
+         * ==========================================
+         * 8. SYSTEM BOOTSTRAP & PORT LISTENER
+         * ==========================================
+         */
+        // JSON error handler (also catches multer upload errors such as wrong file type / file too large)
+        expressApp.use((err, req, res, next) => {
+          if (res.headersSent) return next(err);
+          console.error('❌ Unhandled request error:', err.message);
+          const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : (err.status || err.statusCode || 400);
+          res.status(status).json({ error: err.message || 'Unexpected server error.' });
+        });
+
+        if (!IS_VERCEL) {
+          console.log(`✅ System Active: Mwea Hub Server fully ready on port ${port}`);
+          console.log(`✅ WebSocket Engine attached and listening for real-time events.`);
+          console.log('====================================================================');
+        } else {
+          console.log('✅ System Active: Mwea Hub API ready on Vercel serverless runtime.');
+          console.log('====================================================================');
+        }
+
+      } catch (dbError) {
+        console.error('❌ Database initialization, migration, or synchronization failed (will retry automatically):', dbError);
+        // Never kill the runtime (that would turn into a 502 + CORS error in the browser):
+        // surface the error so the readiness gate returns a CORS-safe 503 and bootstrap retries.
+        throw dbError;
+      }
 }
 
-// Execute server bootstrapper
-startServer();
+// Execute the async server bootstrap function
+ensureBootstrapped().catch((err) => {
+  console.error('❌ Initial bootstrap failed:', err.message);
+});
+
+// Vercel imports this file and uses the exported Express app as the request handler.
+export default expressApp;
