@@ -309,14 +309,15 @@ const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
       duplicatecheck: 'false'
     });
 
-    const response = await axios.post(
-      process.env.ZETTATEL_API_URL || 'https://portal.zettatel.com/SMSApi/send',
-      payload.toString(),
-      {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        timeout: 15000
-      }
-    );
+    // The send endpoint must be /SMSApi/send. An env URL pointing at the apikey
+    // endpoint only creates API keys (error 251 "ApiKey already exists"), so ignore it.
+    let sendUrl = process.env.ZETTATEL_API_URL || 'https://portal.zettatel.com/SMSApi/send';
+    if (/apikey/i.test(sendUrl)) sendUrl = 'https://portal.zettatel.com/SMSApi/send';
+
+    const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+    if (process.env.ZETTATEL_API_KEY) headers.apikey = process.env.ZETTATEL_API_KEY;
+
+    const response = await axios.post(sendUrl, payload.toString(), { headers, timeout: 15000 });
 
     let data = response.data;
     if (typeof data === 'string') {
@@ -807,6 +808,15 @@ async function startServer() {
         console.log('✅ Synchronized database column: Users.resetToken');
       }
 
+      // Repair columns created with a wrong type (causes WARN_DATA_TRUNCATED on save)
+      for (const col of ['resetTokenExpires', 'verificationOtpExpires']) {
+        const info = userTable[col];
+        if (info && !/DATETIME|TIMESTAMP/i.test(String(info.type))) {
+          await queryInterface.changeColumn(User.getTableName(), col, { type: DataTypes.DATE, allowNull: true });
+          console.log(`✅ Repaired column type: Users.${col} -> DATETIME`);
+        }
+      }
+
       if (!userTable.resetTokenExpires) {
         await queryInterface.addColumn(User.getTableName(), 'resetTokenExpires', {
           type: DataTypes.DATE,
@@ -1120,7 +1130,7 @@ async function startServer() {
         // If explicitly requested to send OTP during signup step
         if (requireOtp || sendOtp) {
           const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-          const tokenExpiration = Date.now() + 10 * 60 * 1000;
+          const tokenExpiration = new Date(Date.now() + 10 * 60 * 1000);
 
           let targetUser = existingUser;
           if (!targetUser) {
@@ -1211,7 +1221,7 @@ async function startServer() {
         }
 
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const tokenExpiration = Date.now() + 10 * 60 * 1000; // 10 mins
+        const tokenExpiration = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
         let hashedPassword = existingUser ? existingUser.password : null;
         if (password) {
           hashedPassword = await bcrypt.hash(password, 12);
@@ -1277,7 +1287,7 @@ async function startServer() {
           where: {
             [Op.or]: identityConditions(searchIdentifier),
             verificationOtp: inputOtp,
-            verificationOtpExpires: { [Op.gt]: Date.now() }
+            verificationOtpExpires: { [Op.gt]: new Date() }
           }
         });
 
@@ -1341,7 +1351,7 @@ async function startServer() {
         }
 
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const tokenExpiration = Date.now() + 10 * 60 * 1000;
+        const tokenExpiration = new Date(Date.now() + 10 * 60 * 1000);
 
         user.verificationOtp = otpCode;
         user.verificationOtpExpires = tokenExpiration;
@@ -1503,7 +1513,7 @@ async function startServer() {
         }
 
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const tokenExpiration = Date.now() + 10 * 60 * 1000; // 10 minutes validity
+        const tokenExpiration = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes validity
 
         user.resetToken = otpCode;
         user.resetTokenExpires = tokenExpiration;
@@ -1540,7 +1550,7 @@ async function startServer() {
           where: {
             [Op.or]: identityConditions(searchIdentifier),
             resetToken: inputOtp,
-            resetTokenExpires: { [Op.gt]: Date.now() }
+            resetTokenExpires: { [Op.gt]: new Date() }
           }
         });
 
@@ -1582,7 +1592,7 @@ async function startServer() {
           where: { 
             [Op.or]: identityConditions(searchIdentifier),
             resetToken: String(verificationCode).trim(),
-            resetTokenExpires: { [Op.gt]: Date.now() } 
+            resetTokenExpires: { [Op.gt]: new Date() } 
           } 
         });
 
