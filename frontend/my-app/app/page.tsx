@@ -1698,6 +1698,8 @@ export default function PremiumRiceStore() {
   const [adminUsers, setAdminUsers] = useState<UserAccount[]>([]);
   const [adminLogs, setAdminLogs] = useState<AuditLog[]>([]);
   const [financialData, setFinancialData] = useState<FinancialAnalyticsResponse | null>(null);
+  const [isFinanceLoading, setIsFinanceLoading] = useState(false);
+  const [isLogsLoading, setIsLogsLoading] = useState(false);
   const [financeYear, setFinanceYear] = useState<number>(new Date().getFullYear());
   const [orderSearchQuery, setOrderSearchQuery] = useState('');
   const [userSearchQuery, setUserSearchQuery] = useState('');
@@ -1898,6 +1900,14 @@ export default function PremiumRiceStore() {
     }
   }, [token, user]);
 
+  // REFRESH LIVE ADMIN DATA WHENEVER THE LOGS / FINANCES TAB IS OPENED
+  useEffect(() => {
+    if (token && user?.role === 'admin') {
+      if (adminTab === 'logs') fetchAdminLogs();
+      if (adminTab === 'finances') fetchFinancialAnalytics(financeYear);
+    }
+  }, [adminTab]);
+
   // REAL-TIME PAYHERO PAYMENT POLLING ENGINE
   useEffect(() => {
     let pollInterval: NodeJS.Timeout | null = null;
@@ -2052,31 +2062,83 @@ export default function PremiumRiceStore() {
 
   const fetchAdminLogs = async () => {
     if (!token) return;
+    setIsLogsLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/admin/logs`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         const data = await res.json();
-        setAdminLogs(data);
+        const list: any[] = Array.isArray(data) ? data : (data.logs || []);
+        setAdminLogs(list.map((l: any) => ({
+          id: l.id,
+          action: String(l.action || 'UNKNOWN'),
+          performedByUserId: l.performedByUserId ?? l.adminId,
+          performedByName: l.performedByName || l.adminName || 'System Auto',
+          performedByEmail: l.performedByEmail,
+          module: l.module || l.targetType || 'system',
+          details: l.details || (l.changes ? (typeof l.changes === 'string' ? l.changes : JSON.stringify(l.changes)) : ''),
+          ipAddress: l.ipAddress,
+          timestamp: l.timestamp || l.createdAt
+        })));
+      } else {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || 'Failed to load audit logs', 'error');
       }
     } catch (err) {
       console.error("Failed to load system audit logs:", err);
+    } finally {
+      setIsLogsLoading(false);
     }
   };
 
   const fetchFinancialAnalytics = async (year: number) => {
     if (!token) return;
+    setIsFinanceLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/admin/analytics/finances?year=${year}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         const data = await res.json();
-        setFinancialData(data);
+        const rawMonths: any[] = data.monthlyBreakdown || data.monthlySalesGrowth || [];
+        const monthlyBreakdown: FinancialMonth[] = rawMonths.map((m: any, i: number) => {
+          const idx = typeof m.monthIndex === 'number' ? m.monthIndex : i;
+          const revenue = Number(m.totalRevenue ?? m.totalReceivedSales ?? 0);
+          const cost = Number(m.totalBuyingCost ?? 0);
+          return {
+            monthIndex: idx,
+            monthName: m.monthName || m.month || MONTH_NAMES_SHORT[idx],
+            year: Number(data.year ?? data.selectedYear ?? year),
+            totalRevenue: revenue,
+            totalBuyingCost: cost,
+            netProfit: Number(m.netProfit ?? m.totalProfit ?? (revenue - cost)),
+            totalKgSold: Number(m.totalKgSold ?? 0),
+            orderCount: Number(m.orderCount ?? m.paidOrderCount ?? 0)
+          };
+        });
+        const sm = data.summary || {};
+        setFinancialData({
+          year: Number(data.year ?? data.selectedYear ?? year),
+          availableYears: Array.isArray(data.availableYears) && data.availableYears.length > 0 ? data.availableYears : [year],
+          monthlyBreakdown,
+          summary: {
+            totalMoneyReceived: Number(sm.totalMoneyReceived ?? 0),
+            totalBuyingCosts: Number(sm.totalBuyingCosts ?? sm.totalBuyingCost ?? 0),
+            totalNetProfit: Number(sm.totalNetProfit ?? 0),
+            totalKgSold: Number(sm.totalKgSold ?? 0),
+            totalOrdersCount: Number(sm.totalOrdersCount ?? monthlyBreakdown.reduce((n, m) => n + m.orderCount, 0)),
+            totalPointsAwarded: Number(sm.totalPointsAwarded ?? 0)
+          }
+        });
+      } else {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || 'Failed to load financial analytics', 'error');
       }
     } catch (err) {
       console.error("Failed to load financial engine analytics:", err);
+    } finally {
+      setIsFinanceLoading(false);
     }
   };
 
@@ -4096,6 +4158,7 @@ export default function PremiumRiceStore() {
                         monthlyData={financialData?.monthlyBreakdown || []}
                         selectedYear={financeYear}
                         availableYears={financialData?.availableYears || [2024, 2025, 2026, 2027]}
+                        isLoading={isFinanceLoading && !financialData}
                         onYearChange={(y) => {
                           setFinanceYear(y);
                           fetchFinancialAnalytics(y);
@@ -4428,7 +4491,15 @@ export default function PremiumRiceStore() {
                       <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
                         <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950">
                           <h4 className="font-extrabold text-sm text-white">System Security Audit Logs ({adminLogs.length})</h4>
-                          <span className="text-xs text-slate-400">Track user actions & administrative modifications</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs text-slate-400 hidden sm:inline">Track user actions & administrative modifications</span>
+                            <button 
+                              onClick={fetchAdminLogs}
+                              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold cursor-pointer flex items-center gap-1.5"
+                            >
+                              <RefreshCw className={`w-3 h-3 ${isLogsLoading ? 'animate-spin' : ''}`} /> Refresh
+                            </button>
+                          </div>
                         </div>
 
                         <div className="overflow-x-auto">
@@ -4443,6 +4514,13 @@ export default function PremiumRiceStore() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800/60 font-medium">
+                              {adminLogs.length === 0 && (
+                                <tr>
+                                  <td colSpan={5} className="p-8 text-center text-slate-500">
+                                    {isLogsLoading ? 'Loading audit logs...' : 'No audit log entries recorded yet.'}
+                                  </td>
+                                </tr>
+                              )}
                               {adminLogs.map(log => {
                                 // Determine badge color based on action type
                                 const isDelete = log.action.toUpperCase().includes('DELETE') || log.action.toUpperCase().includes('REMOVE');
