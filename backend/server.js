@@ -2307,6 +2307,7 @@ async function startServer() {
           totalReceivedSales: 0,
           totalBuyingCost: 0,
           totalProfit: 0,
+          totalKgSold: 0,
           paidOrderCount: 0
         }));
 
@@ -2380,6 +2381,7 @@ async function startServer() {
               monthlyStats[monthIdx].totalReceivedSales += orderMoneyReceived;
               monthlyStats[monthIdx].totalBuyingCost += orderCost;
               monthlyStats[monthIdx].totalProfit += orderProfit;
+              monthlyStats[monthIdx].totalKgSold += orderKg;
               monthlyStats[monthIdx].paidOrderCount += 1;
             }
           }
@@ -2403,7 +2405,13 @@ async function startServer() {
             totalPointsAwarded: Number(totalPointsAwarded.toFixed(2))
           },
           riceCategories: riceCategoryBreakdown,
-          monthlySalesGrowth: monthlyStats
+          monthlySalesGrowth: monthlyStats.map((m) => ({
+            ...m,
+            totalReceivedSales: Number(m.totalReceivedSales.toFixed(2)),
+            totalBuyingCost: Number(m.totalBuyingCost.toFixed(2)),
+            totalProfit: Number(m.totalProfit.toFixed(2)),
+            totalKgSold: Number(m.totalKgSold.toFixed(2))
+          }))
         });
       } catch (err) {
         console.error('DEBUG: Financial Analytics Error:', err);
