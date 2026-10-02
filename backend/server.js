@@ -83,6 +83,428 @@ if (isProduction && !process.env.JWT_SECRET) {
 console.log('====================================================================');
 
 /**
+ * Built-in copy of all 47 counties and their 290 constituencies (IEBC).
+ * Used automatically if kenya_locations.json is missing or unreadable on the host,
+ * so the location hierarchy can never come up empty in production.
+ */
+const KENYA_LOCATIONS_FALLBACK = {
+  "Baringo": [
+    "Baringo Central",
+    "Baringo North",
+    "Baringo South",
+    "Eldama Ravine",
+    "Mogotio",
+    "Tiaty"
+  ],
+  "Bomet": [
+    "Bomet Central",
+    "Bomet East",
+    "Chepalungu",
+    "Konoin",
+    "Sotik"
+  ],
+  "Bungoma": [
+    "Bumula",
+    "Kabuchai",
+    "Kanduyi",
+    "Kimilili",
+    "Mt. Elgon",
+    "Sirisia",
+    "Tongaren",
+    "Webuye East",
+    "Webuye West"
+  ],
+  "Busia": [
+    "Budalangi",
+    "Butula",
+    "Funyula",
+    "Matayos",
+    "Nambale",
+    "Teso North",
+    "Teso South"
+  ],
+  "Elgeyo-Marakwet": [
+    "Keiyo North",
+    "Keiyo South",
+    "Marakwet East",
+    "Marakwet West"
+  ],
+  "Embu": [
+    "Manyatta",
+    "Mbeere North",
+    "Mbeere South",
+    "Runyenjes"
+  ],
+  "Garissa": [
+    "Balambala",
+    "Dadaab",
+    "Fafi",
+    "Garissa Township",
+    "Ijara",
+    "Lagdera"
+  ],
+  "Homa Bay": [
+    "Homa Bay Town",
+    "Kabondo Kasipul",
+    "Karachuonyo",
+    "Kasipul",
+    "Ndhiwa",
+    "Rangwe",
+    "Suba North",
+    "Suba South"
+  ],
+  "Isiolo": [
+    "Isiolo North",
+    "Isiolo South"
+  ],
+  "Kajiado": [
+    "Kajiado Central",
+    "Kajiado East",
+    "Kajiado North",
+    "Kajiado South",
+    "Kajiado West"
+  ],
+  "Kakamega": [
+    "Butere",
+    "Ikolomani",
+    "Khwisero",
+    "Likuyani",
+    "Lugari",
+    "Lurambi",
+    "Malava",
+    "Matungu",
+    "Mumias East",
+    "Mumias West",
+    "Navakholo",
+    "Shinyalu"
+  ],
+  "Kericho": [
+    "Ainamoi",
+    "Belgut",
+    "Bureti",
+    "Kipkelion East",
+    "Kipkelion West",
+    "Sigowet/Soin"
+  ],
+  "Kiambu": [
+    "Gatundu North",
+    "Gatundu South",
+    "Githunguri",
+    "Juja",
+    "Kabete",
+    "Kiambaa",
+    "Kiambu",
+    "Kikuyu",
+    "Lari",
+    "Limuru",
+    "Ruiru",
+    "Thika Town"
+  ],
+  "Kilifi": [
+    "Ganze",
+    "Kaloleni",
+    "Kilifi North",
+    "Kilifi South",
+    "Magarini",
+    "Malindi",
+    "Rabai"
+  ],
+  "Kirinyaga": [
+    "Gichugu",
+    "Kirinyaga Central",
+    "Mwea",
+    "Ndia"
+  ],
+  "Kisii": [
+    "Bobasi",
+    "Bomachoge Borabu",
+    "Bomachoge Chache",
+    "Bonchari",
+    "Kitutu Chache North",
+    "Kitutu Chache South",
+    "Nyaribari Chache",
+    "Nyaribari Masaba",
+    "South Mugirango"
+  ],
+  "Kisumu": [
+    "Kisumu Central",
+    "Kisumu East",
+    "Kisumu West",
+    "Muhoroni",
+    "Nyakach",
+    "Nyando",
+    "Seme"
+  ],
+  "Kitui": [
+    "Kitui Central",
+    "Kitui East",
+    "Kitui Rural",
+    "Kitui South",
+    "Kitui West",
+    "Mwingi Central",
+    "Mwingi North",
+    "Mwingi West"
+  ],
+  "Kwale": [
+    "Kinango",
+    "Lunga Lunga",
+    "Matuga",
+    "Msambweni"
+  ],
+  "Laikipia": [
+    "Laikipia East",
+    "Laikipia North",
+    "Laikipia West"
+  ],
+  "Lamu": [
+    "Lamu East",
+    "Lamu West"
+  ],
+  "Machakos": [
+    "Kangundo",
+    "Kathiani",
+    "Machakos Town",
+    "Masinga",
+    "Matungulu",
+    "Mavoko",
+    "Mwala",
+    "Yatta"
+  ],
+  "Makueni": [
+    "Kaiti",
+    "Kibwezi East",
+    "Kibwezi West",
+    "Kilome",
+    "Makueni",
+    "Mbooni"
+  ],
+  "Mandera": [
+    "Banissa",
+    "Lafey",
+    "Mandera East",
+    "Mandera North",
+    "Mandera South",
+    "Mandera West"
+  ],
+  "Marsabit": [
+    "Laisamis",
+    "Moyale",
+    "North Horr",
+    "Saku"
+  ],
+  "Meru": [
+    "Buuri",
+    "Central Imenti",
+    "Igembe Central",
+    "Igembe North",
+    "Igembe South",
+    "North Imenti",
+    "South Imenti",
+    "Tigania East",
+    "Tigania West"
+  ],
+  "Migori": [
+    "Awendo",
+    "Kuria East",
+    "Kuria West",
+    "Nyatike",
+    "Rongo",
+    "Suna East",
+    "Suna West",
+    "Uriri"
+  ],
+  "Mombasa": [
+    "Changamwe",
+    "Jomvu",
+    "Kisauni",
+    "Likoni",
+    "Mvita",
+    "Nyali"
+  ],
+  "Murang'a": [
+    "Gatanga",
+    "Kandara",
+    "Kangema",
+    "Kigumo",
+    "Kiharu",
+    "Maragwa",
+    "Mathioya"
+  ],
+  "Nairobi": [
+    "Dagoretti North",
+    "Dagoretti South",
+    "Embakasi Central",
+    "Embakasi East",
+    "Embakasi North",
+    "Embakasi South",
+    "Embakasi West",
+    "Kamukunji",
+    "Kasarani",
+    "Kibra",
+    "Langata",
+    "Makadara",
+    "Mathare",
+    "Roysambu",
+    "Ruaraka",
+    "Starehe",
+    "Westlands"
+  ],
+  "Nakuru": [
+    "Bahati",
+    "Gilgil",
+    "Kuresoi North",
+    "Kuresoi South",
+    "Molo",
+    "Naivasha",
+    "Nakuru Town East",
+    "Nakuru Town West",
+    "Njoro",
+    "Rongai",
+    "Subukia"
+  ],
+  "Nandi": [
+    "Aldai",
+    "Chesumei",
+    "Emgwen",
+    "Mosop",
+    "Nandi Hills",
+    "Tinderet"
+  ],
+  "Narok": [
+    "Emurua Dikirr",
+    "Kilgoris",
+    "Narok East",
+    "Narok North",
+    "Narok South",
+    "Narok West"
+  ],
+  "Nyamira": [
+    "Borabu",
+    "Kitutu Masaba",
+    "North Mugirango",
+    "West Mugirango"
+  ],
+  "Nyandarua": [
+    "Kinangop",
+    "Kipipiri",
+    "Ndaragwa",
+    "Ol Jorok",
+    "Ol Kalou"
+  ],
+  "Nyeri": [
+    "Kieni",
+    "Mathira",
+    "Mukurweini",
+    "Nyeri Town",
+    "Othaya",
+    "Tetu"
+  ],
+  "Samburu": [
+    "Samburu East",
+    "Samburu North",
+    "Samburu West"
+  ],
+  "Siaya": [
+    "Alego Usonga",
+    "Bondo",
+    "Gem",
+    "Rarieda",
+    "Ugenya",
+    "Ugunja"
+  ],
+  "Taita Taveta": [
+    "Mwatate",
+    "Taveta",
+    "Voi",
+    "Wundanyi"
+  ],
+  "Tana River": [
+    "Bura",
+    "Galole",
+    "Garsen"
+  ],
+  "Tharaka-Nithi": [
+    "Chuka/Igambang'ombe",
+    "Maara",
+    "Tharaka"
+  ],
+  "Trans Nzoia": [
+    "Cherangany",
+    "Endebess",
+    "Kiminini",
+    "Kwanza",
+    "Saboti"
+  ],
+  "Turkana": [
+    "Loima",
+    "Turkana Central",
+    "Turkana East",
+    "Turkana North",
+    "Turkana South",
+    "Turkana West"
+  ],
+  "Uasin Gishu": [
+    "Ainabkoi",
+    "Kapseret",
+    "Kesses",
+    "Moiben",
+    "Soy",
+    "Turbo"
+  ],
+  "Vihiga": [
+    "Emuhaya",
+    "Hamisi",
+    "Luanda",
+    "Sabatia",
+    "Vihiga"
+  ],
+  "Wajir": [
+    "Eldas",
+    "Tarbaj",
+    "Wajir East",
+    "Wajir North",
+    "Wajir South",
+    "Wajir West"
+  ],
+  "West Pokot": [
+    "Kacheliba",
+    "Kapenguria",
+    "Pokot South",
+    "Sigor"
+  ]
+};
+
+/** Default regional transport charge per county (admins can edit these in the database). */
+const defaultCountyFees = (tree) => {
+  const fees = {};
+  Object.keys(tree).forEach((countyName) => {
+    const lowerName = countyName.toLowerCase();
+    if (lowerName.includes('nairobi') || lowerName.includes('kirinyaga') || lowerName.includes('kiambu')) {
+      fees[countyName] = 200;
+    } else if (lowerName.includes('mombasa') || lowerName.includes('kwale') || lowerName.includes('kilifi')) {
+      fees[countyName] = 500;
+    } else if (lowerName.includes('mandera') || lowerName.includes('wajir') || lowerName.includes('turkana')) {
+      fees[countyName] = 800;
+    } else {
+      fees[countyName] = 350;
+    }
+  });
+  return fees;
+};
+
+/**
+ * Matches a customer-typed place name to the official spelling, ignoring case, spaces,
+ * hyphens, apostrophes and a trailing "County" ("murang a county" -> "Murang'a").
+ * Returns the canonical name from `candidates`, or null when nothing matches.
+ */
+const resolveLocationName = (input, candidates) => {
+  const norm = (v) => String(v || '').toLowerCase().replace(/\bcounty\b/g, '').replace(/[^a-z0-9]/g, '');
+  const wanted = norm(input);
+  if (!wanted || !Array.isArray(candidates)) return null;
+  return candidates.find((c) => norm(c) === wanted) || null;
+};
+
+/**
  * ==========================================
  * DYNAMIC KENYA LOCATIONS LOADER UTILITY
  * ==========================================
@@ -121,19 +543,7 @@ function loadKenyaLocationsDataset() {
         } else {
           // Build hierarchy and county fee map dynamically from top-level keys
           logisticsHierarchy = rawJsonData;
-          Object.keys(rawJsonData).forEach((countyName) => {
-            // Assign default regional transport charges based on common geographical zones
-            const lowerName = countyName.toLowerCase();
-            if (lowerName.includes('nairobi') || lowerName.includes('kirinyaga') || lowerName.includes('kiambu')) {
-              countyOverrides[countyName] = 200;
-            } else if (lowerName.includes('mombasa') || lowerName.includes('kwale') || lowerName.includes('kilifi')) {
-              countyOverrides[countyName] = 500;
-            } else if (lowerName.includes('mandera') || lowerName.includes('wajir') || lowerName.includes('turkana')) {
-              countyOverrides[countyName] = 800;
-            } else {
-              countyOverrides[countyName] = 350;
-            }
-          });
+          countyOverrides = defaultCountyFees(rawJsonData);
         }
         console.log(`✅ Successfully loaded location dataset. Total Counties Identified: ${Object.keys(countyOverrides).length}`);
       }
@@ -142,6 +552,13 @@ function loadKenyaLocationsDataset() {
     }
   } else {
     console.warn('⚠️ WARNING: kenya_locations.json was not found on disk. Initializing basic empty location structures.');
+  }
+
+  if (!Object.keys(countyOverrides).length) {
+    console.warn('⚠️ Using the built-in Kenya locations dataset (47 counties, 290 constituencies).');
+    rawJsonData = KENYA_LOCATIONS_FALLBACK;
+    logisticsHierarchy = KENYA_LOCATIONS_FALLBACK;
+    countyOverrides = defaultCountyFees(KENYA_LOCATIONS_FALLBACK);
   }
 
   return { countyOverrides, logisticsHierarchy, rawJsonData };
@@ -860,22 +1277,48 @@ async function startServer() {
     // =========================================================================
     const { countyOverrides, logisticsHierarchy, rawJsonData } = loadKenyaLocationsDataset();
 
-    await SystemConfig.findOrCreate({ 
-      where: { key: 'county_overrides' }, 
-      defaults: { value: countyOverrides } 
-    });
+    // County shipping fees: keep any fees an admin already edited, but add every
+    // county from the dataset that is missing from the database.
+    {
+      const [overridesRow, overridesCreated] = await SystemConfig.findOrCreate({
+        where: { key: 'county_overrides' },
+        defaults: { value: countyOverrides }
+      });
+      if (!overridesCreated && countyOverrides && Object.keys(countyOverrides).length) {
+        const merged = { ...countyOverrides, ...(overridesRow.value || {}) };
+        if (Object.keys(merged).length !== Object.keys(overridesRow.value || {}).length) {
+          overridesRow.value = merged;
+          overridesRow.changed('value', true);
+          await overridesRow.save();
+          console.log('✅ County shipping fees synced with kenya_locations.json (new counties added).');
+        }
+      }
+    }
 
-    await SystemConfig.findOrCreate({ 
-      where: { key: 'logistics_hierarchy' }, 
-      defaults: { value: logisticsHierarchy } 
-    });
+    // The location hierarchy comes straight from kenya_locations.json, so refresh it
+    // on every boot. (findOrCreate left the first-ever copy in the DB forever.)
+    if (logisticsHierarchy && Object.keys(logisticsHierarchy).length) {
+      const [hierarchyRow, hierarchyCreated] = await SystemConfig.findOrCreate({
+        where: { key: 'logistics_hierarchy' },
+        defaults: { value: logisticsHierarchy }
+      });
+      if (!hierarchyCreated) {
+        hierarchyRow.value = logisticsHierarchy;
+        hierarchyRow.changed('value', true);
+        await hierarchyRow.save();
+      }
+    }
 
-    // Save full JSON dataset in SystemConfig if available for deep front-end search
     if (rawJsonData) {
-      await SystemConfig.findOrCreate({
+      const [fullRow, fullCreated] = await SystemConfig.findOrCreate({
         where: { key: 'kenya_locations_full' },
         defaults: { value: rawJsonData }
       });
+      if (!fullCreated) {
+        fullRow.value = rawJsonData;
+        fullRow.changed('value', true);
+        await fullRow.save();
+      }
     }
 
     // --- EXPANDED 10-FIELD HERO CONFIGURATION DEFAULT ---
@@ -1939,7 +2382,7 @@ async function startServer() {
     // --- CREATE ORDER, CALCULATE WEIGHT/POINTS & TRIGGER PAYHERO STK PUSH ---
     expressApp.post('/api/orders/create', authenticateToken, async (req, res) => {
       try {
-        const { 
+        let { 
           cartItems, 
           paymentMethod, 
           mpesaPhoneNumber,
@@ -1968,6 +2411,21 @@ async function startServer() {
           if (!preProduct || preProduct.stockQuantity < preQty) {
             return res.status(422).json({ error: `Insufficient stock for product ID: ${preId} (${preProduct ? preProduct.brandName : 'Unknown Item'}).` });
           }
+        }
+
+        // Resolve the delivery county/constituency against the official dataset BEFORE any stock is deducted.
+        let activeCountyMap = countyOverrides;
+        if (county) {
+          const countyConfig = await SystemConfig.findOne({ where: { key: 'county_overrides' } });
+          if (countyConfig && countyConfig.value) activeCountyMap = { ...countyOverrides, ...countyConfig.value };
+          const canonicalCounty = resolveLocationName(county, Object.keys(activeCountyMap || {}));
+          if (!canonicalCounty) {
+            return res.status(400).json({ error: `Unknown county "${county}". Please select a valid Kenyan county.` });
+          }
+          county = canonicalCounty;
+          const countyAreas = Array.isArray(logisticsHierarchy && logisticsHierarchy[canonicalCounty]) ? logisticsHierarchy[canonicalCounty] : [];
+          const canonicalTown = town ? resolveLocationName(town, countyAreas) : null;
+          if (canonicalTown) town = canonicalTown;
         }
 
         let calculatedSubtotal = 0;
@@ -2018,12 +2476,8 @@ async function startServer() {
         }
 
         let activeTransportCharge = shippingFee !== undefined ? Number(shippingFee) : 250;
-        if (county) {
-          const countyConfig = await SystemConfig.findOne({ where: { key: 'county_overrides' } });
-          const activeMap = countyConfig && countyConfig.value ? countyConfig.value : countyOverrides;
-          if (activeMap && activeMap[county] !== undefined) {
-            activeTransportCharge = Number(activeMap[county]);
-          }
+        if (county && activeCountyMap && activeCountyMap[county] !== undefined) {
+          activeTransportCharge = Number(activeCountyMap[county]);
         }
 
         const fullDeliveryAddress = {
