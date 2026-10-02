@@ -301,8 +301,7 @@ const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
 
     // Ping Africa uses Bearer-token auth with a JSON body.
     const payload = {
-      phone: formattedPhone,
-      to: formattedPhone,
+      recipient: formattedPhone,
       message,
     };
     if (process.env.PING_AFRICA_SENDER_ID) payload.sender_id = process.env.PING_AFRICA_SENDER_ID;
