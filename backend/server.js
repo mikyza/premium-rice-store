@@ -272,8 +272,9 @@ const identityConditions = (identifier) => {
 };
 
 /**
- * Helper function to send SMS OTP via the Zettatel gateway.
- * Returns true ONLY when the gateway confirms acceptance (Zettatel answers HTTP 200 even on errors).
+ * Helper function to send SMS OTP via the Ping Africa gateway.
+ * Returns true ONLY when the gateway confirms acceptance (HTTP 2xx and no error flag in the body).
+ * Required env: PING_AFRICA_API_TOKEN. Optional: PING_AFRICA_API_URL, PING_AFRICA_SENDER_ID.
  * @param {string} phoneNumber 
  * @param {string} otpCode 
  * @param {string} type - 'reset' | 'signup'
@@ -285,8 +286,8 @@ const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
       console.warn(`⚠️ [SMS] Skipped: "${phoneNumber}" is not a valid Kenyan mobile number.`);
       return false;
     }
-    if (!process.env.ZETTATEL_USER || !process.env.ZETTATEL_PASSWORD) {
-      console.error('❌ [SMS] ZETTATEL_USER / ZETTATEL_PASSWORD are not set in the environment variables.');
+    if (!process.env.PING_AFRICA_API_TOKEN) {
+      console.error('❌ [SMS] PING_AFRICA_API_TOKEN is not set in the environment variables.');
       return false;
     }
 
@@ -295,46 +296,42 @@ const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
       : `Your Mwea Rice Hub password reset OTP is ${otpCode}. Valid for 10 mins.`;
 
     console.log(`📱 [SMS DISPATCH] Triggering SMS to ${formattedPhone} (type: ${type})`);
-    
-    // Zettatel Gateway requires URL Encoded Form Data, not JSON.
-    const payload = new URLSearchParams({
-      userid: process.env.ZETTATEL_USER,
-      password: process.env.ZETTATEL_PASSWORD,
-      senderid: process.env.ZETTATEL_SENDER_ID || 'INFO',
-      msg: message,
-      mobile: formattedPhone,
-      sendMethod: 'quick',
-      msgType: 'text',
-      output: 'json',
-      duplicatecheck: 'false'
+
+    const sendUrl = process.env.PING_AFRICA_API_URL || 'https://bulk.ping.africa/api/v1/sms/send';
+
+    // Ping Africa uses Bearer-token auth with a JSON body.
+    const payload = {
+      phone: formattedPhone,
+      to: formattedPhone,
+      message,
+    };
+    if (process.env.PING_AFRICA_SENDER_ID) payload.sender_id = process.env.PING_AFRICA_SENDER_ID;
+
+    const response = await axios.post(sendUrl, payload, {
+      headers: {
+        Authorization: `Bearer ${process.env.PING_AFRICA_API_TOKEN}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json'
+      },
+      timeout: 15000
     });
-
-    // The send endpoint must be /SMSApi/send. An env URL pointing at the apikey
-    // endpoint only creates API keys (error 251 "ApiKey already exists"), so ignore it.
-    let sendUrl = process.env.ZETTATEL_API_URL || 'https://portal.zettatel.com/SMSApi/send';
-    if (/apikey/i.test(sendUrl)) sendUrl = 'https://portal.zettatel.com/SMSApi/send';
-
-    const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
-    if (process.env.ZETTATEL_API_KEY) headers.apikey = process.env.ZETTATEL_API_KEY;
-
-    const response = await axios.post(sendUrl, payload.toString(), { headers, timeout: 15000 });
 
     let data = response.data;
     if (typeof data === 'string') {
       try { data = JSON.parse(data); } catch (_) { /* plain-text reply */ }
     }
-    console.log('📨 [ZETTATEL RESPONSE]:', typeof data === 'string' ? data : JSON.stringify(data));
+    console.log('📨 [PING AFRICA RESPONSE]:', typeof data === 'string' ? data : JSON.stringify(data));
 
-    const status = String((data && data.status) || '').toLowerCase();
-    if (status) {
-      if (status !== 'success') {
-        console.error(`❌ [SMS] Zettatel rejected the message: ${(data && (data.reason || data.message)) || status}`);
+    if (data && typeof data === 'object') {
+      const status = String(data.status || '').toLowerCase();
+      if (data.success === false || data.error || ['error', 'failed', 'fail', 'rejected'].includes(status)) {
+        console.error(`❌ [SMS] Ping Africa rejected the message: ${data.message || data.error || status}`);
         return false;
       }
       return true;
     }
-    if (typeof data === 'string' && /(error|fail|invalid|denied|insufficient)/i.test(data)) {
-      console.error('❌ [SMS] Zettatel returned an error response.');
+    if (typeof data === 'string' && /(error|fail|invalid|denied|insufficient|unauthori)/i.test(data)) {
+      console.error('❌ [SMS] Ping Africa returned an error response.');
       return false;
     }
     return true;
