@@ -1720,20 +1720,24 @@ async function startServer() {
         const searchIdentifier = idEmail || idPhone || body.email || body.phoneNumber;
 
         if (!searchIdentifier || !inputOtp) {
+          console.warn(`⚠️ [VERIFY OTP] 400 missing field. Received keys: ${Object.keys(body).join(', ') || '(none)'}; identity found: ${!!searchIdentifier}; code found: ${!!inputOtp}`);
           return res.status(400).json({ error: 'Email or phone number and OTP verification code are required.' });
         }
 
-        const user = await User.findOne({
-          where: {
-            [Op.or]: identityConditions(searchIdentifier),
-            verificationOtp: inputOtp,
-            verificationOtpExpires: { [Op.gt]: new Date() }
-          }
-        });
-
-        if (!user) {
-          return res.status(400).json({ error: 'Invalid or expired account verification OTP code.' });
+        const candidate = await User.findOne({ where: { [Op.or]: identityConditions(searchIdentifier) } });
+        if (!candidate) {
+          console.warn(`⚠️ [VERIFY OTP] 400 no account matches "${searchIdentifier}".`);
+          return res.status(400).json({ error: 'No pending signup found for this phone number or email. Please register again.' });
         }
+        if (!candidate.verificationOtp || String(candidate.verificationOtp).trim() !== inputOtp) {
+          console.warn(`⚠️ [VERIFY OTP] 400 code mismatch for user ${candidate.id} (a newer code may have been sent).`);
+          return res.status(400).json({ error: 'Incorrect verification code. Use the code from the most recent SMS.' });
+        }
+        if (!candidate.verificationOtpExpires || new Date(candidate.verificationOtpExpires).getTime() <= Date.now()) {
+          console.warn(`⚠️ [VERIFY OTP] 400 code expired for user ${candidate.id}.`);
+          return res.status(400).json({ error: 'This verification code has expired. Please request a new one.' });
+        }
+        const user = candidate;
 
         user.isVerified = true;
         user.isActive = true;
@@ -3316,7 +3320,7 @@ async function startServer() {
             if (!user) return res.status(404).json({ error: 'User record not found.' });
             res.json(user);
           } catch (err) {
-            res.status(500).json({ error: err.message });
+            console.error('❌ Admin route error:', err); res.status(500).json({ error: err.message });
           }
         });
 
@@ -3336,7 +3340,7 @@ async function startServer() {
             delete safe.password;
             res.json({ message: 'User record updated successfully.', user: safe });
           } catch (err) {
-            res.status(500).json({ error: err.message });
+            console.error('❌ Admin route error:', err); res.status(500).json({ error: err.message });
           }
         };
         expressApp.put('/api/admin/users/:id', authenticateToken, requireAdmin, adminEditUserHandler);
@@ -3349,11 +3353,18 @@ async function startServer() {
             if (String(user.id) === String(req.adminUser.id)) {
               return res.status(400).json({ error: 'You cannot delete your own admin account.' });
             }
-            await user.destroy();
+            try {
+              await user.destroy();
+            } catch (delErr) {
+              if (delErr.name === 'SequelizeForeignKeyConstraintError') {
+                return res.status(409).json({ error: 'This user has orders or other records and cannot be deleted. Suspend the account instead.' });
+              }
+              throw delErr;
+            }
             await safeAdminLog({ adminId: req.adminUser.id, action: 'DELETE_USER', targetType: 'user', targetId: req.params.id, ipAddress: req.ip });
             res.json({ message: 'User deleted successfully.' });
           } catch (err) {
-            res.status(500).json({ error: err.message });
+            console.error('❌ Admin route error:', err); res.status(500).json({ error: err.message });
           }
         });
 
@@ -3365,7 +3376,7 @@ async function startServer() {
             const msRemaining = flashSaleState.endTime ? Math.max(0, new Date(flashSaleState.endTime).getTime() - Date.now()) : 0;
             res.json({ ...(config && config.value ? config.value : {}), active: flashSaleState.active, endTime: flashSaleState.endTime, msRemaining });
           } catch (err) {
-            res.status(500).json({ error: err.message });
+            console.error('❌ Admin route error:', err); res.status(500).json({ error: err.message });
           }
         });
 
@@ -3410,7 +3421,7 @@ async function startServer() {
             await safeAdminLog({ adminId: req.adminUser.id, action: wantsStop ? 'STOP_FLASH_SALE' : 'START_FLASH_SALE', targetType: 'config', targetId: null, ipAddress: req.ip });
             res.json({ message: wantsStop ? 'Flash sale stopped.' : 'Flash sale started.', active: flashSaleState.active, endTime: flashSaleState.endTime });
           } catch (err) {
-            res.status(500).json({ error: err.message });
+            console.error('❌ Admin route error:', err); res.status(500).json({ error: err.message });
           }
         };
         expressApp.post('/api/admin/config/black-friday', authenticateToken, requireAdmin, adminSetBlackFridayHandler);
