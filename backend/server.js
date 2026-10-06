@@ -2508,7 +2508,7 @@ async function startServer() {
           details: shippingAddress || `${streetAddress || ''}, ${sublocation || ''}, ${location || ''}, ${town || ''}, ${county || ''}`
         };
 
-        const finalOrderTotal = Number(grandTotal || (calculatedSubtotal + activeTransportCharge));
+        const finalOrderTotal = Number((calculatedSubtotal + activeTransportCharge).toFixed(2)); // always computed server-side
         const earnedPoints = Number((totalWeightKg * 0.2).toFixed(2));
 
         const generatedOrder = await Order.create({
@@ -3429,6 +3429,7 @@ async function startServer() {
               flashSaleState.active = true;
               flashSaleState.endTime = endTime.toISOString();
               startFlashSaleCountdown(io);
+              io.emit('blackFridayStarted', { active: true, endTime: flashSaleState.endTime });
               io.emit('blackFridayTick', { active: true, endTime: flashSaleState.endTime, msRemaining: endTime.getTime() - Date.now() });
             }
 
@@ -3444,6 +3445,63 @@ async function startServer() {
           req.body = { active: false };
           return adminSetBlackFridayHandler(req, res);
         });
+
+        // --- ADMIN: COUNTY FREIGHT FEE ---
+        expressApp.post('/api/admin/config/counties', authenticateToken, requireAdmin, async (req, res) => {
+          try {
+            const { county, fee } = req.body || {};
+            const [row] = await SystemConfig.findOrCreate({ where: { key: 'county_overrides' }, defaults: { value: countyOverrides } });
+            const current = { ...countyOverrides, ...(row.value || {}) };
+
+            const canonical = resolveLocationName(county, Object.keys(current));
+            if (!canonical) return res.status(400).json({ error: `Unknown county "${county}".` });
+            const numericFee = Number(fee);
+            if (!Number.isFinite(numericFee) || numericFee < 0 || numericFee > 100000) {
+              return res.status(400).json({ error: 'Freight fee must be a number between 0 and 100,000.' });
+            }
+
+            current[canonical] = Math.round(numericFee);
+            row.value = current;
+            row.changed('value', true);
+            await row.save();
+
+            await safeAdminLog({ adminId: req.adminUser.id, action: 'UPDATE_COUNTY_FEE', targetType: 'config', targetId: null, ipAddress: req.ip });
+            io.emit('countyFeesUpdated', current);
+            res.json({ message: `Freight fee for ${canonical} set to KES ${current[canonical]}.`, county: canonical, fee: current[canonical], overrides: current });
+          } catch (err) {
+            console.error('❌ County fee update error:', err);
+            res.status(500).json({ error: err.message });
+          }
+        });
+
+        // --- ADMIN: HERO BACKDROP SETTINGS ---
+        const adminSaveHeroHandler = async (req, res) => {
+          try {
+            const incoming = req.body;
+            if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+              return res.status(400).json({ error: 'Hero settings must be a JSON object.' });
+            }
+            const clean = {};
+            Object.keys(incoming).forEach((k) => {
+              const v = incoming[k];
+              if (['string', 'number', 'boolean'].includes(typeof v) || v === null) clean[k] = typeof v === 'string' ? v.trim().slice(0, 2000) : v;
+            });
+
+            const [row] = await SystemConfig.findOrCreate({ where: { key: 'hero_settings' }, defaults: { value: clean } });
+            row.value = { ...(row.value || {}), ...clean };
+            row.changed('value', true);
+            await row.save();
+
+            await safeAdminLog({ adminId: req.adminUser.id, action: 'UPDATE_HERO_SETTINGS', targetType: 'config', targetId: null, ipAddress: req.ip });
+            io.emit('heroUpdated', row.value);
+            res.json({ message: 'Hero settings saved.', hero: row.value });
+          } catch (err) {
+            console.error('❌ Hero settings update error:', err);
+            res.status(500).json({ error: err.message });
+          }
+        };
+        expressApp.post('/api/admin/config/hero', authenticateToken, requireAdmin, adminSaveHeroHandler);
+        expressApp.put('/api/admin/config/hero', authenticateToken, requireAdmin, adminSaveHeroHandler);
 
         // --- ADMIN: MODIFY USER DETAILS ---
         expressApp.put('/api/admin/users/:id/modify', authenticateToken, requireAdmin, async (req, res) => {
@@ -3478,7 +3536,8 @@ async function startServer() {
             const user = await User.findByPk(req.params.id);
             if (!user) return res.status(404).json({ error: 'User not found.' });
             
-            user.isActive = !user.isActive;
+            const wantSuspended = req.body && typeof req.body.isSuspended === 'boolean' ? req.body.isSuspended : user.isActive;
+            user.isActive = !wantSuspended;
             await user.save();
             
             await AdminLog.create({
