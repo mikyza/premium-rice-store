@@ -174,6 +174,31 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
 const SOCKET_URL = process.env.NEXT_PUBLIC_API_URL 
   || 'https://premium-rice-store-7.onrender.com';
 
+/** Turns 0712345678 / +254712345678 / 712345678 into 254712345678, or null when it is not a Kenyan mobile number. */
+export const normalizeKenyanPhone = (raw: string | null | undefined): string | null => {
+  const str = String(raw ?? '').trim();
+  if (!str || str.includes('@')) return null;
+  let digits = str.replace(/\D/g, '');
+  if (digits.startsWith('2540') && digits.length === 13) digits = `254${digits.slice(4)}`;
+  if (digits.startsWith('254') && digits.length === 12) return digits;
+  if (digits.startsWith('0') && digits.length === 10) return `254${digits.slice(1)}`;
+  if ((digits.startsWith('7') || digits.startsWith('1')) && digits.length === 9) return `254${digits}`;
+  return null;
+};
+
+/** Compares place names ignoring case, spaces, hyphens, apostrophes and a trailing "County" (Taita-Taveta == Taita Taveta). */
+export const normPlaceName = (v: string | null | undefined): string =>
+  String(v ?? '').toLowerCase().replace(/\bcounty\b/g, '').replace(/[^a-z0-9]/g, '');
+
+/** Looks up a county's freight fee whatever spelling the county is stored under. */
+export const getCountyFee = (overrides: { [key: string]: number }, county: string): number | undefined => {
+  if (!overrides) return undefined;
+  if (overrides[county] !== undefined) return Number(overrides[county]);
+  const wanted = normPlaceName(county);
+  const key = Object.keys(overrides).find(k => normPlaceName(k) === wanted);
+  return key !== undefined ? Number(overrides[key]) : undefined;
+};
+
 export interface LogisticsData {
   towns: string[];
   locations: string[];
@@ -1641,6 +1666,7 @@ export default function PremiumRiceStore() {
   const [flashSale, setFlashSale] = useState({ active: false, endTime: null as string | null, msRemaining: 0 });
   const [baseTransportFee, setBaseTransportFee] = useState(250);
   const [countyOverrides, setCountyOverrides] = useState<{ [key: string]: number }>({});
+  const [serverLocations, setServerLocations] = useState<{ [county: string]: string[] }>({});
   const [socket, setSocket] = useState<Socket | null>(null);
 
   // REAL-TIME PAYHERO PAYMENT STATUS MODAL STATE
@@ -1724,6 +1750,27 @@ export default function PremiumRiceStore() {
     }, 4500);
   };
 
+  // Town list for a county = built-in towns + every official constituency served by the backend (no duplicates)
+  const getTownOptions = (county: string): string[] => {
+    const base = (REGIONAL_LOGISTICS_DATA[county as keyof typeof REGIONAL_LOGISTICS_DATA] || DEFAULT_REGIONAL_LOGISTICS).towns;
+    const key = Object.keys(serverLocations).find(k => normPlaceName(k) === normPlaceName(county));
+    const extra = key && Array.isArray(serverLocations[key]) ? serverLocations[key] : [];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    [...base, ...extra].forEach(t => {
+      const n = normPlaceName(t);
+      if (n && !seen.has(n)) { seen.add(n); out.push(t); }
+    });
+    return out;
+  };
+
+  // Shows the server's error message for a failed admin/API call
+  const showApiError = async (res: Response, fallback: string) => {
+    const d = await res.json().catch(() => ({}));
+    showToast(d.error || `${fallback} (${res.status})`, 'error');
+    if (res.status === 401) handleSessionExpired();
+  };
+
   const getAccountCartKey = (u: UserAccount | null) => {
     return u ? `mwea_hub_cart_${u.id || u.phoneNumber}` : 'mwea_hub_cart_guest';
   };
@@ -1783,7 +1830,7 @@ export default function PremiumRiceStore() {
     const currentData = REGIONAL_LOGISTICS_DATA[checkoutData.county as keyof typeof REGIONAL_LOGISTICS_DATA] || DEFAULT_REGIONAL_LOGISTICS;
     setCheckoutData(prev => ({
       ...prev,
-      town: currentData.towns[0] || 'Central Town',
+      town: getTownOptions(checkoutData.county)[0] || currentData.towns[0] || 'Central Town',
       location: currentData.locations[0] || 'Main Location',
       sublocation: currentData.sublocations[0] || 'Sub-location',
       shippingAddress: currentData.streets[0] || 'Main Street'
@@ -1813,6 +1860,8 @@ export default function PremiumRiceStore() {
     fetchCarousel();
     fetchHero();
     fetchCountiesConfig();
+    fetchLocations();
+    fetchFlashSale();
 
     let newSocket: Socket | null = null;
     try {
@@ -1835,6 +1884,12 @@ export default function PremiumRiceStore() {
 
       newSocket.on('stockUpdated', (data: any) => {
         setProducts(prev => prev.map(p => p.id === data.productId ? { ...p, stockQuantity: data.newStockQuantity } : p));
+      });
+
+      newSocket.on('connect', () => { fetchFlashSale(); });
+
+      newSocket.on('countyFeesUpdated', (fees: any) => {
+        if (fees && typeof fees === 'object') setCountyOverrides(fees);
       });
 
       newSocket.on('heroUpdated', (newHero: any) => {
@@ -1886,6 +1941,52 @@ export default function PremiumRiceStore() {
       if (newSocket) newSocket.disconnect();
     };
   }, []);
+
+  // CONFIRM THE SAVED LOGIN IS STILL VALID (expired / deleted / suspended accounts are signed out)
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/user/profile`, { headers: { 'Authorization': `Bearer ${token}` } });
+        if (cancelled) return;
+        if (res.status === 401 || res.status === 403 || res.status === 404) {
+          handleSessionExpired('Your session is no longer valid. Please log in again.');
+          return;
+        }
+        if (res.ok) {
+          const p = await res.json();
+          setUser(prev => {
+            if (!prev) return prev;
+            const merged = { ...prev, fullName: p.fullName ?? prev.fullName, role: p.role ?? prev.role, rewardPoints: p.rewardPoints ?? prev.rewardPoints };
+            if (merged.fullName === prev.fullName && merged.role === prev.role && merged.rewardPoints === prev.rewardPoints) return prev;
+            try { localStorage.setItem('user', JSON.stringify(merged)); } catch (_) { /* ignore */ }
+            return merged;
+          });
+        }
+      } catch (err) {
+        console.warn("Session check skipped (network):", err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  // ADMINS JOIN THE LIVE ORDER CHANNEL SO NEW ORDERS APPEAR INSTANTLY
+  useEffect(() => {
+    if (!socket || !token || user?.role !== 'admin') return;
+    const join = () => socket.emit('joinAdminChannel', token);
+    const onNewOrder = (order: any) => {
+      showToast(`New order #${order?.id ?? ''} received!`, 'info');
+      fetchAdminOrders();
+    };
+    join();
+    socket.on('connect', join);
+    socket.on('newOrderAlert', onNewOrder);
+    return () => {
+      socket.off('connect', join);
+      socket.off('newOrderAlert', onNewOrder);
+    };
+  }, [socket, token, user?.role]);
 
   // LOAD USER DATA & ADMIN RECORDS ON LOGIN
   useEffect(() => {
@@ -2015,6 +2116,33 @@ export default function PremiumRiceStore() {
     }
   };
 
+  const fetchLocations = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/config/locations`);
+      if (res.ok) {
+        const data = await res.json();
+        const tree = data && data.hierarchy && !Array.isArray(data.hierarchy) ? data.hierarchy : data;
+        const clean: { [county: string]: string[] } = {};
+        Object.keys(tree || {}).forEach(k => { if (Array.isArray(tree[k])) clean[k] = tree[k].filter((x: any) => typeof x === 'string'); });
+        setServerLocations(clean);
+      }
+    } catch (err) {
+      console.error("Failed to load Kenya locations:", err);
+    }
+  };
+
+  const fetchFlashSale = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/config/flash-sale`);
+      if (res.ok) {
+        const d = await res.json();
+        setFlashSale({ active: !!d.active, endTime: d.endTime ?? null, msRemaining: Number(d.msRemaining) || 0 });
+      }
+    } catch (err) {
+      console.error("Failed to load flash sale state:", err);
+    }
+  };
+
   const fetchMyOrders = async () => {
     if (!token) return;
     try {
@@ -2053,7 +2181,8 @@ export default function PremiumRiceStore() {
       });
       if (res.ok) {
         const data = await res.json();
-        setAdminUsers(data);
+        const list: any[] = Array.isArray(data) ? data : (data.users || []);
+        setAdminUsers(list.map((u: any) => ({ ...u, isSuspended: u.isSuspended ?? (u.isActive === false) })));
       }
     } catch (err) {
       console.error("Failed to fetch user directory:", err);
@@ -2184,8 +2313,9 @@ export default function PremiumRiceStore() {
 
   const activeShippingFee = useMemo(() => {
     const selectedCounty = checkoutData.county;
-    if (countyOverrides && countyOverrides[selectedCounty] !== undefined) {
-      return Number(countyOverrides[selectedCounty]);
+    const overrideFee = getCountyFee(countyOverrides, selectedCounty);
+    if (overrideFee !== undefined && Number.isFinite(overrideFee)) {
+      return overrideFee;
     }
     return baseTransportFee;
   }, [checkoutData.county, countyOverrides, baseTransportFee]);
@@ -2209,6 +2339,26 @@ export default function PremiumRiceStore() {
     e.preventDefault();
     const identifier = (formData.phoneNumber || formData.email || '').trim();
     const identity = buildIdentityPayload(identifier);
+
+    if (!identifier) {
+      showToast('Enter your phone number or email address.', 'error');
+      return;
+    }
+    if (identifier.includes('@')) {
+      if (!/^\S+@\S+\.\S+$/.test(identifier)) { showToast('Enter a valid email address.', 'error'); return; }
+    } else if (!normalizeKenyanPhone(identifier)) {
+      showToast('Enter a valid Kenyan phone number, e.g. 0712345678.', 'error');
+      return;
+    }
+    if (!isLogin && signupOtpStep) {
+      if (!/^\d{6}$/.test(signupOtp.trim())) { showToast('Enter the 6-digit verification code.', 'error'); return; }
+    } else {
+      if (!formData.password) { showToast('Enter your password.', 'error'); return; }
+      if (!isLogin) {
+        if (!String(formData.fullName || '').trim()) { showToast('Enter your full name.', 'error'); return; }
+        if (formData.password.length < 6) { showToast('Password must be at least 6 characters.', 'error'); return; }
+      }
+    }
     
     try {
       let endpoint = '/user/login';
@@ -2327,6 +2477,16 @@ export default function PremiumRiceStore() {
     showToast('Logged out successfully.', 'info');
   };
 
+  // Called when the server says the saved login is no longer valid
+  const handleSessionExpired = (message: string = 'Your session has expired. Please log in again.') => {
+    setToken(null);
+    setUser(null);
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setView('login');
+    showToast(message, 'warning');
+  };
+
   // ORDER CREATION & STK PUSH INITIATION
   const handlePlaceOrder = async () => {
     if (!token) {
@@ -2340,8 +2500,15 @@ export default function PremiumRiceStore() {
       return;
     }
 
-    if (checkoutData.paymentMethod === 'mpesa_stk' && !checkoutData.stkPhoneNumber) {
-      showToast('Please enter your M-Pesa phone number for STK Push prompt.', 'error');
+    if (isCheckingOut) return;
+
+    const stkPhone = normalizeKenyanPhone(checkoutData.stkPhoneNumber);
+    if (checkoutData.paymentMethod === 'mpesa_stk' && !stkPhone) {
+      showToast('Enter a valid M-Pesa number, e.g. 0712345678, for the STK Push prompt.', 'error');
+      return;
+    }
+    if (!checkoutData.county || !checkoutData.town) {
+      showToast('Please choose your delivery county and town.', 'error');
       return;
     }
 
@@ -2351,7 +2518,7 @@ export default function PremiumRiceStore() {
       const payload = {
         cartItems: cart.map(i => ({ productId: i.productId, quantity: i.quantity })),
         paymentMethod: checkoutData.paymentMethod,
-        mpesaPhoneNumber: checkoutData.stkPhoneNumber,
+        mpesaPhoneNumber: stkPhone || checkoutData.stkPhoneNumber,
         county: checkoutData.county,
         town: checkoutData.town,
         location: checkoutData.location,
@@ -2384,17 +2551,21 @@ export default function PremiumRiceStore() {
           status: initialPaymentInfo.status as any,
           receipt: initialPaymentInfo.receipt,
           reason: initialPaymentInfo.reason,
-          phoneNumber: checkoutData.stkPhoneNumber || user?.phoneNumber || 'N/A',
-          amount: cartGrandTotal,
+          phoneNumber: stkPhone || checkoutData.stkPhoneNumber || user?.phoneNumber || 'N/A',
+          amount: Number(data.grandTotal ?? cartGrandTotal),
           isPolling: true
         });
 
         if (data.stkPromptSent) {
           showToast('STK Push dispatched to handset! Enter M-Pesa PIN to complete.', 'success');
+        } else if (checkoutData.paymentMethod === 'mpesa_stk') {
+          showToast(data.stkStatusMessage || 'Order placed, but the M-Pesa prompt could not be sent. Use Retry to resend it.', 'warning');
         } else {
           showToast(`Order #${data.id} placed successfully. Verifying status...`, 'success');
         }
       } else {
+        if (res.status === 401) { handleSessionExpired(); return; }
+        if (res.status === 422) fetchProducts();
         showToast(data.error || 'Order creation failed.', 'error');
       }
     } catch (err: any) {
@@ -2406,12 +2577,20 @@ export default function PremiumRiceStore() {
 
   const handleRetryStkPush = async (orderId: number | string, phone: string, amount: number) => {
     try {
+      const retryPhone = normalizeKenyanPhone(phone);
+      if (!retryPhone) {
+        showToast('Enter a valid M-Pesa number, e.g. 0712345678.', 'error');
+        return;
+      }
       const res = await fetch(`${API_BASE_URL}/payments/stkpush`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({
           orderId,
-          phoneNumber: phone,
+          phoneNumber: retryPhone,
           amount
         })
       });
@@ -2491,7 +2670,7 @@ export default function PremiumRiceStore() {
         setEditingProduct(null);
         fetchProducts();
       } else {
-        showToast('Failed to update product', 'error');
+        await showApiError(res, 'Failed to update product');
       }
     } catch (err: any) {
       showToast(err.message, 'error');
@@ -2508,6 +2687,8 @@ export default function PremiumRiceStore() {
       if (res.ok) {
         showToast('Catalog item deleted.', 'info');
         fetchProducts();
+      } else {
+        await showApiError(res, 'Failed to delete product');
       }
     } catch (err: any) {
       showToast(err.message, 'error');
@@ -2528,6 +2709,8 @@ export default function PremiumRiceStore() {
       if (res.ok) {
         showToast(`Order #${orderId} status updated to ${newStatus}`, 'success');
         fetchAdminOrders();
+      } else {
+        await showApiError(res, 'Failed to update order status');
       }
     } catch (err: any) {
       showToast(err.message, 'error');
@@ -2549,6 +2732,8 @@ export default function PremiumRiceStore() {
         showToast(`Order #${orderId} payment tag updated to ${paidTag}`, 'success');
         fetchAdminOrders();
         fetchFinancialAnalytics(financeYear);
+      } else {
+        await showApiError(res, 'Failed to update payment status');
       }
     } catch (err: any) {
       showToast(err.message, 'error');
@@ -2595,6 +2780,8 @@ export default function PremiumRiceStore() {
       if (res.ok) {
         showToast(`User account ${!currentStatus ? 'suspended' : 'reactivated'} successfully.`, 'warning');
         fetchAdminUsers();
+      } else {
+        await showApiError(res, 'Failed to change account status');
       }
     } catch (err: any) {
       showToast(err.message, 'error');
@@ -2633,6 +2820,10 @@ export default function PremiumRiceStore() {
       });
       if (res.ok) {
         showToast(active ? `Flash Harvest Sale Activated for ${hours} hours!` : 'Flash Sale Deactivated', 'success');
+        fetchFlashSale();
+        fetchProducts();
+      } else {
+        await showApiError(res, 'Failed to change flash sale');
       }
     } catch (err: any) {
       showToast(err.message, 'error');
@@ -2655,6 +2846,8 @@ export default function PremiumRiceStore() {
         showToast(`Freight fee for ${countyOverrideForm.county} set to KES ${countyOverrideForm.fee}`, 'success');
         fetchCountiesConfig();
         setCountyOverrideForm({ county: 'Nairobi', fee: '' });
+      } else {
+        await showApiError(res, 'Failed to save freight fee');
       }
     } catch (err: any) {
       showToast(err.message, 'error');
@@ -2675,6 +2868,8 @@ export default function PremiumRiceStore() {
       });
       if (res.ok) {
         showToast('Storefront Hero configuration synchronized!', 'success');
+      } else {
+        await showApiError(res, 'Failed to save hero settings');
       }
     } catch (err: any) {
       showToast(err.message, 'error');
@@ -3299,7 +3494,7 @@ export default function PremiumRiceStore() {
                             onChange={(e) => setCheckoutData(prev => ({ ...prev, town: e.target.value }))}
                             className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-medium bg-white cursor-pointer"
                           >
-                            {(REGIONAL_LOGISTICS_DATA[checkoutData.county as keyof typeof REGIONAL_LOGISTICS_DATA]?.towns || DEFAULT_REGIONAL_LOGISTICS.towns).map((t) => (
+                            {getTownOptions(checkoutData.county).map((t) => (
                               <option key={t} value={t}>{t}</option>
                             ))}
                           </select>
@@ -4352,7 +4547,7 @@ export default function PremiumRiceStore() {
                         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Active Freight Rates Overview</h4>
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                           {ALL_47_COUNTIES.slice(0, 16).map(county => {
-                            const customFee = countyOverrides[county];
+                            const customFee = getCountyFee(countyOverrides, county);
 
                             return (
                               <div key={county} className="p-3 rounded-2xl bg-slate-950 border border-slate-800 flex justify-between items-center text-xs">
