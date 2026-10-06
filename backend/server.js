@@ -1714,9 +1714,10 @@ async function startServer() {
     // --- ACCOUNT CREATION OTP VERIFICATION ENDPOINTS ---
     const handleSignupOtpVerification = async (req, res) => {
       try {
-        const { email, phoneNumber, otp, code } = req.body || {};
-        const inputOtp = String(otp || code || '').trim();
-        const searchIdentifier = email || phoneNumber;
+        const body = req.body || {};
+        const { email: idEmail, phone: idPhone } = splitIdentity(body);
+        const inputOtp = String(body.otp || body.code || body.otpCode || body.verificationCode || '').replace(/\s+/g, '');
+        const searchIdentifier = idEmail || idPhone || body.email || body.phoneNumber;
 
         if (!searchIdentifier || !inputOtp) {
           return res.status(400).json({ error: 'Email or phone number and OTP verification code are required.' });
@@ -1768,8 +1769,8 @@ async function startServer() {
     // --- RESEND SIGNUP OTP ENDPOINT ---
     const handleResendSignupOtp = async (req, res) => {
       try {
-        const { email, phoneNumber } = req.body || {};
-        const searchIdentifier = email || phoneNumber;
+        const { email: idEmail, phone: idPhone } = splitIdentity(req.body || {});
+        const searchIdentifier = idEmail || idPhone || (req.body || {}).email || (req.body || {}).phoneNumber;
 
         if (!searchIdentifier) {
           return res.status(400).json({ error: 'Email address or phone number is required.' });
@@ -3303,7 +3304,123 @@ async function startServer() {
       }
     });
 
-// --- ADMIN: MODIFY USER DETAILS ---
+// Audit logging must never break an admin action, so failures are only reported in the console.
+        const safeAdminLog = async (entry) => {
+          try { await AdminLog.create(entry); } catch (logErr) { console.error('⚠️ Admin audit log skipped:', logErr.message); }
+        };
+
+        // --- ADMIN: SINGLE USER (view / edit / delete) ---
+        expressApp.get('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
+          try {
+            const user = await User.findByPk(req.params.id, { attributes: { exclude: ['password', 'verificationOtp', 'verificationOtpExpires'] } });
+            if (!user) return res.status(404).json({ error: 'User record not found.' });
+            res.json(user);
+          } catch (err) {
+            res.status(500).json({ error: err.message });
+          }
+        });
+
+        const adminEditUserHandler = async (req, res) => {
+          try {
+            const { fullName, role, isActive, email, phoneNumber } = req.body || {};
+            const user = await User.findByPk(req.params.id);
+            if (!user) return res.status(404).json({ error: 'User record not found.' });
+            if (fullName !== undefined) user.fullName = fullName;
+            if (role !== undefined) user.role = role;
+            if (isActive !== undefined) user.isActive = isActive;
+            if (email !== undefined) user.email = email || null;
+            if (phoneNumber !== undefined) user.phoneNumber = phoneNumber ? (normalizeKenyanPhone(phoneNumber) || phoneNumber) : null;
+            await user.save();
+            await safeAdminLog({ adminId: req.adminUser.id, action: 'MODIFY_USER', targetType: 'user', targetId: user.id, ipAddress: req.ip });
+            const safe = user.toJSON ? user.toJSON() : { ...user };
+            delete safe.password;
+            res.json({ message: 'User record updated successfully.', user: safe });
+          } catch (err) {
+            res.status(500).json({ error: err.message });
+          }
+        };
+        expressApp.put('/api/admin/users/:id', authenticateToken, requireAdmin, adminEditUserHandler);
+        expressApp.patch('/api/admin/users/:id', authenticateToken, requireAdmin, adminEditUserHandler);
+
+        expressApp.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
+          try {
+            const user = await User.findByPk(req.params.id);
+            if (!user) return res.status(404).json({ error: 'User record not found.' });
+            if (String(user.id) === String(req.adminUser.id)) {
+              return res.status(400).json({ error: 'You cannot delete your own admin account.' });
+            }
+            await user.destroy();
+            await safeAdminLog({ adminId: req.adminUser.id, action: 'DELETE_USER', targetType: 'user', targetId: req.params.id, ipAddress: req.ip });
+            res.json({ message: 'User deleted successfully.' });
+          } catch (err) {
+            res.status(500).json({ error: err.message });
+          }
+        });
+
+        // --- ADMIN: BLACK FRIDAY / FLASH SALE CONTROL ---
+        expressApp.get('/api/admin/config/black-friday', authenticateToken, requireAdmin, async (req, res) => {
+          try {
+            await syncFlashSaleFromDb(true);
+            const config = await SystemConfig.findOne({ where: { key: 'black_friday' } });
+            const msRemaining = flashSaleState.endTime ? Math.max(0, new Date(flashSaleState.endTime).getTime() - Date.now()) : 0;
+            res.json({ ...(config && config.value ? config.value : {}), active: flashSaleState.active, endTime: flashSaleState.endTime, msRemaining });
+          } catch (err) {
+            res.status(500).json({ error: err.message });
+          }
+        });
+
+        const adminSetBlackFridayHandler = async (req, res) => {
+          try {
+            const b = req.body || {};
+            const wantsStop = b.active === false || b.active === 'false' || b.action === 'stop' || b.action === 'end';
+            let endTime = null;
+
+            if (!wantsStop) {
+              if (b.endTime) {
+                endTime = new Date(b.endTime);
+              } else {
+                const mins = Number(b.durationMinutes) || (Number(b.durationHours) * 60) || (Number(b.durationDays) * 1440) || (Number(b.durationSeconds) / 60) || 0;
+                if (mins > 0) endTime = new Date(Date.now() + mins * 60 * 1000);
+              }
+              if (!endTime || Number.isNaN(endTime.getTime()) || endTime.getTime() <= Date.now()) {
+                return res.status(400).json({ error: 'Provide a future endTime or a positive duration (durationMinutes / durationHours / durationDays).' });
+              }
+            }
+
+            const [config] = await SystemConfig.findOrCreate({ where: { key: 'black_friday' }, defaults: { value: { active: false, endTime: null } } });
+            config.value = wantsStop
+              ? { ...(config.value || {}), active: false, endTime: null }
+              : { ...(config.value || {}), active: true, endTime: endTime.toISOString() };
+            config.changed('value', true);
+            await config.save();
+
+            await syncFlashSaleFromDb(true);
+            if (flashSaleState.countdownIntervalId) { clearInterval(flashSaleState.countdownIntervalId); flashSaleState.countdownIntervalId = null; }
+            if (wantsStop) {
+              flashSaleState.active = false;
+              flashSaleState.endTime = null;
+              io.emit('blackFridayEnded', { active: false });
+            } else {
+              flashSaleState.active = true;
+              flashSaleState.endTime = endTime.toISOString();
+              startFlashSaleCountdown(io);
+              io.emit('blackFridayTick', { active: true, endTime: flashSaleState.endTime, msRemaining: endTime.getTime() - Date.now() });
+            }
+
+            await safeAdminLog({ adminId: req.adminUser.id, action: wantsStop ? 'STOP_FLASH_SALE' : 'START_FLASH_SALE', targetType: 'config', targetId: null, ipAddress: req.ip });
+            res.json({ message: wantsStop ? 'Flash sale stopped.' : 'Flash sale started.', active: flashSaleState.active, endTime: flashSaleState.endTime });
+          } catch (err) {
+            res.status(500).json({ error: err.message });
+          }
+        };
+        expressApp.post('/api/admin/config/black-friday', authenticateToken, requireAdmin, adminSetBlackFridayHandler);
+        expressApp.put('/api/admin/config/black-friday', authenticateToken, requireAdmin, adminSetBlackFridayHandler);
+        expressApp.delete('/api/admin/config/black-friday', authenticateToken, requireAdmin, (req, res) => {
+          req.body = { active: false };
+          return adminSetBlackFridayHandler(req, res);
+        });
+
+        // --- ADMIN: MODIFY USER DETAILS ---
         expressApp.put('/api/admin/users/:id/modify', authenticateToken, requireAdmin, async (req, res) => {
           try {
             const { fullName, role, isActive } = req.body || {};
