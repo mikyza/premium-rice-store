@@ -680,6 +680,23 @@ const splitIdentity = (body = {}) => {
   return { email, phone };
 };
 
+/**
+ * Signup OTP issuing: if the person still has an unexpired code (more than a minute left),
+ * re-send that SAME code instead of replacing it. This stops the "older SMS stops working
+ * after Resend" problem, since every message they received stays valid until it expires.
+ */
+const issueSignupOtp = (user) => {
+  const stillValid = user && user.verificationOtp && user.verificationOtpExpires
+    && new Date(user.verificationOtpExpires).getTime() > Date.now() + 60 * 1000;
+  if (stillValid) {
+    return { otpCode: String(user.verificationOtp), tokenExpiration: new Date(user.verificationOtpExpires) };
+  }
+  return {
+    otpCode: Math.floor(100000 + Math.random() * 900000).toString(),
+    tokenExpiration: new Date(Date.now() + 10 * 60 * 1000)
+  };
+};
+
 /** Sequelize OR-conditions matching an email or any spelling of a phone number. */
 const identityConditions = (identifier) => {
   const value = String(identifier || '').trim();
@@ -1568,8 +1585,7 @@ async function startServer() {
 
         // If explicitly requested to send OTP during signup step
         if (requireOtp || sendOtp) {
-          const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-          const tokenExpiration = new Date(Date.now() + 10 * 60 * 1000);
+          const { otpCode, tokenExpiration } = issueSignupOtp(existingUser);
 
           let targetUser = existingUser;
           if (!targetUser) {
@@ -1659,8 +1675,7 @@ async function startServer() {
           return res.status(409).json({ error: 'An account with this phone number or email address already exists.' });
         }
 
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const tokenExpiration = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
+        const { otpCode, tokenExpiration } = issueSignupOtp(existingUser);
         let hashedPassword = existingUser ? existingUser.password : null;
         if (password) {
           hashedPassword = await bcrypt.hash(password, 12);
@@ -1730,7 +1745,7 @@ async function startServer() {
           return res.status(400).json({ error: 'No pending signup found for this phone number or email. Please register again.' });
         }
         if (!candidate.verificationOtp || String(candidate.verificationOtp).trim() !== inputOtp) {
-          console.warn(`⚠️ [VERIFY OTP] 400 code mismatch for user ${candidate.id} (a newer code may have been sent).`);
+          console.warn(`⚠️ [VERIFY OTP] 400 code mismatch for user ${candidate.id} (phone ${candidate.phoneNumber || '-'}, request identity "${searchIdentifier}", code length ${inputOtp.length}).`);
           return res.status(400).json({ error: 'Incorrect verification code. Use the code from the most recent SMS.' });
         }
         if (!candidate.verificationOtpExpires || new Date(candidate.verificationOtpExpires).getTime() <= Date.now()) {
@@ -1794,8 +1809,7 @@ async function startServer() {
           return res.status(400).json({ error: 'Account is already verified. Please sign in.' });
         }
 
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const tokenExpiration = new Date(Date.now() + 10 * 60 * 1000);
+        const { otpCode, tokenExpiration } = issueSignupOtp(user);
 
         user.verificationOtp = otpCode;
         user.verificationOtpExpires = tokenExpiration;
