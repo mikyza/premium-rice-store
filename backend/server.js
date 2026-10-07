@@ -965,6 +965,542 @@ let flashSaleState = {
 // LIKE operator: case-insensitive on Postgres (Aiven), plain LIKE elsewhere
 const LIKE_OP = sequelize.getDialect() === 'postgres' ? Op.iLike : Op.like;
 
+/**
+ * ==========================================
+ * 2b. STAFF ROLES, AGENTS, COMMISSIONS & ACTIVITY TRACKING
+ * ==========================================
+ * These tables are separate from Users so existing accounts and the Users.role column are never altered.
+ * Effective role = admin (Users.role) | support | agent (StaffRole) | customer.
+ */
+const defineModel = (name, attrs, opts = {}) => sequelize.models[name] || sequelize.define(name, attrs, { timestamps: true, ...opts });
+
+const StaffRole = defineModel('StaffRole', {
+  userId: { type: DataTypes.INTEGER, allowNull: false, unique: true },
+  role: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'none' }, // 'support' | 'agent' | 'none'
+  referralCode: { type: DataTypes.STRING(20), allowNull: true, unique: true },
+  assignedBy: { type: DataTypes.INTEGER, allowNull: true },
+  note: { type: DataTypes.STRING(255), allowNull: true },
+  dismissedAt: { type: DataTypes.DATE, allowNull: true }
+});
+
+const CustomerReferral = defineModel('CustomerReferral', {
+  customerId: { type: DataTypes.INTEGER, allowNull: false, unique: true },
+  agentId: { type: DataTypes.INTEGER, allowNull: false },
+  referralCode: { type: DataTypes.STRING(20), allowNull: false },
+  source: { type: DataTypes.STRING(20), allowNull: true }
+});
+
+const AgentCommission = defineModel('AgentCommission', {
+  agentId: { type: DataTypes.INTEGER, allowNull: false },
+  orderId: { type: DataTypes.INTEGER, allowNull: false, unique: true },
+  customerId: { type: DataTypes.INTEGER, allowNull: false },
+  orderTotal: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
+  orderProfit: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
+  rate: { type: DataTypes.DECIMAL(5, 4), allowNull: false, defaultValue: 0 },
+  amount: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
+  type: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'REPEAT' }, // NEW_CUSTOMER | REPEAT
+  status: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'PENDING' }, // PENDING | PAID | NO_PROFIT | REVERSED | CLAWBACK_DUE
+  payoutId: { type: DataTypes.INTEGER, allowNull: true },
+  note: { type: DataTypes.STRING(255), allowNull: true },
+  paidAt: { type: DataTypes.DATE, allowNull: true }
+});
+
+const AgentPayout = defineModel('AgentPayout', {
+  agentId: { type: DataTypes.INTEGER, allowNull: false },
+  amount: { type: DataTypes.DECIMAL(12, 2), allowNull: false },
+  method: { type: DataTypes.STRING(40), allowNull: true },
+  reference: { type: DataTypes.STRING(120), allowNull: false },
+  note: { type: DataTypes.STRING(255), allowNull: true },
+  paidBy: { type: DataTypes.INTEGER, allowNull: true },
+  commissionCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }
+});
+
+const ActivityEvent = defineModel('ActivityEvent', {
+  actorId: { type: DataTypes.INTEGER, allowNull: true },
+  actorRole: { type: DataTypes.STRING(20), allowNull: true },
+  actorName: { type: DataTypes.STRING(120), allowNull: true },
+  action: { type: DataTypes.STRING(60), allowNull: false },
+  category: { type: DataTypes.STRING(30), allowNull: false, defaultValue: 'system' },
+  severity: { type: DataTypes.STRING(10), allowNull: false, defaultValue: 'info' }, // info | warn | alert
+  targetType: { type: DataTypes.STRING(30), allowNull: true },
+  targetId: { type: DataTypes.STRING(40), allowNull: true },
+  summary: { type: DataTypes.STRING(500), allowNull: true },
+  details: { type: DataTypes.JSON, allowNull: true },
+  ipAddress: { type: DataTypes.STRING(64), allowNull: true }
+}, { indexes: [{ fields: ['createdAt'] }, { fields: ['action'] }, { fields: ['actorId'] }] });
+
+const SupportNote = defineModel('SupportNote', {
+  customerId: { type: DataTypes.INTEGER, allowNull: false },
+  authorId: { type: DataTypes.INTEGER, allowNull: false },
+  authorName: { type: DataTypes.STRING(120), allowNull: true },
+  note: { type: DataTypes.TEXT, allowNull: false }
+});
+
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const STAFF_ROLES = ['support', 'agent'];
+
+/** admin | support | agent | <whatever Users.role holds, usually customer> */
+async function effectiveRoleFor(user) {
+  if (!user) return 'customer';
+  if (user.role === 'admin') return 'admin';
+  try {
+    const row = await StaffRole.findOne({ where: { userId: user.id } });
+    if (row && STAFF_ROLES.includes(row.role)) return row.role;
+  } catch (e) { /* table not created yet */ }
+  return user.role || 'customer';
+}
+
+const requireRoles = (...roles) => (req, res, next) => {
+  if (!req.user || !roles.includes(req.user.role)) {
+    return res.status(403).json({ error: 'Access denied for your account type.' });
+  }
+  next();
+};
+
+/** One place to record everything that happens. Never throws. */
+async function logEvent({ req = null, actor = null, action, category = 'system', severity = 'info', targetType = null, targetId = null, summary = '', details = null }) {
+  try {
+    const a = actor || (req && req.user ? { id: req.user.id, role: req.user.role, name: req.user.fullName } : {});
+    const ev = await ActivityEvent.create({
+      actorId: a.id ?? null,
+      actorRole: a.role || null,
+      actorName: a.name ? String(a.name).slice(0, 120) : null,
+      action: String(action).slice(0, 60),
+      category,
+      severity,
+      targetType,
+      targetId: targetId !== null && targetId !== undefined ? String(targetId).slice(0, 40) : null,
+      summary: String(summary || '').slice(0, 500),
+      details,
+      ipAddress: req && req.ip ? String(req.ip).slice(0, 64) : null
+    });
+    try { io.to('admin-dashboard-room').emit('activityEvent', ev.toJSON()); } catch (_) { /* sockets optional */ }
+    return ev;
+  } catch (e) {
+    console.error('⚠️ Activity log skipped:', e.message);
+    return null;
+  }
+}
+
+const categorizeAction = (action) => {
+  const a = String(action || '').toUpperCase();
+  if (/LOGIN|LOGOUT|PASSWORD|SIGNUP|ACCOUNT|OTP/.test(a)) return 'auth';
+  if (/COMMISSION|PAYOUT|AGENT|REFERRAL/.test(a)) return 'agents';
+  if (/PAYMENT|ORDER|STK/.test(a)) return 'orders';
+  if (/PRODUCT|STOCK|BUYING|INVENTORY/.test(a)) return 'inventory';
+  if (/USER|ROLE|SUSPEND|SUPPORT|NOTE/.test(a)) return 'users';
+  if (/FLASH|CONFIG|HERO|COUNTY|CAROUSEL|SETTING/.test(a)) return 'settings';
+  return 'admin';
+};
+
+// Every existing AdminLog entry (product edits, order updates, flash sale, ...) is mirrored into the activity feed automatically.
+if (AdminLog && !AdminLog.__mirrored) {
+  const originalAdminLogCreate = AdminLog.create.bind(AdminLog);
+  AdminLog.create = async (entry, ...rest) => {
+    const record = await originalAdminLogCreate(entry, ...rest);
+    (async () => {
+      try {
+        const u = entry && entry.adminId ? await User.findByPk(entry.adminId, { attributes: ['id', 'fullName', 'role'] }) : null;
+        await logEvent({
+          actor: u ? { id: u.id, role: u.role, name: u.fullName } : {},
+          action: entry.action,
+          category: categorizeAction(entry.action),
+          targetType: entry.targetType || null,
+          targetId: entry.targetId ?? null,
+          summary: `${entry.action}${entry.targetType ? ' · ' + entry.targetType : ''}${entry.targetId !== undefined && entry.targetId !== null ? ' #' + entry.targetId : ''}`,
+          details: entry.changes ?? null
+        });
+      } catch (_) { /* mirror is best-effort */ }
+    })();
+    return record;
+  };
+  AdminLog.__mirrored = true;
+}
+
+// ---------- Login brute-force protection (in memory) ----------
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_FAILS = 6;
+const loginFailures = new Map();
+const loginKey = (identifier) => String(identifier || '').toLowerCase().replace(/\s+/g, '');
+const loginLockedForMs = (key) => {
+  const rec = loginFailures.get(key);
+  if (!rec) return 0;
+  if (Date.now() - rec.first > LOGIN_WINDOW_MS) { loginFailures.delete(key); return 0; }
+  return rec.count >= LOGIN_MAX_FAILS ? Math.max(0, rec.first + LOGIN_WINDOW_MS - Date.now()) : 0;
+};
+const registerLoginFailure = (key) => {
+  const now = Date.now();
+  const rec = loginFailures.get(key);
+  if (!rec || now - rec.first > LOGIN_WINDOW_MS) { loginFailures.set(key, { count: 1, first: now }); return 1; }
+  rec.count += 1;
+  return rec.count;
+};
+setInterval(() => { const now = Date.now(); for (const [k, v] of loginFailures) if (now - v.first > LOGIN_WINDOW_MS) loginFailures.delete(k); }, 10 * 60 * 1000).unref?.();
+
+// ---------- Referral codes ----------
+const normalizeReferralCode = (raw) => String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+async function generateUniqueReferralCode() {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    let code = 'MW';
+    for (let i = 0; i < 5; i++) code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+    const clash = await StaffRole.findOne({ where: { referralCode: code } });
+    if (!clash) return code;
+  }
+  throw new Error('Could not generate a unique referral code. Try again.');
+}
+
+const maskPhone = (p) => {
+  const d = String(p || '').replace(/\D/g, '');
+  if (d.length < 9) return '—';
+  const local = `0${d.slice(-9)}`;
+  return `${local.slice(0, 4)}***${local.slice(-3)}`;
+};
+
+/** Gives a customer to an agent (once, permanently). Returns { attached, reason?, agentName? } and never throws. */
+async function attachReferral(customerId, rawCode, source = 'signup', req = null) {
+  try {
+    const code = normalizeReferralCode(rawCode);
+    if (!code || !customerId) return { attached: false, reason: 'no-code' };
+    const already = await CustomerReferral.findOne({ where: { customerId } });
+    if (already) return { attached: false, reason: 'already-linked' };
+    const staff = await StaffRole.findOne({ where: { referralCode: code, role: 'agent' } });
+    if (!staff) return { attached: false, reason: 'invalid-code' };
+    if (Number(staff.userId) === Number(customerId)) return { attached: false, reason: 'own-code' };
+    const agentUser = await User.findByPk(staff.userId, { attributes: ['id', 'fullName', 'isActive'] });
+    if (!agentUser || agentUser.isActive === false) return { attached: false, reason: 'agent-inactive' };
+    await CustomerReferral.create({ customerId, agentId: staff.userId, referralCode: code, source });
+    await logEvent({
+      req,
+      actor: req && req.user ? undefined : { id: customerId, role: 'customer', name: null },
+      action: 'REFERRAL_ATTACHED', category: 'agents', targetType: 'user', targetId: customerId,
+      summary: `Customer #${customerId} linked to agent ${agentUser.fullName} (${code}) via ${source}`,
+      details: { agentId: staff.userId, code, source }
+    });
+    return { attached: true, agentName: agentUser.fullName };
+  } catch (e) {
+    console.error('⚠️ Referral attach skipped:', e.message);
+    return { attached: false, reason: 'error' };
+  }
+}
+
+// ---------- Commission engine ----------
+const COMMISSION_DEFAULTS = { newCustomerRate: 0.6, repeatRate: 0.4 };
+const clampRate = (v, fallback) => {
+  let n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  if (n > 1) n = n / 100;
+  return n < 0 ? 0 : n > 1 ? 1 : n;
+};
+async function getCommissionRates() {
+  try {
+    const row = await SystemConfig.findOne({ where: { key: 'agent_commission' } });
+    const v = (row && row.value) || {};
+    return {
+      newCustomerRate: clampRate(v.newCustomerRate, COMMISSION_DEFAULTS.newCustomerRate),
+      repeatRate: clampRate(v.repeatRate, COMMISSION_DEFAULTS.repeatRate)
+    };
+  } catch (e) {
+    return { ...COMMISSION_DEFAULTS };
+  }
+}
+
+const getOrderItems = (order) => {
+  let items = order && order.items;
+  if (typeof items === 'string') { try { items = JSON.parse(items); } catch (_) { items = []; } }
+  return Array.isArray(items) ? items : [];
+};
+
+/** Profit = (price paid - buying price) x quantity over every line. Delivery fees are not profit. */
+async function computeOrderProfit(order) {
+  const items = getOrderItems(order);
+  let revenue = 0, cost = 0, missingCost = false;
+  const fallbackIds = items.filter(i => !(Number(i.buyingPrice) > 0)).map(i => i.productId).filter(Boolean);
+  const costMap = {};
+  if (fallbackIds.length) {
+    const prods = await RiceProduct.findAll({ where: { id: fallbackIds }, attributes: ['id', 'buyingPrice'] });
+    prods.forEach(p => { costMap[p.id] = Number(p.buyingPrice) || 0; });
+  }
+  items.forEach((i) => {
+    const qty = Number(i.quantity) || 0;
+    const price = Number(i.priceAtPurchase) || 0;
+    let unitCost = Number(i.buyingPrice);
+    if (!(unitCost > 0)) unitCost = costMap[i.productId] || 0;
+    if (!(unitCost > 0)) { missingCost = true; unitCost = price; } // unknown cost -> no profit credited for that line
+    revenue += price * qty;
+    cost += unitCost * qty;
+  });
+  return { revenue: round2(revenue), cost: round2(cost), profit: Math.max(0, round2(revenue - cost)), missingCost };
+}
+
+/** Called once an order is confirmed paid. Safe to call repeatedly. */
+async function accrueAgentCommission(order, source = 'payment') {
+  try {
+    if (!order || !order.paymentDetails || order.paymentDetails.isPaid !== true) return null;
+    const existing = await AgentCommission.findOne({ where: { orderId: order.id } });
+    if (existing) {
+      if (existing.status === 'REVERSED') {
+        existing.status = Number(existing.amount) > 0 ? 'PENDING' : 'NO_PROFIT';
+        existing.note = 'Reinstated after payment was confirmed again.';
+        await existing.save();
+        await logEvent({ action: 'COMMISSION_REINSTATED', category: 'agents', targetType: 'order', targetId: order.id, summary: `Commission for order #${order.id} reinstated`, details: { source } });
+      }
+      return existing;
+    }
+    const referral = await CustomerReferral.findOne({ where: { customerId: order.userId } });
+    if (!referral) return null;
+    if (Number(referral.agentId) === Number(order.userId)) return null;
+
+    const staff = await StaffRole.findOne({ where: { userId: referral.agentId } });
+    const agentUser = await User.findByPk(referral.agentId, { attributes: ['id', 'fullName', 'isActive'] });
+    if (!staff || staff.role !== 'agent' || !agentUser || agentUser.isActive === false) {
+      await logEvent({ action: 'COMMISSION_SKIPPED', category: 'agents', severity: 'warn', targetType: 'order', targetId: order.id,
+        summary: `No commission for order #${order.id}: agent #${referral.agentId} is not an active agent`, details: { agentId: referral.agentId } });
+      return null;
+    }
+
+    const earlier = await Order.findAll({ where: { userId: order.userId, id: { [Op.ne]: order.id } }, attributes: ['id', 'paymentDetails'] });
+    const hadPaidBefore = earlier.some(o => o.paymentDetails && o.paymentDetails.isPaid === true);
+    const isNewCustomer = !hadPaidBefore;
+
+    const rates = await getCommissionRates();
+    const rate = isNewCustomer ? rates.newCustomerRate : rates.repeatRate;
+    const { profit, missingCost } = await computeOrderProfit(order);
+    const amount = round2(profit * rate);
+
+    const row = await AgentCommission.create({
+      agentId: referral.agentId,
+      orderId: order.id,
+      customerId: order.userId,
+      orderTotal: Number(order.grandTotal) || 0,
+      orderProfit: profit,
+      rate,
+      amount,
+      type: isNewCustomer ? 'NEW_CUSTOMER' : 'REPEAT',
+      status: amount > 0 ? 'PENDING' : 'NO_PROFIT',
+      note: missingCost ? 'Some items had no buying price, so profit may be understated.' : null
+    });
+    await logEvent({
+      action: 'COMMISSION_EARNED', category: 'agents', targetType: 'order', targetId: order.id,
+      summary: `${agentUser.fullName} earned KES ${amount} (${Math.round(rate * 100)}% of KES ${profit} profit, ${isNewCustomer ? 'new customer' : 'repeat order'}) on order #${order.id}`,
+      details: { agentId: referral.agentId, customerId: order.userId, profit, rate, amount, source }
+    });
+    return row;
+  } catch (e) {
+    console.error('⚠️ Commission accrual failed:', e.message);
+    return null;
+  }
+}
+
+async function reverseAgentCommission(order, reason) {
+  try {
+    const c = await AgentCommission.findOne({ where: { orderId: order.id } });
+    if (!c || c.status === 'REVERSED' || c.status === 'CLAWBACK_DUE') return null;
+    const wasPaid = c.status === 'PAID';
+    c.status = wasPaid ? 'CLAWBACK_DUE' : 'REVERSED';
+    c.note = String(reason || 'Order payment reversed').slice(0, 255);
+    await c.save();
+    await logEvent({
+      action: wasPaid ? 'COMMISSION_CLAWBACK_DUE' : 'COMMISSION_REVERSED', category: 'agents', severity: wasPaid ? 'alert' : 'warn',
+      targetType: 'order', targetId: order.id,
+      summary: `Commission for order #${order.id} ${wasPaid ? 'was already paid out and must be recovered' : 'reversed'}: ${reason}`,
+      details: { agentId: c.agentId, amount: Number(c.amount) }
+    });
+    return c;
+  } catch (e) {
+    console.error('⚠️ Commission reversal failed:', e.message);
+    return null;
+  }
+}
+
+/** Runs after any confirmed payment: records it and credits the agent. */
+async function onOrderPaid(order, source) {
+  await logEvent({
+    action: 'PAYMENT_CONFIRMED', category: 'orders', targetType: 'order', targetId: order.id,
+    summary: `Order #${order.id} paid (KES ${Number(order.grandTotal) || 0}) via ${source}`,
+    details: { receipt: order.paymentDetails && order.paymentDetails.mpesaReceipt, userId: order.userId }
+  });
+  await accrueAgentCommission(order, source);
+}
+
+/** Full numbers for one agent: sales, rice sold, customers, commissions, payouts, monthly trend. */
+async function buildAgentSnapshot(agentId, year) {
+  const [commissions, referrals, payouts] = await Promise.all([
+    AgentCommission.findAll({ where: { agentId }, order: [['createdAt', 'DESC']] }),
+    CustomerReferral.findAll({ where: { agentId } }),
+    AgentPayout.findAll({ where: { agentId }, order: [['createdAt', 'DESC']] })
+  ]);
+  const live = commissions.filter(c => c.status !== 'REVERSED');
+  const orderIds = live.map(c => c.orderId);
+  const orders = orderIds.length ? await Order.findAll({ where: { id: orderIds } }) : [];
+  const orderMap = {};
+  orders.forEach(o => { orderMap[o.id] = o; });
+
+  const customerIds = referrals.map(r => r.customerId);
+  const users = customerIds.length
+    ? await User.findAll({ where: { id: customerIds }, attributes: ['id', 'fullName', 'phoneNumber', 'createdAt', 'isVerified', 'isActive'] })
+    : [];
+  const userMap = {};
+  users.forEach(u => { userMap[u.id] = u; });
+
+  const sum = (arr, fn) => round2(arr.reduce((s, x) => s + (Number(fn(x)) || 0), 0));
+  const pendingAmount = sum(commissions.filter(c => c.status === 'PENDING'), c => c.amount);
+  const paidAmount = sum(commissions.filter(c => c.status === 'PAID'), c => c.amount);
+  const clawbackAmount = sum(commissions.filter(c => c.status === 'CLAWBACK_DUE'), c => c.amount);
+
+  let kgSold = 0, salesValue = 0;
+  const productMap = {};
+  live.forEach((c) => {
+    const o = orderMap[c.orderId];
+    if (!o) return;
+    kgSold += Number(o.totalWeightKg) || 0;
+    salesValue += Number(o.subTotal) || 0;
+    getOrderItems(o).forEach((i) => {
+      const key = String(i.productId || i.name);
+      const qty = Number(i.quantity) || 0;
+      if (!productMap[key]) productMap[key] = { name: i.name || i.brandName || 'Rice', quantity: 0, kg: 0, revenue: 0 };
+      productMap[key].quantity += qty;
+      productMap[key].kg += (Number(i.weightKg) || 0) * qty;
+      productMap[key].revenue += (Number(i.priceAtPurchase) || 0) * qty;
+    });
+  });
+
+  const selectedYear = Number(year) || new Date().getFullYear();
+  const monthly = Array.from({ length: 12 }, (_, i) => ({ monthIndex: i, month: new Date(2000, i, 1).toLocaleString('en-US', { month: 'short' }), orders: 0, kg: 0, sales: 0, commission: 0 }));
+  const years = new Set([new Date().getFullYear()]);
+  live.forEach((c) => {
+    const d = new Date(c.createdAt);
+    years.add(d.getFullYear());
+    if (d.getFullYear() !== selectedYear) return;
+    const o = orderMap[c.orderId];
+    const m = monthly[d.getMonth()];
+    m.orders += 1;
+    m.kg = round2(m.kg + (o ? Number(o.totalWeightKg) || 0 : 0));
+    m.sales = round2(m.sales + (o ? Number(o.subTotal) || 0 : 0));
+    m.commission = round2(m.commission + (Number(c.amount) || 0));
+  });
+
+  const perCustomer = {};
+  live.forEach((c) => {
+    const k = c.customerId;
+    if (!perCustomer[k]) perCustomer[k] = { orders: 0, spent: 0, commission: 0, lastOrderAt: null };
+    const o = orderMap[c.orderId];
+    perCustomer[k].orders += 1;
+    perCustomer[k].spent += o ? Number(o.subTotal) || 0 : 0;
+    perCustomer[k].commission += Number(c.amount) || 0;
+    if (!perCustomer[k].lastOrderAt || new Date(c.createdAt) > new Date(perCustomer[k].lastOrderAt)) perCustomer[k].lastOrderAt = c.createdAt;
+  });
+
+  const customers = referrals
+    .filter(r => userMap[r.customerId] && userMap[r.customerId].isVerified !== false)
+    .map((r) => {
+      const u = userMap[r.customerId];
+      const s = perCustomer[r.customerId] || { orders: 0, spent: 0, commission: 0, lastOrderAt: null };
+      return {
+        id: u.id, fullName: u.fullName, phone: maskPhone(u.phoneNumber), joinedAt: r.createdAt,
+        orders: s.orders, totalSpent: round2(s.spent), commissionEarned: round2(s.commission), lastOrderAt: s.lastOrderAt
+      };
+    })
+    .sort((a, b) => new Date(b.joinedAt) - new Date(a.joinedAt));
+
+  const recent = commissions.slice(0, 200).map((c) => {
+    const o = orderMap[c.orderId];
+    const cu = userMap[c.customerId];
+    return {
+      id: c.id, orderId: c.orderId, date: c.createdAt, customer: cu ? cu.fullName : `Customer #${c.customerId}`,
+      type: c.type, rate: Number(c.rate), orderTotal: Number(c.orderTotal), profit: Number(c.orderProfit), amount: Number(c.amount),
+      status: c.status, paidAt: c.paidAt, note: c.note,
+      items: o ? getOrderItems(o).map(i => `${i.quantity}× ${i.name || i.brandName}`).join(', ') : ''
+    };
+  });
+
+  return {
+    summary: {
+      customers: customers.length,
+      orders: live.length,
+      newCustomerOrders: live.filter(c => c.type === 'NEW_CUSTOMER').length,
+      repeatOrders: live.filter(c => c.type === 'REPEAT').length,
+      kgSold: round2(kgSold),
+      salesValue: round2(salesValue),
+      profitGenerated: sum(live, c => c.orderProfit),
+      commissionPending: pendingAmount,
+      commissionPaid: paidAmount,
+      commissionTotal: round2(pendingAmount + paidAmount),
+      clawbackDue: clawbackAmount
+    },
+    year: selectedYear,
+    availableYears: Array.from(years).sort((a, b) => b - a),
+    monthly,
+    products: Object.values(productMap).map(p => ({ ...p, kg: round2(p.kg), revenue: round2(p.revenue) })).sort((a, b) => b.kg - a.kg),
+    customers,
+    commissions: recent,
+    payouts: payouts.map(p => ({ id: p.id, amount: Number(p.amount), method: p.method, reference: p.reference, note: p.note, commissionCount: p.commissionCount, date: p.createdAt }))
+  };
+}
+
+/** Staff role assignment shared by every admin screen. Throws errors with a .status for the caller to return. */
+const httpError = (status, message) => { const e = new Error(message); e.status = status; return e; };
+async function assignStaffRole(req, target, newRole, note) {
+  if (!['customer', 'support', 'agent'].includes(newRole)) throw httpError(400, 'Role must be customer, support or agent.');
+  if (target.role === 'admin') throw httpError(403, 'Administrator accounts cannot be changed here.');
+  if (req && req.user && Number(target.id) === Number(req.user.id)) throw httpError(403, 'You cannot change your own role.');
+  if (target.isActive === false && newRole !== 'customer') throw httpError(400, 'Reactivate this account before giving it a staff role.');
+  if (target.isVerified === false) throw httpError(400, 'This account has not been verified yet.');
+
+  let row = await StaffRole.findOne({ where: { userId: target.id } });
+  const oldRole = row && STAFF_ROLES.includes(row.role) ? row.role : 'customer';
+  if (oldRole === newRole) return { changed: false, role: newRole, referralCode: row ? row.referralCode : null };
+
+  if (newRole === 'customer') {
+    row.role = 'none';
+    row.dismissedAt = new Date();
+    row.note = note ? String(note).slice(0, 255) : row.note;
+    await row.save();
+  } else {
+    if (!row) row = await StaffRole.create({ userId: target.id, role: newRole, assignedBy: req && req.user ? req.user.id : null });
+    row.role = newRole;
+    row.dismissedAt = null;
+    row.assignedBy = req && req.user ? req.user.id : row.assignedBy;
+    row.note = note ? String(note).slice(0, 255) : row.note;
+    if (newRole === 'agent' && !row.referralCode) row.referralCode = await generateUniqueReferralCode();
+    await row.save();
+  }
+
+  await logEvent({
+    req, action: newRole === 'customer' ? (oldRole === 'agent' ? 'AGENT_DISMISSED' : 'STAFF_DISMISSED') : (newRole === 'agent' ? 'AGENT_APPOINTED' : 'SUPPORT_APPOINTED'),
+    category: 'users', severity: 'warn', targetType: 'user', targetId: target.id,
+    summary: `${target.fullName} (#${target.id}) changed from ${oldRole} to ${newRole}`,
+    details: { from: oldRole, to: newRole, referralCode: row ? row.referralCode : null, note: note || null }
+  });
+  return { changed: true, role: newRole, referralCode: row ? row.referralCode : null };
+}
+
+/** Lets old admin forms (which send a role) still work for the new roles. Returns true when it handled the change. */
+async function applyRoleChange(req, user, role) {
+  if (role === undefined || role === null) return false;
+  if (STAFF_ROLES.includes(role)) { await assignStaffRole(req, user, role); return true; }
+  const sr = await StaffRole.findOne({ where: { userId: user.id } });
+  if (sr && STAFF_ROLES.includes(sr.role) && (role === 'customer' || role === 'user')) { await assignStaffRole(req, user, 'customer'); return true; }
+  return false;
+}
+
+/** Looks the payment up on PayHero itself, so a forged callback cannot mark an order paid. */
+async function verifyPayHeroPayment(orderId) {
+  try {
+    const response = await axios.get(
+      `https://backend.payhero.co.ke/api/v2/payments?external_reference=ORD-${orderId}`,
+      { headers: { 'Authorization': getPayHeroAuthHeader() }, timeout: 15000 }
+    );
+    const data = response.data;
+    const p = Array.isArray(data) ? data[0] : (data && (data.response || data));
+    const status = String((p && (p.status || p.Status)) || '').toUpperCase();
+    return status === 'SUCCESS' || status === 'PAID';
+  } catch (e) {
+    return false;
+  }
+}
+
+
 // Serverless-safe flash sale sync: no timers, state is derived from the DB (cached for 5s).
 let lastFlashSaleSync = 0;
 async function syncFlashSaleFromDb(force = false) {
@@ -1052,13 +1588,33 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ error: 'Authentication token is required to access this resource.' });
   }
 
-  jwt.verify(token, JWT_SECRET, (err, decodedUser) => {
+  jwt.verify(token, JWT_SECRET, async (err, decodedUser) => {
     if (err) {
       console.log(`DEBUG: Auth Token Verification Failed - ${err.message}`);
       return res.status(403).json({ error: 'Token is invalid or expired. Please sign in again.' });
     }
-    req.user = decodedUser;
-    next();
+    try {
+      // Always trust the database, not the token: suspended accounts are cut off at once and role changes apply immediately.
+      const dbUser = await User.findByPk(decodedUser.id, { attributes: ['id', 'fullName', 'role', 'isActive', 'phoneNumber', 'email'] });
+      if (!dbUser) {
+        return res.status(401).json({ error: 'This account no longer exists. Please sign in again.' });
+      }
+      if (dbUser.isActive === false) {
+        return res.status(403).json({ error: 'Your account is suspended. Please contact customer care.' });
+      }
+      req.user = {
+        ...decodedUser,
+        id: dbUser.id,
+        fullName: dbUser.fullName,
+        phoneNumber: dbUser.phoneNumber,
+        email: dbUser.email,
+        role: await effectiveRoleFor(dbUser)
+      };
+      next();
+    } catch (dbErr) {
+      console.error('DEBUG: Auth user lookup failed:', dbErr.message);
+      return res.status(500).json({ error: 'Could not verify your session. Please try again.' });
+    }
   });
 };
 
@@ -1561,7 +2117,7 @@ async function startServer() {
           existingUser.verificationOtpExpires = null;
           await existingUser.save();
 
-          const token = jwt.sign({ id: existingUser.id, role: existingUser.role }, JWT_SECRET, { expiresIn: '7d' });
+          const token = jwt.sign({ id: existingUser.id, role: await effectiveRoleFor(existingUser) }, JWT_SECRET, { expiresIn: '7d' });
           return res.status(200).json({
             message: 'Account verified and created successfully.',
             token,
@@ -1570,7 +2126,7 @@ async function startServer() {
               fullName: existingUser.fullName,
               email: existingUser.email,
               phoneNumber: existingUser.phoneNumber,
-              role: existingUser.role,
+              role: await effectiveRoleFor(existingUser),
               rewardPoints: existingUser.rewardPoints || 0
             }
           });
@@ -1607,6 +2163,7 @@ async function startServer() {
             await targetUser.save();
           }
 
+          if (req.body && req.body.referralCode) await attachReferral(targetUser.id, req.body.referralCode, 'signup', req);
           const delivery = await dispatchOtp(targetUser, otpCode, 'signup');
           if (!delivery.anySent) {
             return res.status(502).json({ error: OTP_DELIVERY_FAILED_MESSAGE });
@@ -1642,13 +2199,15 @@ async function startServer() {
           });
         }
         
-        const token = jwt.sign({ id: newUser.id, role: newUser.role }, JWT_SECRET, { expiresIn: '7d' });
+        if (req.body && req.body.referralCode) await attachReferral(newUser.id, req.body.referralCode, 'signup', req);
+        await logEvent({ req, actor: { id: newUser.id, role: 'customer', name: newUser.fullName }, action: 'ACCOUNT_CREATED', category: 'auth', targetType: 'user', targetId: newUser.id, summary: `${newUser.fullName} created an account` });
+        const token = jwt.sign({ id: newUser.id, role: await effectiveRoleFor(newUser) }, JWT_SECRET, { expiresIn: '7d' });
         res.status(201).json({ 
           token, 
           user: { 
             id: newUser.id, 
             fullName: newUser.fullName, 
-            role: newUser.role, 
+            role: await effectiveRoleFor(newUser), 
             rewardPoints: newUser.rewardPoints || 0 
           } 
         });
@@ -1702,6 +2261,7 @@ async function startServer() {
           await userRecord.save();
         }
 
+        if (req.body && req.body.referralCode) await attachReferral(userRecord.id, req.body.referralCode, 'signup', req);
         const delivery = await dispatchOtp(userRecord, otpCode, 'signup');
         if (!delivery.anySent) {
           return res.status(502).json({ error: OTP_DELIVERY_FAILED_MESSAGE });
@@ -1760,7 +2320,10 @@ async function startServer() {
         user.verificationOtpExpires = null;
         await user.save();
 
-        const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+        if (body.referralCode) await attachReferral(user.id, body.referralCode, 'signup', req);
+        await logEvent({ req, actor: { id: user.id, role: 'customer', name: user.fullName }, action: 'ACCOUNT_VERIFIED', category: 'auth', targetType: 'user', targetId: user.id, summary: `${user.fullName} verified their account` });
+
+        const token = jwt.sign({ id: user.id, role: await effectiveRoleFor(user) }, JWT_SECRET, { expiresIn: '7d' });
 
         res.status(200).json({
           success: true,
@@ -1771,7 +2334,7 @@ async function startServer() {
             fullName: user.fullName,
             email: user.email,
             phoneNumber: user.phoneNumber,
-            role: user.role,
+            role: await effectiveRoleFor(user),
             rewardPoints: user.rewardPoints || 0
           }
         });
@@ -1845,14 +2408,33 @@ async function startServer() {
           return res.status(400).json({ error: 'Phone number or email address and password are required.' });
         }
 
+        const throttleKey = loginKey(normalizeKenyanPhone(loginIdentifier) || loginIdentifier);
+        const lockedMs = loginLockedForMs(throttleKey);
+        if (lockedMs > 0) {
+          await logEvent({ req, actor: { id: null, role: 'anonymous', name: String(loginIdentifier).slice(0, 80) }, action: 'LOGIN_BLOCKED', category: 'auth', severity: 'alert',
+            summary: `Login blocked for "${String(loginIdentifier).slice(0, 80)}" after repeated failures`, details: { retryInMinutes: Math.ceil(lockedMs / 60000) } });
+          return res.status(429).json({ error: `Too many failed attempts. Try again in ${Math.ceil(lockedMs / 60000)} minute(s) or reset your password.` });
+        }
+        const failLogin = async (status, message, why, knownUser) => {
+          const fails = registerLoginFailure(throttleKey);
+          await logEvent({ req, actor: { id: knownUser ? knownUser.id : null, role: 'anonymous', name: knownUser ? knownUser.fullName : String(loginIdentifier).slice(0, 80) },
+            action: fails >= LOGIN_MAX_FAILS ? 'LOGIN_LOCKOUT' : 'LOGIN_FAILED', category: 'auth', severity: fails >= LOGIN_MAX_FAILS ? 'alert' : 'warn',
+            targetType: knownUser ? 'user' : null, targetId: knownUser ? knownUser.id : null,
+            summary: `Failed login for "${String(loginIdentifier).slice(0, 80)}" (${why}), attempt ${fails}`, details: { reason: why, attempts: fails } });
+          return res.status(status).json({ error: message });
+        };
+
         const user = await User.findOne({ 
           where: { 
             [Op.or]: identityConditions(loginIdentifier)
           } 
         });
 
-        if (!user || !user.isActive) {
-          return res.status(401).json({ error: 'Invalid login credentials or account has been suspended.' });
+        if (!user) {
+          return failLogin(401, 'Invalid login credentials or account has been suspended.', 'unknown account', null);
+        }
+        if (!user.isActive) {
+          return failLogin(401, 'Invalid login credentials or account has been suspended.', 'suspended account', user);
         }
 
         if (!user.password) {
@@ -1861,16 +2443,21 @@ async function startServer() {
 
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
-          return res.status(401).json({ error: 'Invalid credentials or account disabled.' });
+          return failLogin(401, 'Invalid credentials or account disabled.', 'wrong password', user);
         }
+        if (user.isVerified === false) {
+          return res.status(403).json({ error: 'Please verify your phone number with the code we sent before signing in.' });
+        }
+        loginFailures.delete(throttleKey);
 
-        const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+        const token = jwt.sign({ id: user.id, role: await effectiveRoleFor(user) }, JWT_SECRET, { expiresIn: '7d' });
+        await logEvent({ req, actor: { id: user.id, role: await effectiveRoleFor(user), name: user.fullName }, action: 'LOGIN_SUCCESS', category: 'auth', targetType: 'user', targetId: user.id, summary: `${user.fullName} signed in` });
         res.json({ 
           token, 
           user: { 
             id: user.id, 
             fullName: user.fullName, 
-            role: user.role, 
+            role: await effectiveRoleFor(user), 
             phoneNumber: user.phoneNumber, 
             email: user.email, 
             rewardPoints: user.rewardPoints || 0 
@@ -1887,7 +2474,8 @@ async function startServer() {
       try {
         const user = await User.findByPk(req.user.id, { attributes: { exclude: ['password', 'resetToken', 'resetTokenExpires', 'verificationOtp', 'verificationOtpExpires'] } });
         if (!user) return res.status(404).json({ error: 'User profile not found.' });
-        res.json(user);
+        const staffRow = await StaffRole.findOne({ where: { userId: user.id } });
+        res.json({ ...user.toJSON(), role: await effectiveRoleFor(user), referralCode: staffRow && staffRow.role === 'agent' ? staffRow.referralCode : undefined });
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
@@ -1924,7 +2512,7 @@ async function startServer() {
             fullName: user.fullName, 
             email: user.email, 
             phoneNumber: user.phoneNumber, 
-            role: user.role, 
+            role: await effectiveRoleFor(user), 
             rewardPoints: user.rewardPoints || 0 
           } 
         });
@@ -2540,6 +3128,13 @@ async function startServer() {
         // Clear user shopping cart after successful order creation
         await Cart.destroy({ where: { userId: req.user.id } });
 
+        // Referral code typed at checkout (only links customers that do not already belong to an agent)
+        let referralResult = { attached: false };
+        if (req.body && req.body.referralCode) referralResult = await attachReferral(req.user.id, req.body.referralCode, 'checkout', req);
+        await logEvent({ req, action: 'ORDER_CREATED', category: 'orders', targetType: 'order', targetId: generatedOrder.id,
+          summary: `Order #${generatedOrder.id} placed for KES ${finalOrderTotal} (${county || 'no county'}, ${paymentMethod || 'mpesa_stk'})`,
+          details: { items: builtOrderLineItems.length, kg: totalWeightKg, referralLinked: !!referralResult.attached } });
+
         let stkInitiated = false;
         let stkMessage = '';
 
@@ -2638,6 +3233,7 @@ async function startServer() {
             await user.save();
           }
           await order.save();
+          await onOrderPaid(order, 'payment status check');
           io.emit('orderStatusUpdated', order);
         } else if (failureReason) {
           order.paymentDetails = {
@@ -2648,6 +3244,8 @@ async function startServer() {
           };
           order.status = 'payment_failed';
           await order.save();
+          await logEvent({ action: 'PAYMENT_FAILED', category: 'orders', severity: 'warn', targetType: 'order', targetId: order.id,
+            summary: `Payment failed for order #${order.id}: ${failureReason}`, details: { userId: order.userId } });
           io.emit('orderStatusUpdated', order);
         }
 
@@ -2687,6 +3285,16 @@ async function startServer() {
           if (order) {
             const isPaymentSuccessful = String(statusStr).toUpperCase() === 'SUCCESS' || body.success === true;
             const existingPaymentDetails = order.paymentDetails || {};
+
+            // A callback is just a web request anyone could forge, so confirm the payment with PayHero before crediting anything.
+            if (isPaymentSuccessful && existingPaymentDetails.isPaid !== true) {
+              const reallyPaid = await verifyPayHeroPayment(order.id);
+              if (!reallyPaid) {
+                await logEvent({ action: 'PAYMENT_CALLBACK_UNVERIFIED', category: 'orders', severity: 'alert', targetType: 'order', targetId: order.id,
+                  summary: `Callback claimed order #${order.id} was paid but PayHero could not confirm it`, details: { receipt: mpesaReceipt } });
+                return res.status(200).json({ status: 'PENDING_VERIFICATION', message: 'Payment will be confirmed by the status check.' });
+              }
+            }
             
             if (isPaymentSuccessful) {
               if (order.status === 'payment_failed' || order.status === 'pending') {
@@ -2727,6 +3335,13 @@ async function startServer() {
             }
 
             await order.save();
+
+            if (isPaymentSuccessful && existingPaymentDetails.isPaid !== true) {
+              await onOrderPaid(order, 'M-Pesa callback');
+            } else if (!isPaymentSuccessful) {
+              await logEvent({ action: 'PAYMENT_FAILED', category: 'orders', severity: 'warn', targetType: 'order', targetId: order.id,
+                summary: `Payment failed for order #${order.id}`, details: { userId: order.userId } });
+            }
 
             io.to('admin-dashboard-room').emit('paymentReceived', {
               orderId: order.id,
@@ -3218,6 +3833,10 @@ async function startServer() {
         order.status = req.body.status;
         await order.save();
 
+        if (/cancel|refund|reject/i.test(String(req.body.status || ''))) {
+          await reverseAgentCommission(order, `Order marked ${req.body.status} by ${req.adminUser.fullName}`);
+        }
+
         await AdminLog.create({
           adminId: req.adminUser.id,
           action: 'UPDATE_ORDER_STATUS',
@@ -3259,6 +3878,12 @@ async function startServer() {
         }
 
         await order.save();
+
+        if (updatedIsPaid && currentPaymentDetails.isPaid !== true) {
+          await onOrderPaid(order, `manual override by ${req.adminUser.fullName}`);
+        } else if (!updatedIsPaid && currentPaymentDetails.isPaid === true) {
+          await reverseAgentCommission(order, `Payment marked unpaid by ${req.adminUser.fullName}`);
+        }
 
         await AdminLog.create({
           adminId: req.adminUser.id,
@@ -3312,11 +3937,422 @@ async function startServer() {
       }
     });
 
+    // ==========================================================================
+    // CUSTOMER CARE (SUPPORT) — can view accounts, fix a name, and un-suspend. Nothing else.
+    // ==========================================================================
+    const supportOnly = [authenticateToken, requireRoles('support', 'admin')];
+    const SUPPORT_USER_ATTRS = ['id', 'fullName', 'phoneNumber', 'email', 'isActive', 'isVerified', 'rewardPoints', 'createdAt', 'role'];
+
+    const overlayStaffRoles = async (users) => {
+      const ids = users.map(u => u.id);
+      const rows = ids.length ? await StaffRole.findAll({ where: { userId: ids } }) : [];
+      const map = {};
+      rows.forEach(r => { if (STAFF_ROLES.includes(r.role)) map[r.userId] = r; });
+      return users.map((u) => {
+        const o = u.toJSON ? u.toJSON() : u;
+        const sr = map[o.id];
+        return { ...o, role: o.role === 'admin' ? 'admin' : (sr ? sr.role : o.role) };
+      });
+    };
+
+    const supportTargetGuard = async (req, res, user) => {
+      if (!user) { res.status(404).json({ error: 'User not found.' }); return false; }
+      if (user.role === 'admin') { res.status(403).json({ error: 'Administrator accounts cannot be managed from customer care.' }); return false; }
+      if (req.user.role === 'support') {
+        if (Number(user.id) === Number(req.user.id)) { res.status(403).json({ error: 'You cannot manage your own account from here.' }); return false; }
+        const sr = await StaffRole.findOne({ where: { userId: user.id } });
+        if (sr && sr.role === 'support') { res.status(403).json({ error: 'Other customer care accounts can only be managed by an administrator.' }); return false; }
+      }
+      return true;
+    };
+
+    expressApp.get('/api/support/overview', ...supportOnly, async (req, res) => {
+      try {
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const base = { role: { [Op.ne]: 'admin' } };
+        const [total, suspended, newThisWeek, unverified] = await Promise.all([
+          User.count({ where: base }),
+          User.count({ where: { ...base, isActive: false } }),
+          User.count({ where: { ...base, createdAt: { [Op.gte]: weekAgo } } }),
+          User.count({ where: { ...base, isVerified: false } })
+        ]);
+        const myRecent = await ActivityEvent.findAll({ where: { actorId: req.user.id, category: 'users' }, order: [['createdAt', 'DESC']], limit: 15 });
+        res.json({ totalCustomers: total, suspended, newThisWeek, unverified, myRecentActions: myRecent });
+      } catch (err) {
+        console.error('❌ Support overview error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.get('/api/support/users', ...supportOnly, async (req, res) => {
+      try {
+        const search = String(req.query.search || '').trim().slice(0, 60);
+        const status = String(req.query.status || 'all');
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(50, Math.max(5, parseInt(req.query.limit, 10) || 20));
+        const and = [{ role: { [Op.ne]: 'admin' } }];
+        if (status === 'suspended') and.push({ isActive: false });
+        if (status === 'active') and.push({ isActive: true });
+        if (search) {
+          const digits = search.replace(/\D/g, '');
+          const ors = [{ fullName: { [LIKE_OP]: `%${search}%` } }, { email: { [LIKE_OP]: `%${search}%` } }];
+          if (digits.length >= 3) ors.push({ phoneNumber: { [LIKE_OP]: `%${digits.replace(/^0/, '')}%` } });
+          const variants = phoneVariants(search);
+          if (variants && variants.length) ors.push({ phoneNumber: { [Op.in]: variants } });
+          if (/^\d{1,9}$/.test(search)) ors.push({ id: Number(search) });
+          and.push({ [Op.or]: ors });
+        }
+        const { rows, count } = await User.findAndCountAll({ where: { [Op.and]: and }, attributes: SUPPORT_USER_ATTRS, order: [['createdAt', 'DESC']], limit, offset: (page - 1) * limit });
+        res.json({ users: await overlayStaffRoles(rows), total: count, page, pages: Math.max(1, Math.ceil(count / limit)) });
+      } catch (err) {
+        console.error('❌ Support users error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.get('/api/support/users/:id', ...supportOnly, async (req, res) => {
+      try {
+        const user = await User.findByPk(req.params.id, { attributes: SUPPORT_USER_ATTRS });
+        if (!user || user.role === 'admin') return res.status(404).json({ error: 'User not found.' });
+        const [profile] = await overlayStaffRoles([user]);
+        const orders = await Order.findAll({ where: { userId: user.id }, order: [['createdAt', 'DESC']], limit: 50 });
+        const notes = await SupportNote.findAll({ where: { customerId: user.id }, order: [['createdAt', 'DESC']], limit: 50 });
+        const history = await ActivityEvent.findAll({ where: { targetType: 'user', targetId: String(user.id) }, order: [['createdAt', 'DESC']], limit: 30 });
+        const referral = await CustomerReferral.findOne({ where: { customerId: user.id } });
+        let referredBy = null;
+        if (referral) {
+          const agent = await User.findByPk(referral.agentId, { attributes: ['fullName'] });
+          referredBy = agent ? `${agent.fullName} (${referral.referralCode})` : referral.referralCode;
+        }
+        res.json({
+          user: profile,
+          referredBy,
+          orders: orders.map((o) => {
+            const pd = o.paymentDetails || {};
+            return {
+              id: o.id, status: o.status, grandTotal: Number(o.grandTotal) || 0, createdAt: o.createdAt,
+              paymentStatus: pd.paidTag || (pd.isPaid ? 'PAID' : 'PENDING'), mpesaReceipt: pd.mpesaReceipt || null, method: pd.method || null,
+              county: o.county, town: o.town, items: getOrderItems(o).map(i => `${i.quantity}× ${i.name || i.brandName}`).join(', ')
+            };
+          }),
+          notes,
+          history
+        });
+      } catch (err) {
+        console.error('❌ Support user detail error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // Customer care may change ONE thing about an account: the display name.
+    expressApp.put('/api/support/users/:id/name', ...supportOnly, async (req, res) => {
+      try {
+        const user = await User.findByPk(req.params.id);
+        if (!(await supportTargetGuard(req, res, user))) return;
+        const newName = String((req.body || {}).fullName || '').replace(/\s+/g, ' ').trim();
+        if (newName.length < 3 || newName.length > 80 || !/^[\p{L}][\p{L}\p{M}'’.\- ]*[\p{L}.]$/u.test(newName)) {
+          return res.status(400).json({ error: 'Enter a real full name (3–80 letters; spaces, hyphens and apostrophes are allowed).' });
+        }
+        const oldName = user.fullName;
+        if (oldName === newName) return res.json({ message: 'Name is already up to date.', fullName: newName });
+        user.fullName = newName;
+        await user.save();
+        await logEvent({ req, action: 'USER_NAME_CHANGED', category: 'users', targetType: 'user', targetId: user.id,
+          summary: `${req.user.fullName} renamed user #${user.id}: "${oldName}" → "${newName}"`, details: { from: oldName, to: newName } });
+        res.json({ message: 'Name updated.', fullName: newName });
+      } catch (err) {
+        console.error('❌ Support rename error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // ...and reactivate a suspended account. Suspending/deleting stays with administrators.
+    expressApp.post('/api/support/users/:id/unsuspend', ...supportOnly, async (req, res) => {
+      try {
+        const user = await User.findByPk(req.params.id);
+        if (!(await supportTargetGuard(req, res, user))) return;
+        if (user.isActive !== false) return res.status(400).json({ error: 'This account is not suspended.' });
+        const reason = String((req.body || {}).reason || '').trim().slice(0, 300);
+        if (reason.length < 3) return res.status(400).json({ error: 'Please give a short reason for reactivating this account.' });
+        user.isActive = true;
+        await user.save();
+        await logEvent({ req, action: 'USER_UNSUSPENDED', category: 'users', severity: 'warn', targetType: 'user', targetId: user.id,
+          summary: `${req.user.fullName} reactivated ${user.fullName} (#${user.id}): ${reason}`, details: { reason } });
+        res.json({ message: 'Account reactivated.', isActive: true });
+      } catch (err) {
+        console.error('❌ Support unsuspend error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.post('/api/support/users/:id/notes', ...supportOnly, async (req, res) => {
+      try {
+        const user = await User.findByPk(req.params.id, { attributes: ['id', 'role', 'fullName'] });
+        if (!user || user.role === 'admin') return res.status(404).json({ error: 'User not found.' });
+        const note = String((req.body || {}).note || '').trim().slice(0, 1000);
+        if (note.length < 3) return res.status(400).json({ error: 'Write a note of at least 3 characters.' });
+        const created = await SupportNote.create({ customerId: user.id, authorId: req.user.id, authorName: req.user.fullName, note });
+        await logEvent({ req, action: 'SUPPORT_NOTE_ADDED', category: 'users', targetType: 'user', targetId: user.id, summary: `${req.user.fullName} added a note on ${user.fullName} (#${user.id})` });
+        res.status(201).json(created);
+      } catch (err) {
+        console.error('❌ Support note error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // ==========================================================================
+    // AGENTS — referral partners who earn a share of profit
+    // ==========================================================================
+    expressApp.get('/api/referral/validate', async (req, res) => {
+      try {
+        const code = normalizeReferralCode(req.query.code);
+        if (!code) return res.json({ valid: false });
+        const staff = await StaffRole.findOne({ where: { referralCode: code, role: 'agent' } });
+        if (!staff) return res.json({ valid: false });
+        const agentUser = await User.findByPk(staff.userId, { attributes: ['fullName', 'isActive'] });
+        if (!agentUser || agentUser.isActive === false) return res.json({ valid: false });
+        res.json({ valid: true, code, agentName: String(agentUser.fullName || '').split(' ')[0] });
+      } catch (err) {
+        res.json({ valid: false });
+      }
+    });
+
+    expressApp.get('/api/agent/overview', authenticateToken, requireRoles('agent'), async (req, res) => {
+      try {
+        const staff = await StaffRole.findOne({ where: { userId: req.user.id } });
+        if (!staff || staff.role !== 'agent') return res.status(403).json({ error: 'You are not an active agent.' });
+        const snapshot = await buildAgentSnapshot(req.user.id, req.query.year);
+        res.json({ referralCode: staff.referralCode, agentSince: staff.createdAt, rates: await getCommissionRates(), ...snapshot });
+      } catch (err) {
+        console.error('❌ Agent overview error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // ==========================================================================
+    // ADMIN — roles, agents, payouts, commission settings, full activity feed
+    // ==========================================================================
+    expressApp.put('/api/admin/users/:id/role', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const user = await User.findByPk(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found.' });
+        const result = await assignStaffRole(req, user, String((req.body || {}).role || ''), (req.body || {}).note);
+        res.json({ message: result.changed ? `Role updated to ${result.role}.` : 'Role unchanged.', ...result });
+      } catch (err) {
+        res.status(err.status || 500).json({ error: err.message });
+      }
+    });
+
+    expressApp.get('/api/admin/agents', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const rows = await StaffRole.findAll({ where: { referralCode: { [Op.ne]: null } } });
+        const users = rows.length ? await User.findAll({ where: { id: rows.map(r => r.userId) }, attributes: ['id', 'fullName', 'phoneNumber', 'email', 'isActive'] }) : [];
+        const userMap = {};
+        users.forEach(u => { userMap[u.id] = u; });
+        const agents = await Promise.all(rows.map(async (r) => {
+          const u = userMap[r.userId];
+          const snap = await buildAgentSnapshot(r.userId, req.query.year);
+          return {
+            id: r.userId, fullName: u ? u.fullName : `User #${r.userId}`, phoneNumber: u ? u.phoneNumber : null, email: u ? u.email : null,
+            isActive: u ? u.isActive !== false : false, isCurrentAgent: r.role === 'agent', referralCode: r.referralCode,
+            since: r.createdAt, dismissedAt: r.dismissedAt, summary: snap.summary
+          };
+        }));
+        agents.sort((a, b) => (b.isCurrentAgent - a.isCurrentAgent) || (b.summary.commissionTotal - a.summary.commissionTotal));
+        const totals = agents.reduce((t, a) => ({
+          pending: round2(t.pending + a.summary.commissionPending), paid: round2(t.paid + a.summary.commissionPaid),
+          sales: round2(t.sales + a.summary.salesValue), orders: t.orders + a.summary.orders, customers: t.customers + a.summary.customers
+        }), { pending: 0, paid: 0, sales: 0, orders: 0, customers: 0 });
+        res.json({ agents, totals, rates: await getCommissionRates() });
+      } catch (err) {
+        console.error('❌ Admin agents error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.get('/api/admin/agents/:id', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const staff = await StaffRole.findOne({ where: { userId: req.params.id } });
+        if (!staff || !staff.referralCode) return res.status(404).json({ error: 'This user has never been an agent.' });
+        const u = await User.findByPk(req.params.id, { attributes: ['id', 'fullName', 'phoneNumber', 'email', 'isActive'] });
+        const snapshot = await buildAgentSnapshot(req.params.id, req.query.year);
+        res.json({ agent: { id: Number(req.params.id), fullName: u ? u.fullName : '', phoneNumber: u ? u.phoneNumber : null, email: u ? u.email : null,
+          isActive: u ? u.isActive !== false : false, isCurrentAgent: staff.role === 'agent', referralCode: staff.referralCode }, ...snapshot });
+      } catch (err) {
+        console.error('❌ Admin agent detail error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.post('/api/admin/agents/:id/payouts', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const agentId = Number(req.params.id);
+        const { reference, method, note, commissionIds } = req.body || {};
+        const ref = String(reference || '').trim().slice(0, 120);
+        if (ref.length < 3) return res.status(400).json({ error: 'Enter the M-Pesa/bank payment reference for this payout.' });
+        const duplicate = await AgentPayout.findOne({ where: { agentId, reference: ref } });
+        if (duplicate) return res.status(409).json({ error: 'A payout with this reference was already recorded for this agent.' });
+
+        const where = { agentId, status: 'PENDING' };
+        if (Array.isArray(commissionIds) && commissionIds.length) where.id = commissionIds.map(Number).filter(Number.isFinite);
+        const result = await sequelize.transaction(async (t) => {
+          const due = await AgentCommission.findAll({ where, transaction: t });
+          if (!due.length) throw httpError(400, 'There are no pending commissions to pay out.');
+          const total = round2(due.reduce((s, c) => s + Number(c.amount), 0));
+          const payout = await AgentPayout.create({
+            agentId, amount: total, method: String(method || 'mpesa').slice(0, 40), reference: ref,
+            note: note ? String(note).slice(0, 255) : null, paidBy: req.adminUser.id, commissionCount: due.length
+          }, { transaction: t });
+          await AgentCommission.update({ status: 'PAID', payoutId: payout.id, paidAt: new Date() }, { where: { id: due.map(c => c.id) }, transaction: t });
+          return { payout, total, count: due.length };
+        });
+        const agentUser = await User.findByPk(agentId, { attributes: ['fullName'] });
+        await logEvent({ req, action: 'PAYOUT_RECORDED', category: 'agents', severity: 'warn', targetType: 'user', targetId: agentId,
+          summary: `${req.adminUser.fullName} paid ${agentUser ? agentUser.fullName : 'agent #' + agentId} KES ${result.total} for ${result.count} order(s), ref ${ref}`,
+          details: { payoutId: result.payout.id, amount: result.total, method: method || 'mpesa', reference: ref } });
+        res.status(201).json({ message: `Payout of KES ${result.total} recorded.`, payout: result.payout, amount: result.total, commissions: result.count });
+      } catch (err) {
+        console.error('❌ Payout error:', err);
+        res.status(err.status || 500).json({ error: err.message });
+      }
+    });
+
+    expressApp.post('/api/admin/agents/:id/regenerate-code', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const staff = await StaffRole.findOne({ where: { userId: req.params.id, role: 'agent' } });
+        if (!staff) return res.status(404).json({ error: 'Active agent not found.' });
+        const oldCode = staff.referralCode;
+        staff.referralCode = await generateUniqueReferralCode();
+        await staff.save();
+        await CustomerReferral.update({ referralCode: staff.referralCode }, { where: { agentId: staff.userId } });
+        await logEvent({ req, action: 'AGENT_CODE_REGENERATED', category: 'agents', severity: 'warn', targetType: 'user', targetId: staff.userId,
+          summary: `Referral code for agent #${staff.userId} changed ${oldCode} → ${staff.referralCode}`, details: { from: oldCode, to: staff.referralCode } });
+        res.json({ referralCode: staff.referralCode });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.get('/api/admin/config/agent-commission', authenticateToken, requireAdmin, async (req, res) => {
+      res.json(await getCommissionRates());
+    });
+    expressApp.put('/api/admin/config/agent-commission', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const b = req.body || {};
+        const rates = {
+          newCustomerRate: clampRate(b.newCustomerRate, NaN),
+          repeatRate: clampRate(b.repeatRate, NaN)
+        };
+        if (!Number.isFinite(rates.newCustomerRate) || !Number.isFinite(rates.repeatRate)) {
+          return res.status(400).json({ error: 'Enter both rates as percentages between 0 and 100.' });
+        }
+        const before = await getCommissionRates();
+        const [row] = await SystemConfig.findOrCreate({ where: { key: 'agent_commission' }, defaults: { value: rates } });
+        row.value = rates;
+        row.changed('value', true);
+        await row.save();
+        await logEvent({ req, action: 'AGENT_RATES_CHANGED', category: 'settings', severity: 'warn', targetType: 'config', targetId: 'agent_commission',
+          summary: `Agent commission changed: new customers ${Math.round(before.newCustomerRate * 100)}% → ${Math.round(rates.newCustomerRate * 100)}%, repeat ${Math.round(before.repeatRate * 100)}% → ${Math.round(rates.repeatRate * 100)}%`,
+          details: { before, after: rates } });
+        res.json({ message: 'Commission rates saved. They apply to payments confirmed from now on.', ...rates });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // ---------- Activity feed ----------
+    const buildEventFilter = (q) => {
+      const where = {};
+      if (q.category && q.category !== 'all') where.category = String(q.category);
+      if (q.severity && q.severity !== 'all') where.severity = String(q.severity);
+      if (q.actorRole && q.actorRole !== 'all') where.actorRole = String(q.actorRole);
+      if (q.action) where.action = String(q.action);
+      if (q.actorId && /^\d+$/.test(String(q.actorId))) where.actorId = Number(q.actorId);
+      const range = {};
+      if (q.from && !Number.isNaN(Date.parse(q.from))) range[Op.gte] = new Date(q.from);
+      if (q.to && !Number.isNaN(Date.parse(q.to))) { const d = new Date(q.to); d.setHours(23, 59, 59, 999); range[Op.lte] = d; }
+      if (Object.getOwnPropertySymbols(range).length) where.createdAt = range;
+      const text = String(q.q || '').trim().slice(0, 80);
+      if (text) where[Op.or] = [{ summary: { [LIKE_OP]: `%${text}%` } }, { actorName: { [LIKE_OP]: `%${text}%` } }, { action: { [LIKE_OP]: `%${text}%` } }, { targetId: text }];
+      return where;
+    };
+
+    expressApp.get('/api/admin/events', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(200, Math.max(10, parseInt(req.query.limit, 10) || 50));
+        const { rows, count } = await ActivityEvent.findAndCountAll({ where: buildEventFilter(req.query), order: [['createdAt', 'DESC']], limit, offset: (page - 1) * limit });
+        res.json({ events: rows, total: count, page, pages: Math.max(1, Math.ceil(count / limit)) });
+      } catch (err) {
+        console.error('❌ Events error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.get('/api/admin/events/summary', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const recent = await ActivityEvent.findAll({ where: { createdAt: { [Op.gte]: since } }, order: [['createdAt', 'DESC']], limit: 5000 });
+        const byCategory = {}, byHour = Array.from({ length: 24 }, () => 0), actors = {};
+        let alerts = 0, warnings = 0, failedLogins = 0;
+        const hourAgo = Date.now() - 60 * 60 * 1000;
+        recent.forEach((e) => {
+          byCategory[e.category] = (byCategory[e.category] || 0) + 1;
+          if (e.severity === 'alert') alerts += 1;
+          if (e.severity === 'warn') warnings += 1;
+          if (/LOGIN_FAILED|LOGIN_LOCKOUT|LOGIN_BLOCKED/.test(e.action) && new Date(e.createdAt).getTime() >= hourAgo) failedLogins += 1;
+          const hoursAgo = Math.min(23, Math.floor((Date.now() - new Date(e.createdAt).getTime()) / 3600000));
+          byHour[23 - hoursAgo] += 1;
+          if (e.actorId && e.actorRole !== 'anonymous') {
+            const k = e.actorId;
+            actors[k] = actors[k] || { actorId: k, name: e.actorName, role: e.actorRole, count: 0 };
+            actors[k].count += 1;
+          }
+        });
+        const pendingCommission = round2((await AgentCommission.findAll({ where: { status: 'PENDING' }, attributes: ['amount'] })).reduce((s, c) => s + Number(c.amount), 0));
+        res.json({
+          last24h: recent.length, alerts, warnings, failedLoginsLastHour: failedLogins, pendingCommission,
+          byCategory, byHour, topActors: Object.values(actors).sort((a, b) => b.count - a.count).slice(0, 6)
+        });
+      } catch (err) {
+        console.error('❌ Events summary error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.get('/api/admin/events/export/csv', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const rows = await ActivityEvent.findAll({ where: buildEventFilter(req.query), order: [['createdAt', 'DESC']], limit: 5000 });
+        const esc = (v) => {
+          let t = v === null || v === undefined ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+          if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`; // stops spreadsheet formula injection
+          return `"${t.replace(/"/g, '""')}"`;
+        };
+        const header = ['Time', 'Severity', 'Category', 'Action', 'Actor', 'Role', 'Target', 'Summary', 'IP'];
+        const lines = [header.join(',')].concat(rows.map(e => [
+          new Date(e.createdAt).toISOString(), e.severity, e.category, e.action, e.actorName, e.actorRole,
+          e.targetType ? `${e.targetType} #${e.targetId}` : '', e.summary, e.ipAddress
+        ].map(esc).join(',')));
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="activity-${new Date().toISOString().slice(0, 10)}.csv"`);
+        res.send(lines.join('\n'));
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     // --- USER CLEARANCE MANAGEMENT ---
     expressApp.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
       try {
-        const systemRegisteredUsers = await User.findAll({ attributes: { exclude: ['password'] } });
-        res.json(systemRegisteredUsers);
+        const systemRegisteredUsers = await User.findAll({ attributes: { exclude: ['password', 'resetToken', 'resetTokenExpires', 'verificationOtp', 'verificationOtpExpires'] } });
+        const staffRows = await StaffRole.findAll();
+        const staffMap = {};
+        staffRows.forEach(r => { if (STAFF_ROLES.includes(r.role)) staffMap[r.userId] = r; });
+        res.json(systemRegisteredUsers.map((u) => {
+          const o = u.toJSON();
+          const sr = staffMap[o.id];
+          return { ...o, role: o.role === 'admin' ? 'admin' : (sr ? sr.role : o.role), referralCode: sr && sr.role === 'agent' ? sr.referralCode : undefined, isSuspended: o.isActive === false };
+        }));
       } catch (err) { 
         res.status(500).json({ error: err.message }); 
       }
@@ -3344,8 +4380,20 @@ async function startServer() {
             const user = await User.findByPk(req.params.id);
             if (!user) return res.status(404).json({ error: 'User record not found.' });
             if (fullName !== undefined) user.fullName = fullName;
-            if (role !== undefined) user.role = role;
+            if (role !== undefined) {
+              const handledAsStaff = await applyRoleChange(req, user, role);
+              if (!handledAsStaff && !STAFF_ROLES.includes(role) && role !== 'none') user.role = role;
+            }
             if (isActive !== undefined) user.isActive = isActive;
+            if (req.body && req.body.rewardPoints !== undefined) {
+              const pts = Math.round(Number(req.body.rewardPoints));
+              if (!Number.isFinite(pts) || pts < 0 || pts > 1000000) return res.status(400).json({ error: 'Reward points must be a whole number between 0 and 1,000,000.' });
+              if (pts !== Number(user.rewardPoints || 0)) {
+                await logEvent({ req, action: 'USER_POINTS_ADJUSTED', category: 'users', severity: 'warn', targetType: 'user', targetId: user.id,
+                  summary: `${req.user ? req.user.fullName : 'Admin'} changed reward points for ${user.fullName} (#${user.id}): ${user.rewardPoints || 0} → ${pts}`, details: { from: Number(user.rewardPoints || 0), to: pts } });
+                user.rewardPoints = pts;
+              }
+            }
             if (email !== undefined) user.email = email || null;
             if (phoneNumber !== undefined) user.phoneNumber = phoneNumber ? (normalizeKenyanPhone(phoneNumber) || phoneNumber) : null;
             await user.save();
@@ -3354,7 +4402,7 @@ async function startServer() {
             delete safe.password;
             res.json({ message: 'User record updated successfully.', user: safe });
           } catch (err) {
-            console.error('❌ Admin route error:', err); res.status(500).json({ error: err.message });
+            console.error('❌ Admin route error:', err); res.status(err.status || 500).json({ error: err.message });
           }
         };
         expressApp.put('/api/admin/users/:id', authenticateToken, requireAdmin, adminEditUserHandler);
@@ -3366,6 +4414,11 @@ async function startServer() {
             if (!user) return res.status(404).json({ error: 'User record not found.' });
             if (String(user.id) === String(req.adminUser.id)) {
               return res.status(400).json({ error: 'You cannot delete your own admin account.' });
+            }
+            const staffRow = await StaffRole.findOne({ where: { userId: user.id } });
+            const hasCommissions = await AgentCommission.findOne({ where: { agentId: user.id } });
+            if ((staffRow && STAFF_ROLES.includes(staffRow.role)) || hasCommissions) {
+              return res.status(409).json({ error: 'This account is (or was) staff with commission history. Dismiss the role and suspend the account instead of deleting it.' });
             }
             try {
               await user.destroy();
@@ -3511,7 +4564,10 @@ async function startServer() {
             if (!targetUserRecord) return res.status(404).json({ error: 'User record not found.' });
 
             if (fullName !== undefined) targetUserRecord.fullName = fullName;
-            if (role !== undefined) targetUserRecord.role = role;
+            if (role !== undefined) {
+              const handledAsStaff = await applyRoleChange(req, targetUserRecord, role);
+              if (!handledAsStaff && !STAFF_ROLES.includes(role) && role !== 'none') targetUserRecord.role = role;
+            }
             if (isActive !== undefined) targetUserRecord.isActive = isActive;
 
             await targetUserRecord.save();
@@ -3524,9 +4580,11 @@ async function startServer() {
               ipAddress: req.ip
             });
 
-            res.json({ message: 'User record updated successfully.', user: targetUserRecord });
+            const safeUser = targetUserRecord.toJSON();
+            delete safeUser.password;
+            res.json({ message: 'User record updated successfully.', user: safeUser });
           } catch (err) {
-            res.status(500).json({ error: err.message });
+            res.status(err.status || 500).json({ error: err.message });
           }
         });
 
