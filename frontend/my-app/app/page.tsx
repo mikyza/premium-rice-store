@@ -11,7 +11,8 @@ import {
   Award, Calendar, Lock, Unlock, TrendingUp, Filter, 
   FileText, Percent, Layers, Globe, Sliders, Bell, ArrowRight,
   ChevronDown, ArrowUpRight, HelpCircle, Star, PhoneCall,
-  XCircle, Zap, Ban, UserCheck, UserX, ShieldAlert, FileSpreadsheet
+  XCircle, Zap, Ban, UserCheck, UserX, ShieldAlert, FileSpreadsheet,
+  Copy, Link2, Headphones, Wallet, Briefcase, StickyNote
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 
@@ -42,7 +43,8 @@ export interface UserAccount {
   fullName: string;
   email?: string | null;
   phoneNumber: string;
-  role: 'customer' | 'admin' | 'logistics';
+  role: 'customer' | 'admin' | 'logistics' | 'support' | 'agent';
+  referralCode?: string;
   rewardPoints: number;
   isSuspended?: boolean;
   createdAt?: string;
@@ -1622,9 +1624,890 @@ const ProductCard: React.FC<ProductCardProps> = ({
 // 6. MAIN APPLICATION COMPONENT (PREMIUM RICE STORE)
 // ============================================================================
 
+// ============================================================================
+// STAFF, AGENT & ACTIVITY SCREENS (customer care, agents, admin tracking)
+// ============================================================================
+
+type ToastFn = (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
+
+const staffApi = async (path: string, token: string | null, options: { method?: string; body?: any } = {}) => {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: options.method || 'GET',
+    headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err: any = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+};
+
+const formatWhen = (value: any) => {
+  if (!value) return '—';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('en-KE', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+const StaffStat = ({ label, value, tone = 'slate', hint }: { label: string; value: React.ReactNode; tone?: 'slate' | 'emerald' | 'amber' | 'rose' | 'sky'; hint?: string }) => {
+  const tones: Record<string, string> = {
+    slate: 'text-white', emerald: 'text-emerald-400', amber: 'text-amber-400', rose: 'text-rose-400', sky: 'text-sky-400'
+  };
+  return (
+    <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
+      <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">{label}</p>
+      <p className={`text-xl font-black mt-1 ${tones[tone]}`}>{value}</p>
+      {hint && <p className="text-[10px] text-slate-500 mt-0.5">{hint}</p>}
+    </div>
+  );
+};
+
+const StatusPill = ({ status }: { status: string }) => {
+  const map: Record<string, string> = {
+    PENDING: 'bg-amber-950 text-amber-300 border-amber-800',
+    PAID: 'bg-emerald-950 text-emerald-300 border-emerald-800',
+    NO_PROFIT: 'bg-slate-800 text-slate-400 border-slate-700',
+    REVERSED: 'bg-slate-800 text-slate-400 border-slate-700',
+    CLAWBACK_DUE: 'bg-rose-950 text-rose-300 border-rose-800'
+  };
+  const label: Record<string, string> = { PENDING: 'Pending payout', PAID: 'Paid', NO_PROFIT: 'No profit', REVERSED: 'Reversed', CLAWBACK_DUE: 'Recover from agent' };
+  return <span className={`px-2 py-0.5 rounded-full border text-[9px] font-black uppercase ${map[status] || map.NO_PROFIT}`}>{label[status] || status}</span>;
+};
+
+const copyText = async (text: string, showToast: ToastFn, okMessage: string) => {
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast(okMessage, 'success');
+  } catch (_) {
+    showToast('Could not copy automatically. Select the text and copy it.', 'warning');
+  }
+};
+
+// ---------------------------------------------------------------------------
+// AGENT DASHBOARD
+// ---------------------------------------------------------------------------
+function AgentDashboard({ token, user, showToast, onSessionExpired }: { token: string | null; user: UserAccount; showToast: ToastFn; onSessionExpired: () => void }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [year, setYear] = useState<number>(new Date().getFullYear());
+  const [tab, setTab] = useState<'customers' | 'commissions' | 'rice' | 'payouts'>('commissions');
+
+  const load = useCallback(async (y: number) => {
+    setLoading(true);
+    try {
+      const d = await staffApi(`/agent/overview?year=${y}`, token);
+      setData(d);
+    } catch (err: any) {
+      if (err.status === 401) onSessionExpired();
+      else showToast(err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => { load(year); }, [year, load]);
+
+  if (loading && !data) return <div className="min-h-[60vh] flex items-center justify-center bg-slate-950 text-slate-400 text-sm font-bold">Loading your agent dashboard…</div>;
+  if (!data) return <div className="min-h-[60vh] flex items-center justify-center bg-slate-950 text-slate-400 text-sm font-bold">Your agent dashboard is not available right now.</div>;
+
+  const sm = data.summary;
+  const link = typeof window !== 'undefined' ? `${window.location.origin}/?ref=${data.referralCode}` : data.referralCode;
+  const maxCommission = Math.max(1, ...data.monthly.map((m: any) => m.commission));
+
+  return (
+    <div className="min-h-[85vh] bg-slate-950 text-slate-100 p-4 sm:p-6 lg:p-8">
+      <div className="container mx-auto space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
+          <div>
+            <div className="flex items-center gap-2">
+              <Briefcase className="w-5 h-5 text-emerald-400" />
+              <span className="text-xs font-black text-emerald-400 uppercase tracking-widest">Agent Partner Console</span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-black text-white">Welcome, {user.fullName}</h2>
+            <p className="text-xs text-slate-400 mt-1">
+              You earn {Math.round(data.rates.newCustomerRate * 100)}% of the profit on a new customer&apos;s first order and {Math.round(data.rates.repeatRate * 100)}% on every repeat order.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] font-black uppercase text-slate-500">Year</label>
+            <select value={year} onChange={(e) => setYear(Number(e.target.value))} className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-bold text-white cursor-pointer">
+              {data.availableYears.map((y: number) => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <button onClick={() => load(year)} className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-emerald-400 cursor-pointer" title="Refresh">
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+        </div>
+
+        {/* Referral code card */}
+        <div className="bg-gradient-to-r from-emerald-900/60 to-teal-900/40 border border-emerald-700/40 rounded-3xl p-5 sm:p-6 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-wider text-emerald-300">Your referral code</p>
+            <p className="text-3xl font-black font-mono tracking-widest text-white mt-1">{data.referralCode}</p>
+            <p className="text-[11px] text-emerald-100/70 mt-1">Customers enter this when they sign up or at checkout.</p>
+          </div>
+          <div className="md:col-span-2 space-y-2">
+            <p className="text-[10px] font-black uppercase tracking-wider text-emerald-300">Your sign-up link</p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input readOnly value={link} className="flex-1 px-3 py-2.5 rounded-xl bg-slate-950/70 border border-slate-700 text-xs font-mono text-slate-200" />
+              <button onClick={() => copyText(link, showToast, 'Link copied. Share it with your customers!')} className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer">
+                <Link2 className="w-4 h-4" /> Copy link
+              </button>
+              <button onClick={() => copyText(data.referralCode, showToast, 'Code copied.')} className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer">
+                <Copy className="w-4 h-4" /> Copy code
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {sm.clawbackDue > 0 && (
+          <div className="bg-rose-950/60 border border-rose-800 rounded-2xl p-4 text-xs text-rose-200 font-bold flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" /> {formatKES(sm.clawbackDue)} of commission you were already paid is on orders that were later refunded or cancelled. Admin will settle this with you.
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <StaffStat label="Customers referred" value={sm.customers} tone="sky" />
+          <StaffStat label="Paid orders" value={sm.orders} hint={`${sm.newCustomerOrders} first orders · ${sm.repeatOrders} repeat`} />
+          <StaffStat label="Rice sold" value={`${sm.kgSold.toLocaleString()} kg`} tone="emerald" />
+          <StaffStat label="Sales value" value={formatKES(sm.salesValue)} />
+          <StaffStat label="Profit you generated" value={formatKES(sm.profitGenerated)} />
+          <StaffStat label="Commission pending" value={formatKES(sm.commissionPending)} tone="amber" hint="Awaiting payout" />
+          <StaffStat label="Commission paid" value={formatKES(sm.commissionPaid)} tone="emerald" />
+          <StaffStat label="Total earned" value={formatKES(sm.commissionTotal)} tone="emerald" />
+        </div>
+
+        {/* Monthly commission bars */}
+        <div className="bg-slate-900 rounded-3xl p-5 border border-slate-800">
+          <h3 className="text-sm font-black text-white mb-4 flex items-center gap-2"><BarChart2 className="w-4 h-4 text-emerald-400" /> Commission by month — {data.year}</h3>
+          <div className="grid grid-cols-12 gap-2 items-end h-40">
+            {data.monthly.map((m: any) => (
+              <div key={m.monthIndex} className="flex flex-col items-center justify-end h-full gap-1" title={`${m.month}: ${formatKES(m.commission)} from ${m.orders} order(s), ${m.kg} kg`}>
+                <span className="text-[9px] font-bold text-slate-400">{m.commission > 0 ? Math.round(m.commission) : ''}</span>
+                <div className="w-full rounded-t-lg bg-gradient-to-t from-emerald-700 to-emerald-400" style={{ height: `${Math.max(m.commission > 0 ? 6 : 2, (m.commission / maxCommission) * 100)}%`, opacity: m.commission > 0 ? 1 : 0.25 }} />
+                <span className="text-[9px] font-bold text-slate-500">{m.month}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex flex-wrap gap-2">
+          {([
+            ['commissions', 'My Sales & Commission'], ['customers', 'My Customers'], ['rice', 'Rice I Have Sold'], ['payouts', 'Payouts Received']
+          ] as const).map(([id, label]) => (
+            <button key={id} onClick={() => setTab(id)} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === id ? 'bg-emerald-700 text-white' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'}`}>{label}</button>
+          ))}
+        </div>
+
+        <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
+          <div className="overflow-x-auto">
+            {tab === 'commissions' && (
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-950 text-slate-400 uppercase font-black border-b border-slate-800">
+                  <tr><th className="p-3">Order</th><th className="p-3">Date</th><th className="p-3">Customer</th><th className="p-3">Rice</th><th className="p-3">Type</th><th className="p-3 text-right">Profit</th><th className="p-3 text-right">Rate</th><th className="p-3 text-right">You earn</th><th className="p-3">Status</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {data.commissions.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-slate-500 font-bold">No sales yet. Share your link to get your first customer!</td></tr>}
+                  {data.commissions.map((c: any) => (
+                    <tr key={c.id} className="hover:bg-slate-800/40">
+                      <td className="p-3 font-mono font-bold text-slate-400">#{c.orderId}</td>
+                      <td className="p-3 text-slate-400 whitespace-nowrap">{formatWhen(c.date)}</td>
+                      <td className="p-3 font-bold text-white">{c.customer}</td>
+                      <td className="p-3 text-slate-300 max-w-[220px] truncate" title={c.items}>{c.items}</td>
+                      <td className="p-3"><span className={`px-2 py-0.5 rounded-md font-black text-[9px] uppercase ${c.type === 'NEW_CUSTOMER' ? 'bg-sky-950 text-sky-300' : 'bg-slate-800 text-slate-300'}`}>{c.type === 'NEW_CUSTOMER' ? 'New customer' : 'Repeat'}</span></td>
+                      <td className="p-3 text-right">{formatKES(c.profit)}</td>
+                      <td className="p-3 text-right text-slate-300">{Math.round(c.rate * 100)}%</td>
+                      <td className="p-3 text-right font-black text-emerald-400">{formatKES(c.amount)}</td>
+                      <td className="p-3"><StatusPill status={c.status} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {tab === 'customers' && (
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-950 text-slate-400 uppercase font-black border-b border-slate-800">
+                  <tr><th className="p-3">Customer</th><th className="p-3">Phone</th><th className="p-3">Joined</th><th className="p-3 text-right">Orders</th><th className="p-3 text-right">Spent on rice</th><th className="p-3 text-right">Your commission</th><th className="p-3">Last order</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {data.customers.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-slate-500 font-bold">Nobody has signed up with your code yet.</td></tr>}
+                  {data.customers.map((c: any) => (
+                    <tr key={c.id} className="hover:bg-slate-800/40">
+                      <td className="p-3 font-bold text-white">{c.fullName}</td>
+                      <td className="p-3 font-mono text-slate-400">{c.phone}</td>
+                      <td className="p-3 text-slate-400 whitespace-nowrap">{formatWhen(c.joinedAt)}</td>
+                      <td className="p-3 text-right">{c.orders}</td>
+                      <td className="p-3 text-right">{formatKES(c.totalSpent)}</td>
+                      <td className="p-3 text-right font-black text-emerald-400">{formatKES(c.commissionEarned)}</td>
+                      <td className="p-3 text-slate-400 whitespace-nowrap">{c.lastOrderAt ? formatWhen(c.lastOrderAt) : 'No order yet'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {tab === 'rice' && (
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-950 text-slate-400 uppercase font-black border-b border-slate-800">
+                  <tr><th className="p-3">Rice</th><th className="p-3 text-right">Bags sold</th><th className="p-3 text-right">Total kg</th><th className="p-3 text-right">Sales value</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {data.products.length === 0 && <tr><td colSpan={4} className="p-6 text-center text-slate-500 font-bold">Your rice sales will appear here once customers pay.</td></tr>}
+                  {data.products.map((p: any, i: number) => (
+                    <tr key={i} className="hover:bg-slate-800/40">
+                      <td className="p-3 font-bold text-white">{p.name}</td>
+                      <td className="p-3 text-right">{p.quantity}</td>
+                      <td className="p-3 text-right text-emerald-400 font-black">{p.kg.toLocaleString()} kg</td>
+                      <td className="p-3 text-right">{formatKES(p.revenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {tab === 'payouts' && (
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-950 text-slate-400 uppercase font-black border-b border-slate-800">
+                  <tr><th className="p-3">Date</th><th className="p-3">Reference</th><th className="p-3">Method</th><th className="p-3 text-right">Orders covered</th><th className="p-3 text-right">Amount</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {data.payouts.length === 0 && <tr><td colSpan={5} className="p-6 text-center text-slate-500 font-bold">No payouts yet. Pending commission is paid out by the admin.</td></tr>}
+                  {data.payouts.map((p: any) => (
+                    <tr key={p.id} className="hover:bg-slate-800/40">
+                      <td className="p-3 text-slate-400 whitespace-nowrap">{formatWhen(p.date)}</td>
+                      <td className="p-3 font-mono font-bold text-white">{p.reference}</td>
+                      <td className="p-3 uppercase text-slate-400">{p.method}</td>
+                      <td className="p-3 text-right">{p.commissionCount}</td>
+                      <td className="p-3 text-right font-black text-emerald-400">{formatKES(p.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CUSTOMER CARE DASHBOARD (view accounts, fix names, reactivate accounts)
+// ---------------------------------------------------------------------------
+function SupportDashboard({ token, user, showToast, onSessionExpired }: { token: string | null; user: UserAccount; showToast: ToastFn; onSessionExpired: () => void }) {
+  const [overview, setOverview] = useState<any>(null);
+  const [list, setList] = useState<any>({ users: [], total: 0, page: 1, pages: 1 });
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<'all' | 'active' | 'suspended'>('all');
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<any>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [reason, setReason] = useState('');
+  const [noteDraft, setNoteDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const fail = (err: any) => { if (err.status === 401) onSessionExpired(); else showToast(err.message, 'error'); };
+
+  const loadOverview = useCallback(async () => {
+    try { setOverview(await staffApi('/support/overview', token)); } catch (err) { fail(err); }
+  }, [token]);
+
+  const loadList = useCallback(async () => {
+    setLoading(true);
+    try {
+      setList(await staffApi(`/support/users?search=${encodeURIComponent(search)}&status=${status}&page=${page}`, token));
+    } catch (err) { fail(err); } finally { setLoading(false); }
+  }, [token, search, status, page]);
+
+  const openUser = async (id: number) => {
+    setDetailLoading(true);
+    try {
+      const d = await staffApi(`/support/users/${id}`, token);
+      setSelected(d);
+      setNameDraft(d.user.fullName);
+      setReason('');
+      setNoteDraft('');
+    } catch (err) { fail(err); } finally { setDetailLoading(false); }
+  };
+
+  useEffect(() => { loadOverview(); }, [loadOverview]);
+  useEffect(() => {
+    const t = setTimeout(loadList, 300);
+    return () => clearTimeout(t);
+  }, [loadList]);
+
+  const refreshAll = async (id: number) => { await Promise.all([openUser(id), loadList(), loadOverview()]); };
+
+  const saveName = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const r = await staffApi(`/support/users/${selected.user.id}/name`, token, { method: 'PUT', body: { fullName: nameDraft } });
+      showToast(r.message || 'Name updated.', 'success');
+      await refreshAll(selected.user.id);
+    } catch (err) { fail(err); } finally { setBusy(false); }
+  };
+
+  const unsuspend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const r = await staffApi(`/support/users/${selected.user.id}/unsuspend`, token, { method: 'POST', body: { reason } });
+      showToast(r.message || 'Account reactivated.', 'success');
+      await refreshAll(selected.user.id);
+    } catch (err) { fail(err); } finally { setBusy(false); }
+  };
+
+  const addNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await staffApi(`/support/users/${selected.user.id}/notes`, token, { method: 'POST', body: { note: noteDraft } });
+      setNoteDraft('');
+      await openUser(selected.user.id);
+      showToast('Note saved.', 'success');
+    } catch (err) { fail(err); } finally { setBusy(false); }
+  };
+
+  const u = selected?.user;
+
+  return (
+    <div className="min-h-[85vh] bg-slate-950 text-slate-100 p-4 sm:p-6 lg:p-8">
+      <div className="container mx-auto space-y-6">
+        <div className="border-b border-slate-800 pb-6">
+          <div className="flex items-center gap-2">
+            <Headphones className="w-5 h-5 text-sky-400" />
+            <span className="text-xs font-black text-sky-400 uppercase tracking-widest">Customer Care Desk</span>
+          </div>
+          <h2 className="text-2xl sm:text-3xl font-black text-white">Hello, {user.fullName}</h2>
+          <p className="text-xs text-slate-400 mt-1">You can look up accounts, correct a customer&apos;s name and reactivate suspended accounts. Everything you do is recorded.</p>
+        </div>
+
+        {overview && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StaffStat label="Customer accounts" value={overview.totalCustomers} />
+            <StaffStat label="Suspended" value={overview.suspended} tone="rose" />
+            <StaffStat label="New this week" value={overview.newThisWeek} tone="emerald" />
+            <StaffStat label="Not yet verified" value={overview.unverified} tone="amber" />
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* LIST */}
+          <div className="lg:col-span-5 bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
+            <div className="p-4 space-y-3 border-b border-slate-800">
+              <input
+                type="text" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                placeholder="Search name, phone, email or account number…"
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white"
+              />
+              <div className="flex gap-2">
+                {(['all', 'active', 'suspended'] as const).map(s => (
+                  <button key={s} onClick={() => { setStatus(s); setPage(1); }} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold capitalize cursor-pointer ${status === s ? 'bg-sky-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{s}</button>
+                ))}
+                <span className="ml-auto text-[11px] font-bold text-slate-500 self-center">{list.total} found</span>
+              </div>
+            </div>
+            <div className="divide-y divide-slate-800/60 max-h-[60vh] overflow-y-auto">
+              {loading && list.users.length === 0 && <p className="p-6 text-center text-xs text-slate-500 font-bold">Searching…</p>}
+              {!loading && list.users.length === 0 && <p className="p-6 text-center text-xs text-slate-500 font-bold">No accounts match.</p>}
+              {list.users.map((x: any) => (
+                <button key={x.id} onClick={() => openUser(x.id)} className={`w-full p-4 text-left hover:bg-slate-800/50 cursor-pointer flex items-center justify-between gap-3 ${selected?.user?.id === x.id ? 'bg-slate-800/70' : ''}`}>
+                  <div className="min-w-0">
+                    <p className="text-xs font-extrabold text-white truncate">{x.fullName}</p>
+                    <p className="text-[11px] text-slate-400 truncate">{x.phoneNumber}{x.email ? ` · ${x.email}` : ''}</p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    {x.isActive === false
+                      ? <span className="px-2 py-0.5 rounded-full bg-rose-950 text-rose-300 border border-rose-800 text-[9px] font-black uppercase">Suspended</span>
+                      : <span className="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 text-[9px] font-black uppercase">Active</span>}
+                    {(x.role === 'agent' || x.role === 'support') && <span className="text-[9px] font-black uppercase text-sky-400">{x.role}</span>}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="p-3 flex items-center justify-between border-t border-slate-800 text-xs">
+              <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 disabled:opacity-40 cursor-pointer">Previous</button>
+              <span className="text-slate-500 font-bold">Page {list.page} of {list.pages}</span>
+              <button disabled={page >= list.pages} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 disabled:opacity-40 cursor-pointer">Next</button>
+            </div>
+          </div>
+
+          {/* DETAIL */}
+          <div className="lg:col-span-7 space-y-4">
+            {!selected && !detailLoading && (
+              <div className="bg-slate-900 rounded-3xl border border-slate-800 p-10 text-center text-xs font-bold text-slate-500">Select an account on the left to see its details.</div>
+            )}
+            {detailLoading && <div className="bg-slate-900 rounded-3xl border border-slate-800 p-10 text-center text-xs font-bold text-slate-500">Loading account…</div>}
+            {selected && u && !detailLoading && (
+              <>
+                <div className="bg-slate-900 rounded-3xl border border-slate-800 p-5 space-y-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-black uppercase text-slate-500">Account #{u.id}</p>
+                      <h3 className="text-lg font-black text-white">{u.fullName}</h3>
+                    </div>
+                    {u.isActive === false
+                      ? <span className="px-3 py-1 rounded-full bg-rose-950 text-rose-300 border border-rose-800 text-[10px] font-black uppercase">Suspended</span>
+                      : <span className="px-3 py-1 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-black uppercase">Active</span>}
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                    <div><p className="text-[10px] font-black uppercase text-slate-500">Phone</p><p className="font-bold text-slate-200">{u.phoneNumber || '—'}</p></div>
+                    <div><p className="text-[10px] font-black uppercase text-slate-500">Email</p><p className="font-bold text-slate-200 break-all">{u.email || '—'}</p></div>
+                    <div><p className="text-[10px] font-black uppercase text-slate-500">Reward points</p><p className="font-bold text-amber-400">{u.rewardPoints || 0} pts <span className="text-slate-500 font-medium">(view only)</span></p></div>
+                    <div><p className="text-[10px] font-black uppercase text-slate-500">Joined</p><p className="font-bold text-slate-200">{formatWhen(u.createdAt)}</p></div>
+                    <div><p className="text-[10px] font-black uppercase text-slate-500">Verified</p><p className="font-bold text-slate-200">{u.isVerified === false ? 'No' : 'Yes'}</p></div>
+                    <div><p className="text-[10px] font-black uppercase text-slate-500">Referred by</p><p className="font-bold text-slate-200">{selected.referredBy || '—'}</p></div>
+                  </div>
+
+                  {/* The ONLY editable field */}
+                  <form onSubmit={saveName} className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-slate-800">
+                    <input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} className="flex-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-bold text-white" placeholder="Correct full name" />
+                    <button type="submit" disabled={busy || nameDraft.trim() === u.fullName} className="px-4 py-2.5 rounded-xl bg-sky-700 hover:bg-sky-600 disabled:opacity-40 text-white text-xs font-extrabold cursor-pointer">Update name</button>
+                  </form>
+
+                  {u.isActive === false && (
+                    <form onSubmit={unsuspend} className="space-y-2 pt-3 border-t border-slate-800">
+                      <p className="text-[11px] font-bold text-rose-300 flex items-center gap-1.5"><Ban className="w-3.5 h-3.5" /> This account is suspended and cannot sign in.</p>
+                      <input value={reason} onChange={(e) => setReason(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white" placeholder="Why is it being reactivated? (required, e.g. customer verified identity by phone)" />
+                      <button type="submit" disabled={busy || reason.trim().length < 3} className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-extrabold flex items-center gap-2 cursor-pointer">
+                        <UserCheck className="w-4 h-4" /> Reactivate account
+                      </button>
+                    </form>
+                  )}
+                </div>
+
+                <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
+                  <p className="p-4 text-xs font-black text-white border-b border-slate-800">Orders ({selected.orders.length})</p>
+                  <div className="overflow-x-auto max-h-72 overflow-y-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-950 text-slate-400 uppercase font-black"><tr><th className="p-3">Order</th><th className="p-3">Date</th><th className="p-3">Items</th><th className="p-3 text-right">Total</th><th className="p-3">Status</th><th className="p-3">Payment</th></tr></thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {selected.orders.length === 0 && <tr><td colSpan={6} className="p-5 text-center text-slate-500 font-bold">No orders yet.</td></tr>}
+                        {selected.orders.map((o: any) => (
+                          <tr key={o.id}>
+                            <td className="p-3 font-mono font-bold text-slate-400">#{o.id}</td>
+                            <td className="p-3 text-slate-400 whitespace-nowrap">{formatWhen(o.createdAt)}</td>
+                            <td className="p-3 text-slate-300 max-w-[180px] truncate" title={o.items}>{o.items}</td>
+                            <td className="p-3 text-right font-bold">{formatKES(o.grandTotal)}</td>
+                            <td className="p-3 capitalize text-slate-300">{String(o.status).replace('_', ' ')}</td>
+                            <td className="p-3"><span className="font-bold text-slate-200">{o.paymentStatus}</span>{o.mpesaReceipt && <span className="block font-mono text-[10px] text-slate-500">{o.mpesaReceipt}</span>}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  <div className="bg-slate-900 rounded-3xl border border-slate-800 p-4 space-y-3">
+                    <p className="text-xs font-black text-white flex items-center gap-2"><StickyNote className="w-4 h-4 text-amber-400" /> Case notes</p>
+                    <form onSubmit={addNote} className="flex gap-2">
+                      <input value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white" placeholder="Add a note about this customer…" />
+                      <button type="submit" disabled={busy || noteDraft.trim().length < 3} className="px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-white text-xs font-bold cursor-pointer">Add</button>
+                    </form>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {selected.notes.length === 0 && <p className="text-[11px] text-slate-500 font-bold">No notes yet.</p>}
+                      {selected.notes.map((n: any) => (
+                        <div key={n.id} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                          <p className="text-xs text-slate-200">{n.note}</p>
+                          <p className="text-[10px] text-slate-500 mt-1">{n.authorName} · {formatWhen(n.createdAt)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="bg-slate-900 rounded-3xl border border-slate-800 p-4 space-y-3">
+                    <p className="text-xs font-black text-white flex items-center gap-2"><Clock className="w-4 h-4 text-sky-400" /> Account history</p>
+                    <div className="space-y-2 max-h-56 overflow-y-auto">
+                      {selected.history.length === 0 && <p className="text-[11px] text-slate-500 font-bold">Nothing recorded yet.</p>}
+                      {selected.history.map((h: any) => (
+                        <div key={h.id} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                          <p className="text-xs text-slate-200">{h.summary}</p>
+                          <p className="text-[10px] text-slate-500 mt-1">{formatWhen(h.createdAt)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ADMIN: AGENTS (appoint, track, pay out, set commission rates)
+// ---------------------------------------------------------------------------
+function AdminAgentsPanel({ token, showToast, adminUsers, onUsersChanged }: { token: string | null; showToast: ToastFn; adminUsers: UserAccount[]; onUsersChanged: () => void }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [rates, setRates] = useState({ newCustomerRate: '60', repeatRate: '40' });
+  const [appointId, setAppointId] = useState('');
+  const [detail, setDetail] = useState<any>(null);
+  const [payout, setPayout] = useState({ reference: '', method: 'mpesa', note: '' });
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const d = await staffApi('/admin/agents', token);
+      setData(d);
+      setRates({ newCustomerRate: String(Math.round(d.rates.newCustomerRate * 100)), repeatRate: String(Math.round(d.rates.repeatRate * 100)) });
+    } catch (err: any) { showToast(err.message, 'error'); } finally { setLoading(false); }
+  }, [token]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const openAgent = async (id: number) => {
+    try { setDetail(await staffApi(`/admin/agents/${id}`, token)); setPayout({ reference: '', method: 'mpesa', note: '' }); }
+    catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  const saveRates = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const n = Number(rates.newCustomerRate), r = Number(rates.repeatRate);
+    if (![n, r].every(v => Number.isFinite(v) && v >= 0 && v <= 100)) { showToast('Enter both rates as percentages between 0 and 100.', 'error'); return; }
+    try {
+      const res = await staffApi('/admin/config/agent-commission', token, { method: 'PUT', body: { newCustomerRate: n / 100, repeatRate: r / 100 } });
+      showToast(res.message || 'Rates saved.', 'success');
+      load();
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  const setRole = async (userId: number, role: 'agent' | 'customer', label: string) => {
+    if (!confirm(label)) return;
+    try {
+      const res = await staffApi(`/admin/users/${userId}/role`, token, { method: 'PUT', body: { role } });
+      showToast(res.message || 'Role updated.', 'success');
+      setAppointId('');
+      if (detail && detail.agent.id === userId) setDetail(null);
+      load();
+      onUsersChanged();
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  const regenerate = async (id: number) => {
+    if (!confirm('Create a new referral code for this agent? The old code will stop working for new sign-ups (existing customers stay linked).')) return;
+    try {
+      const res = await staffApi(`/admin/agents/${id}/regenerate-code`, token, { method: 'POST' });
+      showToast(`New code: ${res.referralCode}`, 'success');
+      load();
+      if (detail) openAgent(id);
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  const recordPayout = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!detail) return;
+    if (!confirm(`Record a payout of ${formatKES(detail.summary.commissionPending)} to ${detail.agent.fullName}? This marks all pending commissions as paid.`)) return;
+    setBusy(true);
+    try {
+      const res = await staffApi(`/admin/agents/${detail.agent.id}/payouts`, token, { method: 'POST', body: payout });
+      showToast(res.message || 'Payout recorded.', 'success');
+      await openAgent(detail.agent.id);
+      load();
+    } catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(false); }
+  };
+
+  const eligible = adminUsers.filter(u => u.role !== 'admin' && u.role !== 'agent' && u.role !== 'support' && !u.isSuspended && (u as any).isVerified !== false);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StaffStat label="Active agents" value={data ? data.agents.filter((a: any) => a.isCurrentAgent).length : '…'} tone="sky" />
+        <StaffStat label="Sales through agents" value={data ? formatKES(data.totals.sales) : '…'} />
+        <StaffStat label="Commission owed" value={data ? formatKES(data.totals.pending) : '…'} tone="amber" hint="Pending payout" />
+        <StaffStat label="Commission paid" value={data ? formatKES(data.totals.paid) : '…'} tone="emerald" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <form onSubmit={saveRates} className="bg-slate-900 rounded-3xl p-5 border border-slate-800 space-y-3">
+          <h4 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2"><Percent className="w-4 h-4 text-emerald-400" /> Commission rates (share of profit)</h4>
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div>
+              <label className="block font-bold text-slate-400 mb-1">New customer&apos;s first order (%)</label>
+              <input type="number" min={0} max={100} value={rates.newCustomerRate} onChange={(e) => setRates(r => ({ ...r, newCustomerRate: e.target.value }))} className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold" />
+            </div>
+            <div>
+              <label className="block font-bold text-slate-400 mb-1">Repeat / old customers (%)</label>
+              <input type="number" min={0} max={100} value={rates.repeatRate} onChange={(e) => setRates(r => ({ ...r, repeatRate: e.target.value }))} className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold" />
+            </div>
+          </div>
+          <p className="text-[10px] text-slate-500">Profit = price paid minus buying price, per bag. Delivery fees are never counted. Changes apply only to payments confirmed after you save.</p>
+          <button type="submit" className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs cursor-pointer">Save commission rates</button>
+        </form>
+
+        <div className="bg-slate-900 rounded-3xl p-5 border border-slate-800 space-y-3">
+          <h4 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2"><Briefcase className="w-4 h-4 text-sky-400" /> Appoint a new agent</h4>
+          <select value={appointId} onChange={(e) => setAppointId(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-bold cursor-pointer">
+            <option value="">Choose a customer…</option>
+            {eligible.map(u => <option key={u.id} value={u.id}>{u.fullName} — {u.phoneNumber || u.email}</option>)}
+          </select>
+          <button disabled={!appointId} onClick={() => setRole(Number(appointId), 'agent', 'Make this customer an agent? They get a referral code and an agent dashboard at their next sign-in.')} className="w-full py-2.5 rounded-xl bg-sky-700 hover:bg-sky-600 disabled:opacity-40 text-white font-extrabold text-xs cursor-pointer">Make agent</button>
+          <p className="text-[10px] text-slate-500">Agents sign in exactly like customers. Dismissing an agent turns them back into a normal customer; their past earnings stay on record.</p>
+        </div>
+      </div>
+
+      <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
+        <div className="p-4 flex items-center justify-between border-b border-slate-800">
+          <p className="text-xs font-black text-white">All agents</p>
+          <button onClick={load} className="p-1.5 text-slate-400 hover:text-emerald-400 cursor-pointer" title="Refresh"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-950 text-slate-400 uppercase font-black"><tr><th className="p-3">Agent</th><th className="p-3">Code</th><th className="p-3 text-right">Customers</th><th className="p-3 text-right">Orders</th><th className="p-3 text-right">Kg sold</th><th className="p-3 text-right">Sales</th><th className="p-3 text-right">Owed</th><th className="p-3 text-right">Paid</th><th className="p-3 text-right">Actions</th></tr></thead>
+            <tbody className="divide-y divide-slate-800/60">
+              {data && data.agents.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-slate-500 font-bold">No agents yet. Appoint one above.</td></tr>}
+              {data && data.agents.map((a: any) => (
+                <tr key={a.id} className="hover:bg-slate-800/40">
+                  <td className="p-3"><p className="font-extrabold text-white">{a.fullName}</p><p className="text-[10px] text-slate-500">{a.phoneNumber}{!a.isCurrentAgent && ' · dismissed'}{!a.isActive && ' · suspended'}</p></td>
+                  <td className="p-3 font-mono font-bold text-emerald-400">{a.referralCode}</td>
+                  <td className="p-3 text-right">{a.summary.customers}</td>
+                  <td className="p-3 text-right">{a.summary.orders}</td>
+                  <td className="p-3 text-right">{a.summary.kgSold}</td>
+                  <td className="p-3 text-right">{formatKES(a.summary.salesValue)}</td>
+                  <td className="p-3 text-right font-black text-amber-400">{formatKES(a.summary.commissionPending)}</td>
+                  <td className="p-3 text-right text-emerald-400">{formatKES(a.summary.commissionPaid)}</td>
+                  <td className="p-3 text-right space-x-1.5 whitespace-nowrap">
+                    <button onClick={() => openAgent(a.id)} className="p-1.5 text-slate-400 hover:text-emerald-400 cursor-pointer" title="View details & pay out"><Eye className="w-4 h-4" /></button>
+                    {a.isCurrentAgent && <button onClick={() => regenerate(a.id)} className="p-1.5 text-slate-400 hover:text-sky-400 cursor-pointer" title="New referral code"><RefreshCw className="w-4 h-4" /></button>}
+                    {a.isCurrentAgent
+                      ? <button onClick={() => setRole(a.id, 'customer', `Dismiss ${a.fullName} as an agent? They become a normal customer and stop earning commission.`)} className="p-1.5 text-amber-400 hover:text-amber-300 cursor-pointer" title="Dismiss agent"><UserX className="w-4 h-4" /></button>
+                      : <button onClick={() => setRole(a.id, 'agent', `Re-appoint ${a.fullName} as an agent? Their old code is restored.`)} className="p-1.5 text-emerald-400 hover:text-emerald-300 cursor-pointer" title="Re-appoint agent"><UserCheck className="w-4 h-4" /></button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {detail && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-start justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 w-full max-w-4xl my-8 space-y-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase text-slate-500">Agent #{detail.agent.id} · code {detail.agent.referralCode}</p>
+                <h3 className="text-lg font-black text-white">{detail.agent.fullName}</h3>
+                <p className="text-xs text-slate-400">{detail.agent.phoneNumber} {detail.agent.email ? `· ${detail.agent.email}` : ''}</p>
+              </div>
+              <button onClick={() => setDetail(null)} className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <StaffStat label="Customers" value={detail.summary.customers} tone="sky" />
+              <StaffStat label="Kg sold" value={detail.summary.kgSold} tone="emerald" />
+              <StaffStat label="Profit generated" value={formatKES(detail.summary.profitGenerated)} />
+              <StaffStat label="Owed now" value={formatKES(detail.summary.commissionPending)} tone="amber" />
+            </div>
+            {detail.summary.clawbackDue > 0 && <div className="bg-rose-950/60 border border-rose-800 rounded-2xl p-3 text-xs text-rose-200 font-bold">{formatKES(detail.summary.clawbackDue)} was paid on orders that were later reversed — recover it or offset it against the next payout.</div>}
+
+            {detail.summary.commissionPending > 0 && (
+              <form onSubmit={recordPayout} className="grid grid-cols-1 sm:grid-cols-4 gap-2 p-4 rounded-2xl bg-slate-950 border border-slate-800 text-xs">
+                <input required value={payout.reference} onChange={(e) => setPayout(p => ({ ...p, reference: e.target.value }))} placeholder="M-Pesa / bank reference *" className="sm:col-span-2 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white font-mono font-bold" />
+                <select value={payout.method} onChange={(e) => setPayout(p => ({ ...p, method: e.target.value }))} className="px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white font-bold cursor-pointer">
+                  <option value="mpesa">M-Pesa</option><option value="bank">Bank</option><option value="cash">Cash</option>
+                </select>
+                <button type="submit" disabled={busy} className="px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-extrabold cursor-pointer flex items-center justify-center gap-2"><Wallet className="w-4 h-4" /> Record payout</button>
+                <input value={payout.note} onChange={(e) => setPayout(p => ({ ...p, note: e.target.value }))} placeholder="Note (optional)" className="sm:col-span-4 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white" />
+              </form>
+            )}
+
+            <div className="overflow-x-auto rounded-2xl border border-slate-800 max-h-72 overflow-y-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-950 text-slate-400 uppercase font-black"><tr><th className="p-3">Order</th><th className="p-3">Date</th><th className="p-3">Customer</th><th className="p-3">Type</th><th className="p-3 text-right">Profit</th><th className="p-3 text-right">Rate</th><th className="p-3 text-right">Commission</th><th className="p-3">Status</th></tr></thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {detail.commissions.length === 0 && <tr><td colSpan={8} className="p-5 text-center text-slate-500 font-bold">No sales yet.</td></tr>}
+                  {detail.commissions.map((c: any) => (
+                    <tr key={c.id}>
+                      <td className="p-3 font-mono text-slate-400">#{c.orderId}</td>
+                      <td className="p-3 text-slate-400 whitespace-nowrap">{formatWhen(c.date)}</td>
+                      <td className="p-3 font-bold text-white">{c.customer}</td>
+                      <td className="p-3">{c.type === 'NEW_CUSTOMER' ? 'New' : 'Repeat'}</td>
+                      <td className="p-3 text-right">{formatKES(c.profit)}</td>
+                      <td className="p-3 text-right">{Math.round(c.rate * 100)}%</td>
+                      <td className="p-3 text-right font-black text-emerald-400">{formatKES(c.amount)}</td>
+                      <td className="p-3"><StatusPill status={c.status} />{c.note && <span className="block text-[10px] text-slate-500 mt-0.5 max-w-[160px]">{c.note}</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {detail.payouts.length > 0 && (
+              <div className="text-xs space-y-1.5">
+                <p className="font-black text-white">Payout history</p>
+                {detail.payouts.map((p: any) => (
+                  <div key={p.id} className="flex justify-between gap-3 p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                    <span className="text-slate-400">{formatWhen(p.date)} · <span className="font-mono text-slate-200">{p.reference}</span> · {String(p.method).toUpperCase()}</span>
+                    <span className="font-black text-emerald-400">{formatKES(p.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ADMIN: ACTIVITY FEED (everything that happens, live)
+// ---------------------------------------------------------------------------
+function AdminActivityPanel({ token, showToast, socket }: { token: string | null; showToast: ToastFn; socket: Socket | null }) {
+  const [summary, setSummary] = useState<any>(null);
+  const [feed, setFeed] = useState<any>({ events: [], total: 0, page: 1, pages: 1 });
+  const [filters, setFilters] = useState({ category: 'all', severity: 'all', actorRole: 'all', q: '', from: '', to: '' });
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [live, setLive] = useState(true);
+
+  const queryString = useCallback((extra: Record<string, string | number> = {}) => {
+    const p = new URLSearchParams();
+    Object.entries({ ...filters, ...extra }).forEach(([k, v]) => { if (v !== '' && v !== 'all') p.set(k, String(v)); });
+    return p.toString();
+  }, [filters]);
+
+  const loadSummary = useCallback(async () => {
+    try { setSummary(await staffApi('/admin/events/summary', token)); } catch (_) { /* optional */ }
+  }, [token]);
+
+  const loadFeed = useCallback(async () => {
+    setLoading(true);
+    try { setFeed(await staffApi(`/admin/events?${queryString({ page, limit: 50 })}`, token)); }
+    catch (err: any) { showToast(err.message, 'error'); } finally { setLoading(false); }
+  }, [token, queryString, page]);
+
+  useEffect(() => { loadSummary(); }, [loadSummary]);
+  useEffect(() => { const t = setTimeout(loadFeed, 250); return () => clearTimeout(t); }, [loadFeed]);
+
+  // Live updates pushed by the server as things happen
+  useEffect(() => {
+    if (!socket || !live) return;
+    const onEvent = () => { loadSummary(); if (page === 1) loadFeed(); };
+    socket.on('activityEvent', onEvent);
+    return () => { socket.off('activityEvent', onEvent); };
+  }, [socket, live, page, loadFeed, loadSummary]);
+
+  const exportCsv = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/admin/events/export/csv?${queryString()}`, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `activity-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  const setFilter = (k: string, v: string) => { setPage(1); setFilters(f => ({ ...f, [k]: v })); };
+  const sevStyle: Record<string, string> = { info: 'bg-slate-800 text-slate-300', warn: 'bg-amber-950 text-amber-300 border border-amber-800', alert: 'bg-rose-950 text-rose-300 border border-rose-800' };
+  const maxHour = summary ? Math.max(1, ...summary.byHour) : 1;
+
+  return (
+    <div className="space-y-6">
+      {summary && (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <StaffStat label="Events (24h)" value={summary.last24h} tone="sky" />
+            <StaffStat label="Security alerts" value={summary.alerts} tone={summary.alerts ? 'rose' : 'slate'} />
+            <StaffStat label="Warnings" value={summary.warnings} tone="amber" />
+            <StaffStat label="Failed logins (1h)" value={summary.failedLoginsLastHour} tone={summary.failedLoginsLastHour > 5 ? 'rose' : 'slate'} />
+            <StaffStat label="Agent commission owed" value={formatKES(summary.pendingCommission)} tone="amber" />
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 bg-slate-900 rounded-3xl p-4 border border-slate-800">
+              <p className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-3">Activity per hour — last 24 hours</p>
+              <div className="flex items-end gap-1 h-24">
+                {summary.byHour.map((n: number, i: number) => (
+                  <div key={i} className="flex-1 rounded-t bg-emerald-500/80" style={{ height: `${Math.max(3, (n / maxHour) * 100)}%`, opacity: n ? 1 : 0.2 }} title={`${n} event(s)`} />
+                ))}
+              </div>
+            </div>
+            <div className="bg-slate-900 rounded-3xl p-4 border border-slate-800">
+              <p className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Most active (24h)</p>
+              <div className="space-y-1.5">
+                {summary.topActors.length === 0 && <p className="text-xs text-slate-500 font-bold">Nothing yet.</p>}
+                {summary.topActors.map((a: any) => (
+                  <button key={a.actorId} onClick={() => setFilter('q', a.name || '')} className="w-full flex justify-between text-xs p-1.5 rounded-lg hover:bg-slate-800 cursor-pointer">
+                    <span className="font-bold text-slate-200 truncate">{a.name} <span className="text-[9px] uppercase text-slate-500">{a.role}</span></span>
+                    <span className="font-black text-emerald-400">{a.count}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
+        <div className="p-4 grid grid-cols-2 lg:grid-cols-7 gap-2 border-b border-slate-800 text-xs">
+          <input value={filters.q} onChange={(e) => setFilter('q', e.target.value)} placeholder="Search who / what / order #…" className="col-span-2 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white" />
+          <select value={filters.category} onChange={(e) => setFilter('category', e.target.value)} className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white cursor-pointer">
+            <option value="all">All categories</option><option value="auth">Sign-ins & accounts</option><option value="orders">Orders & payments</option><option value="users">Users & roles</option><option value="agents">Agents & commission</option><option value="inventory">Inventory</option><option value="settings">Settings</option><option value="admin">Other admin</option>
+          </select>
+          <select value={filters.severity} onChange={(e) => setFilter('severity', e.target.value)} className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white cursor-pointer">
+            <option value="all">Any severity</option><option value="alert">Alerts</option><option value="warn">Warnings</option><option value="info">Info</option>
+          </select>
+          <select value={filters.actorRole} onChange={(e) => setFilter('actorRole', e.target.value)} className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white cursor-pointer">
+            <option value="all">Anyone</option><option value="admin">Admins</option><option value="support">Customer care</option><option value="agent">Agents</option><option value="customer">Customers</option><option value="user">Customers (legacy)</option><option value="anonymous">Not signed in</option>
+          </select>
+          <input type="date" value={filters.from} onChange={(e) => setFilter('from', e.target.value)} className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white" title="From" />
+          <input type="date" value={filters.to} onChange={(e) => setFilter('to', e.target.value)} className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white" title="To" />
+        </div>
+        <div className="px-4 py-2 flex items-center justify-between text-xs border-b border-slate-800">
+          <span className="font-bold text-slate-400">{feed.total.toLocaleString()} event(s)</span>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setLive(l => !l)} className={`px-3 py-1.5 rounded-lg font-bold cursor-pointer flex items-center gap-1.5 ${live ? 'bg-emerald-900 text-emerald-300' : 'bg-slate-800 text-slate-400'}`}>
+              <span className={`w-2 h-2 rounded-full ${live ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} /> {live ? 'Live' : 'Paused'}
+            </button>
+            <button onClick={() => { loadFeed(); loadSummary(); }} className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-emerald-400 cursor-pointer" title="Refresh"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
+            <button onClick={exportCsv} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 font-bold hover:bg-slate-700 flex items-center gap-1.5 cursor-pointer"><Download className="w-3.5 h-3.5" /> Export CSV</button>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-950 text-slate-400 uppercase font-black"><tr><th className="p-3">When</th><th className="p-3">Level</th><th className="p-3">Who</th><th className="p-3">What happened</th><th className="p-3">IP</th></tr></thead>
+            <tbody className="divide-y divide-slate-800/60">
+              {feed.events.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-slate-500 font-bold">{loading ? 'Loading…' : 'No events match these filters.'}</td></tr>}
+              {feed.events.map((e: any) => (
+                <tr key={e.id} className="hover:bg-slate-800/40 align-top">
+                  <td className="p-3 text-slate-400 whitespace-nowrap">{formatWhen(e.createdAt)}</td>
+                  <td className="p-3"><span className={`px-2 py-0.5 rounded-md font-black text-[9px] uppercase ${sevStyle[e.severity] || sevStyle.info}`}>{e.severity}</span></td>
+                  <td className="p-3"><p className="font-bold text-white">{e.actorName || 'System'}</p><p className="text-[9px] uppercase font-black text-slate-500">{e.actorRole || 'system'}</p></td>
+                  <td className="p-3 text-slate-300 max-w-md"><span className="font-mono text-[10px] text-emerald-400">{e.action}</span><p className="mt-0.5">{e.summary}</p></td>
+                  <td className="p-3 font-mono text-[10px] text-slate-500">{e.ipAddress || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="p-3 flex items-center justify-between border-t border-slate-800 text-xs">
+          <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 disabled:opacity-40 cursor-pointer">Newer</button>
+          <span className="text-slate-500 font-bold">Page {feed.page} of {feed.pages}</span>
+          <button disabled={page >= feed.pages} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 disabled:opacity-40 cursor-pointer">Older</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 export default function PremiumRiceStore() {
   // ROUTING & VIEW STATES
-  const [view, setView] = useState<'home' | 'shop' | 'cart' | 'login' | 'admin' | 'profile'>('home');
+  const [view, setView] = useState<'home' | 'shop' | 'cart' | 'login' | 'admin' | 'profile' | 'agent' | 'support'>('home');
   const [user, setUser] = useState<UserAccount | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -1712,10 +2595,12 @@ export default function PremiumRiceStore() {
   const [resetStep, setResetStep] = useState<'request' | 'reset'>('request');
   const [formData, setFormData] = useState({ phoneNumber: '', email: '', password: '', fullName: '', resetToken: '', newPassword: '' });
   const [signupOtpStep, setSignupOtpStep] = useState(false);
+  const [referralInput, setReferralInput] = useState('');
+  const [referralCheck, setReferralCheck] = useState<{ state: 'idle' | 'checking' | 'valid' | 'invalid'; agentName?: string }>({ state: 'idle' });
   const [signupOtp, setSignupOtp] = useState('');
   
   // ADMIN PANEL NAVIGATION & DATA STATES
-  const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'finances' | 'users' | 'config' | 'carousel' | 'logs'>('inventory');
+  const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'finances' | 'users' | 'config' | 'carousel' | 'logs' | 'agents' | 'activity'>('inventory');
   const [newProduct, setNewProduct] = useState({ 
     brandName: '', variety: '', weightKg: '', basePrice: '', buyingPrice: '', flashSalePrice: '', stockQuantity: '', imageUrl: '', description: '', isOrganic: false 
   });
@@ -1941,6 +2826,41 @@ export default function PremiumRiceStore() {
       if (newSocket) newSocket.disconnect();
     };
   }, []);
+
+  // REFERRAL LINKS: ?ref=CODE is remembered so it survives until the person signs up or checks out
+  useEffect(() => {
+    try {
+      const fromUrl = new URLSearchParams(window.location.search).get('ref');
+      const code = (fromUrl || localStorage.getItem('mwea_ref') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+      if (code) {
+        localStorage.setItem('mwea_ref', code);
+        setReferralInput(code);
+        if (fromUrl) showToast('Referral code applied. Create an account to link it.', 'info');
+      }
+    } catch (_) { /* storage unavailable */ }
+  }, []);
+
+  // Confirms a typed referral code with the server and shows the agent's first name
+  useEffect(() => {
+    const code = referralInput.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (code.length < 4) { setReferralCheck({ state: 'idle' }); return; }
+    setReferralCheck({ state: 'checking' });
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/referral/validate?code=${encodeURIComponent(code)}`);
+        const d = await res.json();
+        setReferralCheck(d.valid ? { state: 'valid', agentName: d.agentName } : { state: 'invalid' });
+      } catch (_) { setReferralCheck({ state: 'idle' }); }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [referralInput]);
+
+  // KEEP EACH ROLE ON ITS OWN SCREEN (e.g. a dismissed agent is sent home)
+  useEffect(() => {
+    if (view === 'admin' && user?.role !== 'admin') setView(user ? 'home' : 'login');
+    if (view === 'agent' && user?.role !== 'agent') setView(user ? 'home' : 'login');
+    if (view === 'support' && user?.role !== 'support') setView(user ? 'home' : 'login');
+  }, [view, user?.role]);
 
   // CONFIRM THE SAVED LOGIN IS STILL VALID (expired / deleted / suspended accounts are signed out)
   useEffect(() => {
@@ -2367,10 +3287,10 @@ export default function PremiumRiceStore() {
       if (!isLogin) {
         if (signupOtpStep) {
           endpoint = '/user/signup/verify-otp';
-          payload = { ...identity, otp: signupOtp.trim() };
+          payload = { ...identity, otp: signupOtp.trim(), referralCode: referralInput || undefined };
         } else {
           endpoint = '/user/signup';
-          payload = { ...identity, password: formData.password, fullName: formData.fullName, requireOtp: true };
+          payload = { ...identity, password: formData.password, fullName: formData.fullName, requireOtp: true, referralCode: referralInput || undefined };
         }
       }
 
@@ -2395,7 +3315,8 @@ export default function PremiumRiceStore() {
         showToast(isLogin ? `Welcome back, ${data.user.fullName}!` : 'Account created successfully!', 'success');
         setSignupOtpStep(false);
         setSignupOtp('');
-        setView(data.user.role === 'admin' ? 'admin' : 'home');
+        try { if (!isLogin) localStorage.removeItem('mwea_ref'); } catch (_) { /* ignore */ }
+        setView(data.user.role === 'admin' ? 'admin' : data.user.role === 'agent' ? 'agent' : data.user.role === 'support' ? 'support' : 'home');
       } else {
         showToast(data.error || 'Authentication failed', 'error');
       }
@@ -2519,6 +3440,7 @@ export default function PremiumRiceStore() {
         cartItems: cart.map(i => ({ productId: i.productId, quantity: i.quantity })),
         paymentMethod: checkoutData.paymentMethod,
         mpesaPhoneNumber: stkPhone || checkoutData.stkPhoneNumber,
+        referralCode: referralInput || undefined,
         county: checkoutData.county,
         town: checkoutData.town,
         location: checkoutData.location,
@@ -2741,6 +3663,31 @@ export default function PremiumRiceStore() {
   };
 
   // ADMIN USER MANAGEMENT HANDLERS (EDIT, SUSPEND, DELETE)
+  const handleSetUserRole = async (target: UserAccount, role: 'customer' | 'agent' | 'support') => {
+    const labels: Record<string, string> = {
+      agent: `Make ${target.fullName} an agent? They get a referral code and an agent dashboard.`,
+      support: `Make ${target.fullName} customer care staff? They can view accounts, fix names and reactivate suspended accounts, nothing more.`,
+      customer: `Return ${target.fullName} to a normal customer account?`
+    };
+    if (!confirm(labels[role])) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/admin/users/${target.id}/role`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ role })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        showToast(d.message || 'Role updated.', 'success');
+        fetchAdminUsers();
+      } else {
+        await showApiError(res, 'Could not change role');
+      }
+    } catch (err: any) {
+      showToast(err.message, 'error');
+    }
+  };
+
   const handleSaveUserEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || !editingUser) return;
@@ -3001,6 +3948,22 @@ export default function PremiumRiceStore() {
                 My Orders & Points
               </button>
             )}
+            {user?.role === 'agent' && (
+              <button 
+                onClick={() => setView('agent')} 
+                className={`transition-all py-1.5 flex items-center gap-1.5 font-black ${view === 'agent' ? 'text-emerald-700 border-b-2 border-emerald-600' : 'text-emerald-600 hover:text-emerald-700'}`}
+              >
+                <Briefcase className="w-4 h-4" /> Agent Dashboard
+              </button>
+            )}
+            {user?.role === 'support' && (
+              <button 
+                onClick={() => setView('support')} 
+                className={`transition-all py-1.5 flex items-center gap-1.5 font-black ${view === 'support' ? 'text-sky-700 border-b-2 border-sky-600' : 'text-sky-600 hover:text-sky-700'}`}
+              >
+                <Headphones className="w-4 h-4" /> Customer Care
+              </button>
+            )}
             {user?.role === 'admin' && (
               <button 
                 onClick={() => setView('admin')} 
@@ -3079,6 +4042,18 @@ export default function PremiumRiceStore() {
                   <span>My Orders & Points ({user.rewardPoints || 0} pts)</span>
                   <ChevronRight className="w-4 h-4 text-slate-400" />
                 </button>
+                {user.role === 'agent' && (
+                  <button onClick={() => { setView('agent'); setMobileMenuOpen(false); }} className="text-left font-black py-2.5 text-emerald-600 border-b border-slate-100 flex items-center justify-between">
+                    <span>Agent Dashboard</span>
+                    <Briefcase className="w-4 h-4" />
+                  </button>
+                )}
+                {user.role === 'support' && (
+                  <button onClick={() => { setView('support'); setMobileMenuOpen(false); }} className="text-left font-black py-2.5 text-sky-600 border-b border-slate-100 flex items-center justify-between">
+                    <span>Customer Care Desk</span>
+                    <Headphones className="w-4 h-4" />
+                  </button>
+                )}
                 {user.role === 'admin' && (
                   <button onClick={() => { setView('admin'); setMobileMenuOpen(false); }} className="text-left font-black py-2.5 text-amber-600 border-b border-slate-100 flex items-center justify-between">
                     <span>Admin Control Console</span>
@@ -3569,6 +4544,21 @@ export default function PremiumRiceStore() {
                       </div>
                     </div>
 
+                    {user && user.role !== 'agent' && (
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Referral Code <span className="text-slate-400 font-medium">(optional)</span></label>
+                        <input 
+                          type="text"
+                          value={referralInput}
+                          onChange={(e) => setReferralInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12))}
+                          placeholder="Agent referral code"
+                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-mono font-bold tracking-widest focus:ring-2 focus:ring-emerald-500"
+                        />
+                        {referralCheck.state === 'valid' && <p className="text-[11px] font-bold text-emerald-600 mt-1">Referred by {referralCheck.agentName}.</p>}
+                        {referralCheck.state === 'invalid' && <p className="text-[11px] font-bold text-rose-600 mt-1">Code not recognised.</p>}
+                      </div>
+                    )}
+
                     {/* Price Breakdown */}
                     <div className="border-t border-slate-100 pt-4 space-y-2 text-xs">
                       <div className="flex justify-between text-slate-600 font-semibold">
@@ -3874,6 +4864,21 @@ export default function PremiumRiceStore() {
                     />
                   </div>
 
+                  {!isLogin && !signupOtpStep && (
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Referral Code <span className="text-slate-400 font-medium">(optional)</span></label>
+                      <input 
+                        type="text"
+                        value={referralInput}
+                        onChange={(e) => setReferralInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12))}
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 text-xs font-mono font-bold tracking-widest focus:ring-2 focus:ring-emerald-500"
+                        placeholder="e.g. MW7K3QX"
+                      />
+                      {referralCheck.state === 'valid' && <p className="text-[11px] font-bold text-emerald-600 mt-1">Code accepted — you are being referred by {referralCheck.agentName}.</p>}
+                      {referralCheck.state === 'invalid' && <p className="text-[11px] font-bold text-rose-600 mt-1">This code was not recognised. You can still sign up without it.</p>}
+                    </div>
+                  )}
+
                   {!isLogin && signupOtpStep && (
                     <div className="space-y-2">
                       <label className="block font-bold text-slate-700 mb-1">6-Digit Verification Code</label>
@@ -3936,6 +4941,13 @@ export default function PremiumRiceStore() {
         {/* VIEW: ADMINISTRATIVE DASHBOARD CONSOLE                             */}
         {/* DARK THEMED WITH TWO-PANEL ARCHITECTURE                             */}
         {/* =================================================================== */}
+        {view === 'agent' && user?.role === 'agent' && (
+          <AgentDashboard token={token} user={user} showToast={showToast} onSessionExpired={() => handleSessionExpired()} />
+        )}
+        {view === 'support' && user?.role === 'support' && (
+          <SupportDashboard token={token} user={user} showToast={showToast} onSessionExpired={() => handleSessionExpired()} />
+        )}
+
         {view === 'admin' && user?.role === 'admin' && (
           <div className="min-h-[85vh] bg-slate-950 text-slate-100 p-4 sm:p-6 lg:p-8">
             <div className="container mx-auto space-y-6">
@@ -3978,6 +4990,8 @@ export default function PremiumRiceStore() {
                         { id: 'users', label: 'User Clearance', icon: Users, desc: 'Edit, suspend, delete' },
                         { id: 'config', label: 'Regional Freight', icon: MapPin, desc: '47 county shipping rates' },
                         { id: 'carousel', label: 'Hero Backdrop', icon: Sliders, desc: 'UI/UX & advert control' },
+                        { id: 'agents', label: 'Agents', icon: Briefcase, desc: 'Referrals, commission, payouts' },
+                        { id: 'activity', label: 'Live Activity', icon: Activity, desc: 'Everything that happens' },
                         { id: 'logs', label: 'Audit Logs', icon: FileText, desc: 'User account logs' }
                       ].map(tab => {
                         const Icon = tab.icon;
@@ -4402,6 +5416,13 @@ export default function PremiumRiceStore() {
                   )}
 
                   {/* SUB-PANEL: USER CLEARANCE (DISPLAY ALL USERS, EDIT, SUSPEND, DELETE) */}
+                  {adminTab === 'agents' && (
+                    <AdminAgentsPanel token={token} showToast={showToast} adminUsers={adminUsers} onUsersChanged={fetchAdminUsers} />
+                  )}
+                  {adminTab === 'activity' && (
+                    <AdminActivityPanel token={token} showToast={showToast} socket={socket} />
+                  )}
+
                   {adminTab === 'users' && (
                     <div className="space-y-6">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 p-4 rounded-2xl border border-slate-800">
@@ -4448,7 +5469,7 @@ export default function PremiumRiceStore() {
                                     </td>
                                     <td className="p-4">
                                       <span className={`px-2 py-0.5 rounded-md font-bold uppercase text-[9px] ${
-                                        u.role === 'admin' ? 'bg-amber-950 text-amber-300 border border-amber-800' : 'bg-slate-800 text-slate-300'
+                                        u.role === 'admin' ? 'bg-amber-950 text-amber-300 border border-amber-800' : u.role === 'agent' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : u.role === 'support' ? 'bg-sky-950 text-sky-300 border border-sky-800' : 'bg-slate-800 text-slate-300'
                                       }`}>
                                         {u.role}
                                       </span>
@@ -4474,6 +5495,26 @@ export default function PremiumRiceStore() {
                                       >
                                         <Edit className="w-4 h-4" />
                                       </button>
+
+                                      {/* Staff roles */}
+                                      {u.role !== 'admin' && (
+                                        <>
+                                          <button
+                                            onClick={() => handleSetUserRole(u, u.role === 'agent' ? 'customer' : 'agent')}
+                                            className={`p-1.5 cursor-pointer ${u.role === 'agent' ? 'text-emerald-400' : 'text-slate-500 hover:text-emerald-400'}`}
+                                            title={u.role === 'agent' ? 'Dismiss agent' : 'Make agent'}
+                                          >
+                                            <Briefcase className="w-4 h-4" />
+                                          </button>
+                                          <button
+                                            onClick={() => handleSetUserRole(u, u.role === 'support' ? 'customer' : 'support')}
+                                            className={`p-1.5 cursor-pointer ${u.role === 'support' ? 'text-sky-400' : 'text-slate-500 hover:text-sky-400'}`}
+                                            title={u.role === 'support' ? 'Remove customer care role' : 'Make customer care'}
+                                          >
+                                            <Headphones className="w-4 h-4" />
+                                          </button>
+                                        </>
+                                      )}
 
                                       {/* Suspend / Reactivate */}
                                       <button 
@@ -5202,6 +6243,8 @@ export default function PremiumRiceStore() {
                     <option value="customer">Customer</option>
                     <option value="admin">Admin</option>
                     <option value="logistics">Logistics</option>
+                    <option value="support">Customer care</option>
+                    <option value="agent">Agent</option>
                   </select>
                 </div>
 
