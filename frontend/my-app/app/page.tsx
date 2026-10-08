@@ -1625,6 +1625,147 @@ const ProductCard: React.FC<ProductCardProps> = ({
 // ============================================================================
 
 // ============================================================================
+// TERMS & CONDITIONS, PASSWORD STRENGTH
+// ============================================================================
+const TERMS_VERSION = '2026-10';
+const MIN_PASSWORD_LENGTH = 8;
+
+/** Advises on strength but never blocks: anything with 8+ characters is allowed. */
+const assessPassword = (pw: string) => {
+  const tips: string[] = [];
+  if (!pw) return { score: 0, label: '', tips, color: 'bg-slate-200', text: 'text-slate-400' };
+  const lower = pw.toLowerCase();
+  const common = ['password', '12345678', '123456789', '1234567890', 'qwertyui', 'qwerty123', 'iloveyou', 'abc12345', '11111111', '00000000', 'admin123', 'welcome1', 'mwearice'];
+  const isCommon = common.some(c => lower.includes(c));
+  const hasLower = /[a-z]/.test(pw), hasUpper = /[A-Z]/.test(pw), hasNum = /\d/.test(pw), hasSym = /[^A-Za-z0-9]/.test(pw);
+  const variety = [hasLower, hasUpper, hasNum, hasSym].filter(Boolean).length;
+  const repeated = /^(.)\1+$/.test(pw) || /(.)\1{3,}/.test(pw);
+  const sequence = /(0123|1234|2345|3456|4567|5678|6789|abcd|bcde|cdef|qwer|asdf|zxcv)/i.test(pw);
+
+  let score = 0;
+  if (pw.length >= MIN_PASSWORD_LENGTH) score += 1;
+  if (pw.length >= 12) score += 1;
+  if (variety >= 3) score += 1;
+  if (variety === 4 || pw.length >= 16) score += 1;
+  if (isCommon || repeated) score = Math.min(score, 1);
+  else if (sequence) score = Math.min(score, 2);
+  if (pw.length < MIN_PASSWORD_LENGTH) score = 0;
+
+  if (pw.length < MIN_PASSWORD_LENGTH) tips.push(`Use at least ${MIN_PASSWORD_LENGTH} characters (${MIN_PASSWORD_LENGTH - pw.length} more).`);
+  if (isCommon) tips.push('This looks like a very common password.');
+  else if (repeated) tips.push('Avoid repeating the same character.');
+  else if (sequence) tips.push('Avoid simple sequences like 1234 or qwerty.');
+  if (pw.length >= MIN_PASSWORD_LENGTH && score < 3) {
+    if (!hasUpper || !hasLower) tips.push('Mix upper and lower case letters.');
+    if (!hasNum) tips.push('Add a number.');
+    if (!hasSym) tips.push('Add a symbol such as ! or #.');
+    if (pw.length < 12) tips.push('A longer password (12+ characters) is much harder to guess.');
+  }
+  const levels = [
+    { label: 'Too short', color: 'bg-rose-500', text: 'text-rose-600' },
+    { label: 'Weak', color: 'bg-orange-500', text: 'text-orange-600' },
+    { label: 'Fair', color: 'bg-amber-400', text: 'text-amber-600' },
+    { label: 'Good', color: 'bg-lime-500', text: 'text-lime-600' },
+    { label: 'Strong', color: 'bg-emerald-500', text: 'text-emerald-600' }
+  ];
+  return { score, ...levels[score], tips: tips.slice(0, 3) };
+};
+
+function PasswordStrength({ value }: { value: string }) {
+  if (!value) return <p className="text-[10px] text-slate-400 mt-1">At least {MIN_PASSWORD_LENGTH} characters. A longer mix of letters, numbers and symbols is safer.</p>;
+  const a = assessPassword(value);
+  return (
+    <div className="mt-1.5 space-y-1">
+      <div className="flex items-center gap-2">
+        <div className="flex-1 grid grid-cols-4 gap-1">
+          {[1, 2, 3, 4].map(i => <div key={i} className={`h-1.5 rounded-full ${a.score >= i ? a.color : 'bg-slate-200'}`} />)}
+        </div>
+        <span className={`text-[10px] font-black uppercase ${a.text}`}>{a.label}</span>
+      </div>
+      {a.tips.length > 0 && <p className="text-[10px] text-slate-500 leading-snug">{a.tips.join(' ')}</p>}
+      {value.length >= MIN_PASSWORD_LENGTH && a.score < 3 && <p className="text-[10px] font-bold text-slate-500">You can still use this password, but a stronger one protects your account better.</p>}
+    </div>
+  );
+}
+
+const TERMS_SECTIONS: { title: string; body: string[] }[] = [
+  { title: '1. About these terms', body: [
+    'These Terms and Conditions govern your use of the Mwea Rice Hub website and the purchase of rice and related products through it ("the Service"). By creating an account or placing an order you agree to them. If you do not agree, please do not use the Service.'
+  ]},
+  { title: '2. Your account', body: [
+    'You must give accurate information when you register, including a working phone number that can receive SMS verification codes. You are responsible for keeping your password private and for everything done through your account.',
+    'You must be at least 18 years old, or have a parent or guardian\'s permission. We may suspend or close accounts that give false information, abuse the Service or are used for fraud.'
+  ]},
+  { title: '3. Products and prices', body: [
+    'All prices are in Kenyan Shillings (KES). Prices, stock and flash-sale offers can change at any time; the price shown when you pay is the price you are charged. Flash-sale prices apply only while the sale is running. Product pictures are for illustration and packaging may vary slightly.'
+  ]},
+  { title: '4. Orders and payment', body: [
+    'Payment is made by M-Pesa STK push, processed by PayHero. An order is confirmed only after your payment is received and verified. If you do not complete the M-Pesa prompt, the order stays unpaid and may be cancelled.',
+    'Always keep your M-Pesa confirmation message. If you were charged but your order shows unpaid, contact customer care with your M-Pesa receipt and we will resolve it.'
+  ]},
+  { title: '5. Delivery', body: [
+    'We deliver across Kenya. A delivery fee based on your county is added at checkout. Delivery times are estimates and can be affected by distance, weather and road conditions. You must give a complete, correct delivery address and be reachable on your phone; we are not responsible for delays or failed deliveries caused by wrong or incomplete details.'
+  ]},
+  { title: '6. Inspection, returns and refunds', body: [
+    'Please inspect your rice on delivery. Report a damaged, wrong or short-weight order to customer care as soon as possible, ideally within 24 hours, with photos where you can. Where the problem is confirmed we will replace the item or refund you. Opened food products that are in good condition cannot normally be returned.'
+  ]},
+  { title: '7. Reward points', body: [
+    'You may earn reward points on paid orders. Points have no cash value, cannot be transferred and can be corrected or removed if they were earned by mistake or through misuse of the Service.'
+  ]},
+  { title: '8. Referral codes and agents', body: [
+    'You may enter an agent\'s referral code when you sign up or order. Once a code is linked to your account it stays linked. Using a code does not change the price you pay. Agents earn commission from us; it is never charged to you.',
+    'Agents must not mislead customers, make false claims about our products or use another person\'s code or details. We may withdraw an agent\'s role and unpaid commission where these rules are broken.'
+  ]},
+  { title: '9. Acceptable use', body: [
+    'You must not misuse the Service: no fraud, no attempts to break into accounts or systems, no automated scraping or abuse of verification codes, and no use that harms other customers or us.'
+  ]},
+  { title: '10. Your personal data', body: [
+    'We collect your name, phone number, email (if given), delivery details, order and payment records, and the technical information needed to keep the Service secure (such as IP address and sign-in activity). We use it to run your account, process and deliver orders, send verification codes and order messages, prevent fraud and improve the Service.',
+    'We share only what is needed with our payment provider (PayHero/M-Pesa), our SMS provider and delivery partners. We do not sell your personal data. Customer care staff can see your account and order details to help you. Under the Kenya Data Protection Act, 2019 you may ask to see, correct or delete your personal data by contacting us.'
+  ]},
+  { title: '11. Messages', body: [
+    'By registering you agree that we may send you SMS or email messages about verification codes, orders, payments and delivery.'
+  ]},
+  { title: '12. Our responsibility', body: [
+    'We take care to deliver safe, good quality rice, but to the extent allowed by law we are not liable for indirect losses, or for delays or failures outside our reasonable control, including network, M-Pesa or courier outages. Nothing in these terms limits rights you have under Kenyan consumer protection law.'
+  ]},
+  { title: '13. Changes to these terms', body: [
+    'We may update these terms. The current version is shown here with its version number. If we make an important change we will ask you to accept it again; continuing to use the Service after a change means you accept the updated terms.'
+  ]},
+  { title: '14. Governing law and contact', body: [
+    'These terms are governed by the laws of Kenya. For questions, complaints or data requests, contact Mwea Rice Hub at mweadirectrice@gmail.com.'
+  ]}
+];
+
+function TermsModal({ onClose, onAccept }: { onClose: () => void; onAccept?: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[100] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6" role="dialog" aria-modal="true" aria-label="Terms and Conditions">
+      <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-black text-slate-900">Terms and Conditions</h3>
+            <p className="text-[11px] text-slate-500">Mwea Rice Hub · version {TERMS_VERSION}</p>
+          </div>
+          <button type="button" onClick={onClose} className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 cursor-pointer" aria-label="Close"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="px-6 py-4 overflow-y-auto space-y-4 text-xs text-slate-700 leading-relaxed">
+          {TERMS_SECTIONS.map(sec => (
+            <section key={sec.title}>
+              <h4 className="font-black text-slate-900 mb-1">{sec.title}</h4>
+              {sec.body.map((p, i) => <p key={i} className="mb-1.5">{p}</p>)}
+            </section>
+          ))}
+        </div>
+        <div className="px-6 py-4 border-t border-slate-100 flex flex-col sm:flex-row gap-2 sm:justify-end">
+          <button type="button" onClick={onClose} className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer">Close</button>
+          {onAccept && <button type="button" onClick={onAccept} className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs cursor-pointer">I have read and accept</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // STAFF, AGENT & ACTIVITY SCREENS (customer care, agents, admin tracking)
 // ============================================================================
 
@@ -1893,13 +2034,19 @@ function AgentDashboard({ token, user, showToast, onSessionExpired }: { token: s
 }
 
 // ---------------------------------------------------------------------------
-// CUSTOMER CARE DASHBOARD (view accounts, fix names, reactivate accounts)
+// CUSTOMER CARE DASHBOARD — fixed navigation panel on the left, work area on the right
+// Can view every account, order and payment. The only changes allowed: fix a name, reactivate an account.
 // ---------------------------------------------------------------------------
+type SupportSection = 'overview' | 'customers' | 'orders' | 'payments' | 'activity';
+
 function SupportDashboard({ token, user, showToast, onSessionExpired }: { token: string | null; user: UserAccount; showToast: ToastFn; onSessionExpired: () => void }) {
+  const [section, setSection] = useState<SupportSection>('overview');
   const [overview, setOverview] = useState<any>(null);
+
+  // customers
   const [list, setList] = useState<any>({ users: [], total: 0, page: 1, pages: 1 });
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<'all' | 'active' | 'suspended'>('all');
+  const [status, setStatus] = useState<'all' | 'active' | 'suspended' | 'unverified'>('all');
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<any>(null);
@@ -1909,6 +2056,16 @@ function SupportDashboard({ token, user, showToast, onSessionExpired }: { token:
   const [noteDraft, setNoteDraft] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // orders & payments
+  const [orders, setOrders] = useState<any>({ orders: [], total: 0, page: 1, pages: 1, counts: { all: 0, paid: 0, pending: 0, failed: 0 } });
+  const [orderSearch, setOrderSearch] = useState('');
+  const [payFilter, setPayFilter] = useState<'all' | 'paid' | 'pending' | 'failed'>('all');
+  const [orderPage, setOrderPage] = useState(1);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [openOrder, setOpenOrder] = useState<number | null>(null);
+  const [checks, setChecks] = useState<Record<number, any>>({});
+  const [checking, setChecking] = useState<number | null>(null);
+
   const fail = (err: any) => { if (err.status === 401) onSessionExpired(); else showToast(err.message, 'error'); };
 
   const loadOverview = useCallback(async () => {
@@ -1917,229 +2074,319 @@ function SupportDashboard({ token, user, showToast, onSessionExpired }: { token:
 
   const loadList = useCallback(async () => {
     setLoading(true);
-    try {
-      setList(await staffApi(`/support/users?search=${encodeURIComponent(search)}&status=${status}&page=${page}`, token));
-    } catch (err) { fail(err); } finally { setLoading(false); }
+    try { setList(await staffApi(`/support/users?search=${encodeURIComponent(search)}&status=${status}&page=${page}`, token)); }
+    catch (err) { fail(err); } finally { setLoading(false); }
   }, [token, search, status, page]);
+
+  const loadOrders = useCallback(async () => {
+    setOrdersLoading(true);
+    try {
+      const pay = section === 'payments' ? payFilter : 'all';
+      setOrders(await staffApi(`/support/orders?search=${encodeURIComponent(orderSearch)}&payment=${pay}&page=${orderPage}`, token));
+    } catch (err) { fail(err); } finally { setOrdersLoading(false); }
+  }, [token, orderSearch, payFilter, orderPage, section]);
 
   const openUser = async (id: number) => {
     setDetailLoading(true);
     try {
       const d = await staffApi(`/support/users/${id}`, token);
-      setSelected(d);
-      setNameDraft(d.user.fullName);
-      setReason('');
-      setNoteDraft('');
+      setSelected(d); setNameDraft(d.user.fullName); setReason(''); setNoteDraft('');
     } catch (err) { fail(err); } finally { setDetailLoading(false); }
   };
 
-  useEffect(() => { loadOverview(); }, [loadOverview]);
-  useEffect(() => {
-    const t = setTimeout(loadList, 300);
-    return () => clearTimeout(t);
-  }, [loadList]);
+  const goToCustomer = (id: number) => { setSection('customers'); openUser(id); };
 
-  const refreshAll = async (id: number) => { await Promise.all([openUser(id), loadList(), loadOverview()]); };
+  useEffect(() => { loadOverview(); }, [loadOverview]);
+  useEffect(() => { if (section === 'customers') { const t = setTimeout(loadList, 300); return () => clearTimeout(t); } }, [section, loadList]);
+  useEffect(() => { if (section === 'orders' || section === 'payments') { const t = setTimeout(loadOrders, 300); return () => clearTimeout(t); } }, [section, loadOrders]);
+
+  const refreshUser = async (id: number) => { await Promise.all([openUser(id), loadList(), loadOverview()]); };
 
   const saveName = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selected) return;
-    setBusy(true);
-    try {
-      const r = await staffApi(`/support/users/${selected.user.id}/name`, token, { method: 'PUT', body: { fullName: nameDraft } });
-      showToast(r.message || 'Name updated.', 'success');
-      await refreshAll(selected.user.id);
-    } catch (err) { fail(err); } finally { setBusy(false); }
+    e.preventDefault(); if (!selected) return; setBusy(true);
+    try { const r = await staffApi(`/support/users/${selected.user.id}/name`, token, { method: 'PUT', body: { fullName: nameDraft } }); showToast(r.message || 'Name updated.', 'success'); await refreshUser(selected.user.id); }
+    catch (err) { fail(err); } finally { setBusy(false); }
   };
-
   const unsuspend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selected) return;
-    setBusy(true);
-    try {
-      const r = await staffApi(`/support/users/${selected.user.id}/unsuspend`, token, { method: 'POST', body: { reason } });
-      showToast(r.message || 'Account reactivated.', 'success');
-      await refreshAll(selected.user.id);
-    } catch (err) { fail(err); } finally { setBusy(false); }
+    e.preventDefault(); if (!selected) return; setBusy(true);
+    try { const r = await staffApi(`/support/users/${selected.user.id}/unsuspend`, token, { method: 'POST', body: { reason } }); showToast(r.message || 'Account reactivated.', 'success'); await refreshUser(selected.user.id); }
+    catch (err) { fail(err); } finally { setBusy(false); }
   };
-
   const addNote = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selected) return;
-    setBusy(true);
-    try {
-      await staffApi(`/support/users/${selected.user.id}/notes`, token, { method: 'POST', body: { note: noteDraft } });
-      setNoteDraft('');
-      await openUser(selected.user.id);
-      showToast('Note saved.', 'success');
-    } catch (err) { fail(err); } finally { setBusy(false); }
+    e.preventDefault(); if (!selected) return; setBusy(true);
+    try { await staffApi(`/support/users/${selected.user.id}/notes`, token, { method: 'POST', body: { note: noteDraft } }); setNoteDraft(''); await openUser(selected.user.id); showToast('Note saved.', 'success'); }
+    catch (err) { fail(err); } finally { setBusy(false); }
+  };
+  const checkPayment = async (orderId: number) => {
+    setChecking(orderId);
+    try { const r = await staffApi(`/support/orders/${orderId}/payment-check`, token); setChecks(c => ({ ...c, [orderId]: r })); loadOverview(); }
+    catch (err) { fail(err); } finally { setChecking(null); }
   };
 
   const u = selected?.user;
+  const readOnly = !!u && (u.role === 'admin' || u.role === 'support' || u.id === user.id);
+  const navItems: { id: SupportSection; label: string; icon: any; badge?: number }[] = [
+    { id: 'overview', label: 'Overview', icon: Activity },
+    { id: 'customers', label: 'Customers', icon: Users, badge: overview?.suspended },
+    { id: 'orders', label: 'Orders', icon: Package },
+    { id: 'payments', label: 'Payments', icon: Wallet, badge: overview ? overview.pendingPayments + overview.failedPayments : undefined },
+    { id: 'activity', label: 'My Activity', icon: Clock }
+  ];
+  const verdictStyle: Record<string, string> = {
+    CONFIRMED_PAID: 'bg-emerald-950 border-emerald-800 text-emerald-200', NOT_PAID: 'bg-slate-800 border-slate-700 text-slate-200',
+    PAID_NOT_RECORDED: 'bg-rose-950 border-rose-800 text-rose-200', RECORDED_PAID_UNCONFIRMED: 'bg-amber-950 border-amber-800 text-amber-200', UNKNOWN: 'bg-slate-800 border-slate-700 text-slate-300'
+  };
+  const payPill = (s: string) => s === 'paid' ? 'bg-emerald-950 text-emerald-300 border-emerald-800' : s === 'failed' ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-amber-950 text-amber-300 border-amber-800';
+
+  const OrdersTable = ({ mode }: { mode: 'orders' | 'payments' }) => (
+    <div className="space-y-4">
+      <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 space-y-3">
+        <input value={orderSearch} onChange={(e) => { setOrderSearch(e.target.value); setOrderPage(1); }} placeholder={mode === 'payments' ? 'Search M-Pesa receipt, phone, customer name or order #…' : 'Search order #, customer, phone or receipt…'} className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white" />
+        {mode === 'payments' && (
+          <div className="flex flex-wrap gap-2">
+            {(['all', 'paid', 'pending', 'failed'] as const).map(f => (
+              <button key={f} onClick={() => { setPayFilter(f); setOrderPage(1); }} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold capitalize cursor-pointer ${payFilter === f ? 'bg-sky-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>
+                {f} <span className="opacity-70">({orders.counts[f] ?? 0})</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-950 text-slate-400 uppercase font-black">
+              <tr><th className="p-3">Order</th><th className="p-3">Date</th><th className="p-3">Customer</th>{mode === 'payments' ? <><th className="p-3">M-Pesa</th><th className="p-3">Receipt</th></> : <><th className="p-3">Delivery</th><th className="p-3">Status</th></>}<th className="p-3 text-right">Total</th><th className="p-3">Payment</th><th className="p-3 text-right">Actions</th></tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60">
+              {ordersLoading && orders.orders.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-slate-500 font-bold">Loading…</td></tr>}
+              {!ordersLoading && orders.orders.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-slate-500 font-bold">Nothing matches.</td></tr>}
+              {orders.orders.map((o: any) => (
+                <React.Fragment key={o.id}>
+                  <tr className="hover:bg-slate-800/40">
+                    <td className="p-3 font-mono font-bold text-slate-300">#{o.id}</td>
+                    <td className="p-3 text-slate-400 whitespace-nowrap">{formatWhen(o.createdAt)}</td>
+                    <td className="p-3"><button onClick={() => goToCustomer(o.customer.id)} className="font-bold text-sky-400 hover:underline cursor-pointer text-left">{o.customer.fullName}</button><p className="text-[10px] text-slate-500">{o.customer.phone}</p></td>
+                    {mode === 'payments'
+                      ? <><td className="p-3 font-mono text-slate-300">{o.mpesaNumber || '—'}</td><td className="p-3 font-mono font-bold text-emerald-400">{o.mpesaReceipt || '—'}</td></>
+                      : <><td className="p-3 text-slate-300">{o.county}{o.town ? `, ${o.town}` : ''}</td><td className="p-3 capitalize text-slate-300">{String(o.status).replace('_', ' ')}</td></>}
+                    <td className="p-3 text-right font-bold">{formatKES(o.grandTotal)}</td>
+                    <td className="p-3"><span className={`px-2 py-0.5 rounded-full border text-[9px] font-black uppercase ${payPill(o.paymentState)}`}>{o.paymentState}</span></td>
+                    <td className="p-3 text-right whitespace-nowrap space-x-1.5">
+                      <button onClick={() => checkPayment(o.id)} disabled={checking === o.id} className="px-2.5 py-1.5 rounded-lg bg-sky-800 hover:bg-sky-700 disabled:opacity-50 text-white text-[10px] font-extrabold cursor-pointer">{checking === o.id ? 'Checking…' : 'Check payment'}</button>
+                      <button onClick={() => setOpenOrder(openOrder === o.id ? null : o.id)} className="p-1.5 text-slate-400 hover:text-white cursor-pointer" title="Details"><Eye className="w-4 h-4" /></button>
+                    </td>
+                  </tr>
+                  {(openOrder === o.id || checks[o.id]) && (
+                    <tr className="bg-slate-950/60"><td colSpan={8} className="p-4 space-y-3">
+                      {checks[o.id] && (
+                        <div className={`p-3 rounded-xl border text-xs font-bold ${verdictStyle[checks[o.id].verdict] || verdictStyle.UNKNOWN}`}>
+                          {checks[o.id].message}
+                          <span className="block text-[10px] font-medium opacity-80 mt-0.5">PayHero status: {checks[o.id].payheroStatus || 'unreachable'} · Order amount {formatKES(checks[o.id].orderAmount)}{checks[o.id].mpesaReceipt ? ` · Receipt ${checks[o.id].mpesaReceipt}` : ''}</span>
+                        </div>
+                      )}
+                      {openOrder === o.id && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                          <div><p className="text-[10px] font-black uppercase text-slate-500">Items</p><p className="text-slate-200">{o.items}</p><p className="text-slate-500 mt-1">Rice {formatKES(o.subTotal)} + delivery {formatKES(o.transportFee)}</p></div>
+                          <div><p className="text-[10px] font-black uppercase text-slate-500">Delivery address</p><p className="text-slate-200">{o.address || '—'}</p></div>
+                          <div><p className="text-[10px] font-black uppercase text-slate-500">Payment</p><p className="text-slate-200">{o.paidTag || o.paymentState} via {String(o.method || 'mpesa').replace('_', ' ')}</p>{o.paidAt && <p className="text-slate-500">Paid {formatWhen(o.paidAt)}</p>}{o.failureReason && <p className="text-rose-300">Reason: {o.failureReason}</p>}<p className="text-slate-500 mt-1">{o.customer.email || ''}</p></div>
+                        </div>
+                      )}
+                    </td></tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="p-3 flex items-center justify-between border-t border-slate-800 text-xs">
+          <button disabled={orderPage <= 1} onClick={() => setOrderPage(p => p - 1)} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 disabled:opacity-40 cursor-pointer">Newer</button>
+          <span className="text-slate-500 font-bold">{orders.total} result(s) · page {orders.page} of {orders.pages}</span>
+          <button disabled={orderPage >= orders.pages} onClick={() => setOrderPage(p => p + 1)} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 disabled:opacity-40 cursor-pointer">Older</button>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="min-h-[85vh] bg-slate-950 text-slate-100 p-4 sm:p-6 lg:p-8">
-      <div className="container mx-auto space-y-6">
-        <div className="border-b border-slate-800 pb-6">
-          <div className="flex items-center gap-2">
-            <Headphones className="w-5 h-5 text-sky-400" />
-            <span className="text-xs font-black text-sky-400 uppercase tracking-widest">Customer Care Desk</span>
-          </div>
-          <h2 className="text-2xl sm:text-3xl font-black text-white">Hello, {user.fullName}</h2>
-          <p className="text-xs text-slate-400 mt-1">You can look up accounts, correct a customer&apos;s name and reactivate suspended accounts. Everything you do is recorded.</p>
+    <div className="bg-slate-950 text-slate-100 lg:h-[calc(100vh-4.5rem)] flex flex-col lg:flex-row lg:overflow-hidden">
+      {/* FIXED NAVIGATION PANEL */}
+      <aside className="lg:w-60 lg:shrink-0 bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-800 lg:h-full flex lg:flex-col sticky top-0 lg:static z-20">
+        <div className="hidden lg:block p-5 border-b border-slate-800">
+          <div className="flex items-center gap-2"><Headphones className="w-5 h-5 text-sky-400" /><span className="text-[11px] font-black text-sky-400 uppercase tracking-widest">Customer Care</span></div>
+          <p className="text-sm font-black text-white mt-2 truncate">{user.fullName}</p>
+          <p className="text-[10px] text-slate-500 mt-0.5">View everything · change names · reactivate accounts</p>
         </div>
+        <nav className="flex lg:flex-col gap-1 p-2 lg:p-3 overflow-x-auto lg:overflow-visible w-full">
+          {navItems.map(item => (
+            <button key={item.id} onClick={() => setSection(item.id)} className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer transition-all ${section === item.id ? 'bg-sky-700 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+              <item.icon className="w-4 h-4 shrink-0" /> <span>{item.label}</span>
+              {!!item.badge && <span className="ml-auto px-1.5 py-0.5 rounded-full bg-rose-600 text-white text-[9px] font-black">{item.badge}</span>}
+            </button>
+          ))}
+        </nav>
+        <p className="hidden lg:block mt-auto p-4 text-[10px] text-slate-600 leading-relaxed">Everything you do here is recorded for the administrator.</p>
+      </aside>
 
-        {overview && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <StaffStat label="Customer accounts" value={overview.totalCustomers} />
-            <StaffStat label="Suspended" value={overview.suspended} tone="rose" />
-            <StaffStat label="New this week" value={overview.newThisWeek} tone="emerald" />
-            <StaffStat label="Not yet verified" value={overview.unverified} tone="amber" />
+      {/* WORK PANEL */}
+      <main className="flex-1 min-w-0 lg:overflow-y-auto p-4 sm:p-6 space-y-5">
+        {section === 'overview' && (
+          <>
+            <div><h2 className="text-xl sm:text-2xl font-black text-white">Hello, {user.fullName}</h2><p className="text-xs text-slate-400 mt-1">Here is what needs attention today.</p></div>
+            {overview ? (
+              <>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <StaffStat label="Accounts" value={overview.totalCustomers} />
+                  <StaffStat label="Suspended" value={overview.suspended} tone="rose" />
+                  <StaffStat label="Not verified" value={overview.unverified} tone="amber" />
+                  <StaffStat label="New this week" value={overview.newThisWeek} tone="emerald" />
+                  <StaffStat label="Paid today" value={overview.paidToday} tone="emerald" hint={formatKES(overview.paidTodayValue)} />
+                  <StaffStat label="Awaiting payment" value={overview.pendingPayments} tone="amber" />
+                  <StaffStat label="Failed payments" value={overview.failedPayments} tone="rose" />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <button onClick={() => { setStatus('suspended'); setPage(1); setSection('customers'); }} className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-rose-700 text-left cursor-pointer"><p className="text-xs font-black text-white flex items-center gap-2"><Ban className="w-4 h-4 text-rose-400" /> Suspended accounts</p><p className="text-[11px] text-slate-400 mt-1">Review and reactivate customers who were suspended.</p></button>
+                  <button onClick={() => { setPayFilter('failed'); setOrderPage(1); setSection('payments'); }} className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-rose-700 text-left cursor-pointer"><p className="text-xs font-black text-white flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-rose-400" /> Failed payments</p><p className="text-[11px] text-slate-400 mt-1">Help customers whose M-Pesa payment did not go through.</p></button>
+                  <button onClick={() => { setPayFilter('pending'); setOrderPage(1); setSection('payments'); }} className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-amber-700 text-left cursor-pointer"><p className="text-xs font-black text-white flex items-center gap-2"><Clock className="w-4 h-4 text-amber-400" /> Awaiting payment</p><p className="text-[11px] text-slate-400 mt-1">Check whether pending orders were actually paid.</p></button>
+                </div>
+              </>
+            ) : <p className="text-xs text-slate-500 font-bold">Loading…</p>}
+          </>
+        )}
+
+        {section === 'customers' && (
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+            <div className="xl:col-span-5 bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
+              <div className="p-4 space-y-3 border-b border-slate-800">
+                <input type="text" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Search name, phone, email or account number…" className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white" />
+                <div className="flex flex-wrap gap-2">
+                  {(['all', 'active', 'suspended', 'unverified'] as const).map(s => (
+                    <button key={s} onClick={() => { setStatus(s); setPage(1); }} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold capitalize cursor-pointer ${status === s ? 'bg-sky-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{s}</button>
+                  ))}
+                  <span className="ml-auto text-[11px] font-bold text-slate-500 self-center">{list.total} found</span>
+                </div>
+              </div>
+              <div className="divide-y divide-slate-800/60 max-h-[62vh] overflow-y-auto">
+                {loading && list.users.length === 0 && <p className="p-6 text-center text-xs text-slate-500 font-bold">Searching…</p>}
+                {!loading && list.users.length === 0 && <p className="p-6 text-center text-xs text-slate-500 font-bold">No accounts match.</p>}
+                {list.users.map((x: any) => (
+                  <button key={x.id} onClick={() => openUser(x.id)} className={`w-full p-4 text-left hover:bg-slate-800/50 cursor-pointer flex items-center justify-between gap-3 ${selected?.user?.id === x.id ? 'bg-slate-800/70' : ''}`}>
+                    <div className="min-w-0"><p className="text-xs font-extrabold text-white truncate">{x.fullName}</p><p className="text-[11px] text-slate-400 truncate">{x.phoneNumber}{x.email ? ` · ${x.email}` : ''}</p></div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      {x.isActive === false ? <span className="px-2 py-0.5 rounded-full bg-rose-950 text-rose-300 border border-rose-800 text-[9px] font-black uppercase">Suspended</span>
+                        : x.isVerified === false ? <span className="px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-800 text-[9px] font-black uppercase">Unverified</span>
+                        : <span className="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 text-[9px] font-black uppercase">Active</span>}
+                      {(x.role === 'agent' || x.role === 'support' || x.role === 'admin') && <span className="text-[9px] font-black uppercase text-sky-400">{x.role}</span>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <div className="p-3 flex items-center justify-between border-t border-slate-800 text-xs">
+                <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 disabled:opacity-40 cursor-pointer">Previous</button>
+                <span className="text-slate-500 font-bold">Page {list.page} of {list.pages}</span>
+                <button disabled={page >= list.pages} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 disabled:opacity-40 cursor-pointer">Next</button>
+              </div>
+            </div>
+
+            <div className="xl:col-span-7 space-y-4">
+              {!selected && !detailLoading && <div className="bg-slate-900 rounded-2xl border border-slate-800 p-10 text-center text-xs font-bold text-slate-500">Select an account to see its details.</div>}
+              {detailLoading && <div className="bg-slate-900 rounded-2xl border border-slate-800 p-10 text-center text-xs font-bold text-slate-500">Loading account…</div>}
+              {selected && u && !detailLoading && (
+                <>
+                  <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 space-y-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div><p className="text-[10px] font-black uppercase text-slate-500">Account #{u.id} · {u.role === 'user' ? 'customer' : u.role}</p><h3 className="text-lg font-black text-white">{u.fullName}</h3></div>
+                      {u.isActive === false ? <span className="px-3 py-1 rounded-full bg-rose-950 text-rose-300 border border-rose-800 text-[10px] font-black uppercase">Suspended</span> : <span className="px-3 py-1 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-black uppercase">Active</span>}
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                      <div><p className="text-[10px] font-black uppercase text-slate-500">Phone</p><p className="font-bold text-slate-200">{u.phoneNumber || '—'}</p></div>
+                      <div><p className="text-[10px] font-black uppercase text-slate-500">Email</p><p className="font-bold text-slate-200 break-all">{u.email || '—'}</p></div>
+                      <div><p className="text-[10px] font-black uppercase text-slate-500">Reward points</p><p className="font-bold text-amber-400">{u.rewardPoints || 0} pts</p></div>
+                      <div><p className="text-[10px] font-black uppercase text-slate-500">Joined</p><p className="font-bold text-slate-200">{formatWhen(u.createdAt)}</p></div>
+                      <div><p className="text-[10px] font-black uppercase text-slate-500">Verified</p><p className="font-bold text-slate-200">{u.isVerified === false ? 'No' : 'Yes'}</p></div>
+                      <div><p className="text-[10px] font-black uppercase text-slate-500">Referred by</p><p className="font-bold text-slate-200">{selected.referredBy || '—'}</p></div>
+                    </div>
+                    {readOnly ? (
+                      <p className="text-[11px] font-bold text-slate-400 pt-3 border-t border-slate-800">This is a staff or administrator account, so it is view-only for you.</p>
+                    ) : (
+                      <>
+                        <form onSubmit={saveName} className="flex flex-col sm:flex-row gap-2 pt-3 border-t border-slate-800">
+                          <input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} className="flex-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-bold text-white" placeholder="Correct full name" />
+                          <button type="submit" disabled={busy || nameDraft.trim() === u.fullName} className="px-4 py-2.5 rounded-xl bg-sky-700 hover:bg-sky-600 disabled:opacity-40 text-white text-xs font-extrabold cursor-pointer">Update name</button>
+                        </form>
+                        {u.isActive === false && (
+                          <form onSubmit={unsuspend} className="space-y-2 pt-3 border-t border-slate-800">
+                            <p className="text-[11px] font-bold text-rose-300 flex items-center gap-1.5"><Ban className="w-3.5 h-3.5" /> Suspended: this customer cannot sign in.</p>
+                            <input value={reason} onChange={(e) => setReason(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white" placeholder="Why is it being reactivated? (required)" />
+                            <button type="submit" disabled={busy || reason.trim().length < 3} className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-extrabold flex items-center gap-2 cursor-pointer"><UserCheck className="w-4 h-4" /> Reactivate account</button>
+                          </form>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
+                    <p className="p-4 text-xs font-black text-white border-b border-slate-800">Orders ({selected.orders.length})</p>
+                    <div className="overflow-x-auto max-h-72 overflow-y-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-950 text-slate-400 uppercase font-black"><tr><th className="p-3">Order</th><th className="p-3">Date</th><th className="p-3">Items</th><th className="p-3 text-right">Total</th><th className="p-3">Status</th><th className="p-3">Payment</th><th className="p-3"></th></tr></thead>
+                        <tbody className="divide-y divide-slate-800/60">
+                          {selected.orders.length === 0 && <tr><td colSpan={7} className="p-5 text-center text-slate-500 font-bold">No orders yet.</td></tr>}
+                          {selected.orders.map((o: any) => (
+                            <tr key={o.id}>
+                              <td className="p-3 font-mono font-bold text-slate-400">#{o.id}</td>
+                              <td className="p-3 text-slate-400 whitespace-nowrap">{formatWhen(o.createdAt)}</td>
+                              <td className="p-3 text-slate-300 max-w-[160px] truncate" title={o.items}>{o.items}</td>
+                              <td className="p-3 text-right font-bold">{formatKES(o.grandTotal)}</td>
+                              <td className="p-3 capitalize text-slate-300">{String(o.status).replace('_', ' ')}</td>
+                              <td className="p-3"><span className="font-bold text-slate-200">{o.paymentStatus}</span>{o.mpesaReceipt && <span className="block font-mono text-[10px] text-slate-500">{o.mpesaReceipt}</span>}</td>
+                              <td className="p-3"><button onClick={() => { setOrderSearch(String(o.id)); setPayFilter('all'); setOrderPage(1); setSection('payments'); }} className="text-[10px] font-extrabold text-sky-400 hover:underline cursor-pointer">Check</button></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
+                    <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 space-y-3">
+                      <p className="text-xs font-black text-white flex items-center gap-2"><StickyNote className="w-4 h-4 text-amber-400" /> Case notes</p>
+                      <form onSubmit={addNote} className="flex gap-2">
+                        <input value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white" placeholder="Add a note about this customer…" />
+                        <button type="submit" disabled={busy || noteDraft.trim().length < 3 || u.role === 'admin'} className="px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-white text-xs font-bold cursor-pointer">Add</button>
+                      </form>
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {selected.notes.length === 0 && <p className="text-[11px] text-slate-500 font-bold">No notes yet.</p>}
+                        {selected.notes.map((n: any) => (<div key={n.id} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800"><p className="text-xs text-slate-200">{n.note}</p><p className="text-[10px] text-slate-500 mt-1">{n.authorName} · {formatWhen(n.createdAt)}</p></div>))}
+                      </div>
+                    </div>
+                    <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 space-y-3">
+                      <p className="text-xs font-black text-white flex items-center gap-2"><Clock className="w-4 h-4 text-sky-400" /> Account history</p>
+                      <div className="space-y-2 max-h-56 overflow-y-auto">
+                        {selected.history.length === 0 && <p className="text-[11px] text-slate-500 font-bold">Nothing recorded yet.</p>}
+                        {selected.history.map((h: any) => (<div key={h.id} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800"><p className="text-xs text-slate-200">{h.summary}</p><p className="text-[10px] text-slate-500 mt-1">{formatWhen(h.createdAt)}</p></div>))}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* LIST */}
-          <div className="lg:col-span-5 bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
-            <div className="p-4 space-y-3 border-b border-slate-800">
-              <input
-                type="text" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                placeholder="Search name, phone, email or account number…"
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white"
-              />
-              <div className="flex gap-2">
-                {(['all', 'active', 'suspended'] as const).map(s => (
-                  <button key={s} onClick={() => { setStatus(s); setPage(1); }} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold capitalize cursor-pointer ${status === s ? 'bg-sky-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{s}</button>
-                ))}
-                <span className="ml-auto text-[11px] font-bold text-slate-500 self-center">{list.total} found</span>
-              </div>
+        {section === 'orders' && <><h2 className="text-xl font-black text-white">All orders</h2>{OrdersTable({ mode: 'orders' })}</>}
+        {section === 'payments' && <><h2 className="text-xl font-black text-white">Payments</h2><p className="text-xs text-slate-400 -mt-2">Use <span className="font-bold text-sky-300">Check payment</span> to ask PayHero if an order was really paid. It only reports; it never changes the order.</p>{OrdersTable({ mode: 'payments' })}</>}
+
+        {section === 'activity' && (
+          <>
+            <h2 className="text-xl font-black text-white">My recent activity</h2>
+            <div className="bg-slate-900 rounded-2xl border border-slate-800 divide-y divide-slate-800/60">
+              {(!overview || overview.myRecentActions.length === 0) && <p className="p-6 text-center text-xs text-slate-500 font-bold">Nothing yet.</p>}
+              {overview && overview.myRecentActions.map((a: any) => (<div key={a.id} className="p-4"><p className="text-xs text-slate-200">{a.summary}</p><p className="text-[10px] text-slate-500 mt-1">{formatWhen(a.createdAt)}</p></div>))}
             </div>
-            <div className="divide-y divide-slate-800/60 max-h-[60vh] overflow-y-auto">
-              {loading && list.users.length === 0 && <p className="p-6 text-center text-xs text-slate-500 font-bold">Searching…</p>}
-              {!loading && list.users.length === 0 && <p className="p-6 text-center text-xs text-slate-500 font-bold">No accounts match.</p>}
-              {list.users.map((x: any) => (
-                <button key={x.id} onClick={() => openUser(x.id)} className={`w-full p-4 text-left hover:bg-slate-800/50 cursor-pointer flex items-center justify-between gap-3 ${selected?.user?.id === x.id ? 'bg-slate-800/70' : ''}`}>
-                  <div className="min-w-0">
-                    <p className="text-xs font-extrabold text-white truncate">{x.fullName}</p>
-                    <p className="text-[11px] text-slate-400 truncate">{x.phoneNumber}{x.email ? ` · ${x.email}` : ''}</p>
-                  </div>
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    {x.isActive === false
-                      ? <span className="px-2 py-0.5 rounded-full bg-rose-950 text-rose-300 border border-rose-800 text-[9px] font-black uppercase">Suspended</span>
-                      : <span className="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 text-[9px] font-black uppercase">Active</span>}
-                    {(x.role === 'agent' || x.role === 'support') && <span className="text-[9px] font-black uppercase text-sky-400">{x.role}</span>}
-                  </div>
-                </button>
-              ))}
-            </div>
-            <div className="p-3 flex items-center justify-between border-t border-slate-800 text-xs">
-              <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 disabled:opacity-40 cursor-pointer">Previous</button>
-              <span className="text-slate-500 font-bold">Page {list.page} of {list.pages}</span>
-              <button disabled={page >= list.pages} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 disabled:opacity-40 cursor-pointer">Next</button>
-            </div>
-          </div>
-
-          {/* DETAIL */}
-          <div className="lg:col-span-7 space-y-4">
-            {!selected && !detailLoading && (
-              <div className="bg-slate-900 rounded-3xl border border-slate-800 p-10 text-center text-xs font-bold text-slate-500">Select an account on the left to see its details.</div>
-            )}
-            {detailLoading && <div className="bg-slate-900 rounded-3xl border border-slate-800 p-10 text-center text-xs font-bold text-slate-500">Loading account…</div>}
-            {selected && u && !detailLoading && (
-              <>
-                <div className="bg-slate-900 rounded-3xl border border-slate-800 p-5 space-y-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] font-black uppercase text-slate-500">Account #{u.id}</p>
-                      <h3 className="text-lg font-black text-white">{u.fullName}</h3>
-                    </div>
-                    {u.isActive === false
-                      ? <span className="px-3 py-1 rounded-full bg-rose-950 text-rose-300 border border-rose-800 text-[10px] font-black uppercase">Suspended</span>
-                      : <span className="px-3 py-1 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-black uppercase">Active</span>}
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-                    <div><p className="text-[10px] font-black uppercase text-slate-500">Phone</p><p className="font-bold text-slate-200">{u.phoneNumber || '—'}</p></div>
-                    <div><p className="text-[10px] font-black uppercase text-slate-500">Email</p><p className="font-bold text-slate-200 break-all">{u.email || '—'}</p></div>
-                    <div><p className="text-[10px] font-black uppercase text-slate-500">Reward points</p><p className="font-bold text-amber-400">{u.rewardPoints || 0} pts <span className="text-slate-500 font-medium">(view only)</span></p></div>
-                    <div><p className="text-[10px] font-black uppercase text-slate-500">Joined</p><p className="font-bold text-slate-200">{formatWhen(u.createdAt)}</p></div>
-                    <div><p className="text-[10px] font-black uppercase text-slate-500">Verified</p><p className="font-bold text-slate-200">{u.isVerified === false ? 'No' : 'Yes'}</p></div>
-                    <div><p className="text-[10px] font-black uppercase text-slate-500">Referred by</p><p className="font-bold text-slate-200">{selected.referredBy || '—'}</p></div>
-                  </div>
-
-                  {/* The ONLY editable field */}
-                  <form onSubmit={saveName} className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-slate-800">
-                    <input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} className="flex-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-bold text-white" placeholder="Correct full name" />
-                    <button type="submit" disabled={busy || nameDraft.trim() === u.fullName} className="px-4 py-2.5 rounded-xl bg-sky-700 hover:bg-sky-600 disabled:opacity-40 text-white text-xs font-extrabold cursor-pointer">Update name</button>
-                  </form>
-
-                  {u.isActive === false && (
-                    <form onSubmit={unsuspend} className="space-y-2 pt-3 border-t border-slate-800">
-                      <p className="text-[11px] font-bold text-rose-300 flex items-center gap-1.5"><Ban className="w-3.5 h-3.5" /> This account is suspended and cannot sign in.</p>
-                      <input value={reason} onChange={(e) => setReason(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white" placeholder="Why is it being reactivated? (required, e.g. customer verified identity by phone)" />
-                      <button type="submit" disabled={busy || reason.trim().length < 3} className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-extrabold flex items-center gap-2 cursor-pointer">
-                        <UserCheck className="w-4 h-4" /> Reactivate account
-                      </button>
-                    </form>
-                  )}
-                </div>
-
-                <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
-                  <p className="p-4 text-xs font-black text-white border-b border-slate-800">Orders ({selected.orders.length})</p>
-                  <div className="overflow-x-auto max-h-72 overflow-y-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-950 text-slate-400 uppercase font-black"><tr><th className="p-3">Order</th><th className="p-3">Date</th><th className="p-3">Items</th><th className="p-3 text-right">Total</th><th className="p-3">Status</th><th className="p-3">Payment</th></tr></thead>
-                      <tbody className="divide-y divide-slate-800/60">
-                        {selected.orders.length === 0 && <tr><td colSpan={6} className="p-5 text-center text-slate-500 font-bold">No orders yet.</td></tr>}
-                        {selected.orders.map((o: any) => (
-                          <tr key={o.id}>
-                            <td className="p-3 font-mono font-bold text-slate-400">#{o.id}</td>
-                            <td className="p-3 text-slate-400 whitespace-nowrap">{formatWhen(o.createdAt)}</td>
-                            <td className="p-3 text-slate-300 max-w-[180px] truncate" title={o.items}>{o.items}</td>
-                            <td className="p-3 text-right font-bold">{formatKES(o.grandTotal)}</td>
-                            <td className="p-3 capitalize text-slate-300">{String(o.status).replace('_', ' ')}</td>
-                            <td className="p-3"><span className="font-bold text-slate-200">{o.paymentStatus}</span>{o.mpesaReceipt && <span className="block font-mono text-[10px] text-slate-500">{o.mpesaReceipt}</span>}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                  <div className="bg-slate-900 rounded-3xl border border-slate-800 p-4 space-y-3">
-                    <p className="text-xs font-black text-white flex items-center gap-2"><StickyNote className="w-4 h-4 text-amber-400" /> Case notes</p>
-                    <form onSubmit={addNote} className="flex gap-2">
-                      <input value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white" placeholder="Add a note about this customer…" />
-                      <button type="submit" disabled={busy || noteDraft.trim().length < 3} className="px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-white text-xs font-bold cursor-pointer">Add</button>
-                    </form>
-                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {selected.notes.length === 0 && <p className="text-[11px] text-slate-500 font-bold">No notes yet.</p>}
-                      {selected.notes.map((n: any) => (
-                        <div key={n.id} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
-                          <p className="text-xs text-slate-200">{n.note}</p>
-                          <p className="text-[10px] text-slate-500 mt-1">{n.authorName} · {formatWhen(n.createdAt)}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="bg-slate-900 rounded-3xl border border-slate-800 p-4 space-y-3">
-                    <p className="text-xs font-black text-white flex items-center gap-2"><Clock className="w-4 h-4 text-sky-400" /> Account history</p>
-                    <div className="space-y-2 max-h-56 overflow-y-auto">
-                      {selected.history.length === 0 && <p className="text-[11px] text-slate-500 font-bold">Nothing recorded yet.</p>}
-                      {selected.history.map((h: any) => (
-                        <div key={h.id} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
-                          <p className="text-xs text-slate-200">{h.summary}</p>
-                          <p className="text-[10px] text-slate-500 mt-1">{formatWhen(h.createdAt)}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
+          </>
+        )}
+      </main>
     </div>
   );
 }
@@ -2579,11 +2826,11 @@ export default function PremiumRiceStore() {
 
   // REGIONAL CHECKOUT DATA STATE
   const [checkoutData, setCheckoutData] = useState({
-    county: 'Nairobi',
-    town: 'Westlands',
-    location: 'CBD',
-    sublocation: 'Mwiki',
-    shippingAddress: 'Moi Avenue',
+    county: '',
+    town: '',
+    location: '',
+    sublocation: '',
+    shippingAddress: '',
     paymentMethod: 'mpesa_stk',
     stkPhoneNumber: ''
   });
@@ -2598,6 +2845,8 @@ export default function PremiumRiceStore() {
   const [referralInput, setReferralInput] = useState('');
   const [referralCheck, setReferralCheck] = useState<{ state: 'idle' | 'checking' | 'valid' | 'invalid'; agentName?: string }>({ state: 'idle' });
   const [signupOtp, setSignupOtp] = useState('');
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
   
   // ADMIN PANEL NAVIGATION & DATA STATES
   const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'finances' | 'users' | 'config' | 'carousel' | 'logs' | 'agents' | 'activity'>('inventory');
@@ -2712,14 +2961,8 @@ export default function PremiumRiceStore() {
 
   // CASCADE REGIONAL LOGISTICS SELECTION WHEN COUNTY CHANGES
   useEffect(() => {
-    const currentData = REGIONAL_LOGISTICS_DATA[checkoutData.county as keyof typeof REGIONAL_LOGISTICS_DATA] || DEFAULT_REGIONAL_LOGISTICS;
-    setCheckoutData(prev => ({
-      ...prev,
-      town: getTownOptions(checkoutData.county)[0] || currentData.towns[0] || 'Central Town',
-      location: currentData.locations[0] || 'Main Location',
-      sublocation: currentData.sublocations[0] || 'Sub-location',
-      shippingAddress: currentData.streets[0] || 'Main Street'
-    }));
+    // Changing the county clears the rest of the address: the customer always fills it in themselves.
+    setCheckoutData(prev => ({ ...prev, town: '', location: '', sublocation: '', shippingAddress: '' }));
   }, [checkoutData.county]);
 
   useEffect(() => {
@@ -2826,6 +3069,20 @@ export default function PremiumRiceStore() {
       if (newSocket) newSocket.disconnect();
     };
   }, []);
+
+  // If the phone number or email changes after a code was sent, the old code no longer applies
+  const otpIdentityRef = useRef('');
+  useEffect(() => {
+    const current = `${(formData.phoneNumber || '').replace(/\D/g, '')}|${(formData.email || '').trim().toLowerCase()}`;
+    if (signupOtpStep && !otpIdentityRef.current) otpIdentityRef.current = current;
+    if (!signupOtpStep) otpIdentityRef.current = '';
+    if (signupOtpStep && otpIdentityRef.current && otpIdentityRef.current !== current) {
+      setSignupOtpStep(false);
+      setSignupOtp('');
+      otpIdentityRef.current = '';
+      showToast('You changed your contact details, so please request a new code.', 'info');
+    }
+  }, [signupOtpStep, formData.phoneNumber, formData.email]);
 
   // REFERRAL LINKS: ?ref=CODE is remembered so it survives until the person signs up or checks out
   useEffect(() => {
@@ -3233,6 +3490,7 @@ export default function PremiumRiceStore() {
 
   const activeShippingFee = useMemo(() => {
     const selectedCounty = checkoutData.county;
+    if (!selectedCounty) return 0;
     const overrideFee = getCountyFee(countyOverrides, selectedCounty);
     if (overrideFee !== undefined && Number.isFinite(overrideFee)) {
       return overrideFee;
@@ -3276,7 +3534,8 @@ export default function PremiumRiceStore() {
       if (!formData.password) { showToast('Enter your password.', 'error'); return; }
       if (!isLogin) {
         if (!String(formData.fullName || '').trim()) { showToast('Enter your full name.', 'error'); return; }
-        if (formData.password.length < 6) { showToast('Password must be at least 6 characters.', 'error'); return; }
+        if (formData.password.length < MIN_PASSWORD_LENGTH) { showToast(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`, 'error'); return; }
+        if (!acceptedTerms) { showToast('Please read and accept the Terms and Conditions to create an account.', 'error'); return; }
       }
     }
     
@@ -3290,7 +3549,7 @@ export default function PremiumRiceStore() {
           payload = { ...identity, otp: signupOtp.trim(), referralCode: referralInput || undefined };
         } else {
           endpoint = '/user/signup';
-          payload = { ...identity, password: formData.password, fullName: formData.fullName, requireOtp: true, referralCode: referralInput || undefined };
+          payload = { ...identity, password: formData.password, fullName: formData.fullName, requireOtp: true, acceptedTerms: true, termsVersion: TERMS_VERSION, referralCode: referralInput || undefined };
         }
       }
 
@@ -3317,6 +3576,12 @@ export default function PremiumRiceStore() {
         setSignupOtp('');
         try { if (!isLogin) localStorage.removeItem('mwea_ref'); } catch (_) { /* ignore */ }
         setView(data.user.role === 'admin' ? 'admin' : data.user.role === 'agent' ? 'agent' : data.user.role === 'support' ? 'support' : 'home');
+      } else if (data && data.requiresVerification) {
+        // Right password but the account was never verified: the server just sent a code, so continue at the code step.
+        setIsLogin(false);
+        setSignupOtpStep(true);
+        setSignupOtp('');
+        showToast(data.error || 'Enter the verification code we sent to finish creating your account.', 'info');
       } else {
         showToast(data.error || 'Authentication failed', 'error');
       }
@@ -3364,6 +3629,10 @@ export default function PremiumRiceStore() {
         showToast(err.message || 'Failed to dispatch password reset request', 'error');
       }
     } else {
+      if (formData.newPassword.length < MIN_PASSWORD_LENGTH) {
+        showToast(`Your new password must be at least ${MIN_PASSWORD_LENGTH} characters.`, 'error');
+        return;
+      }
       try {
         const res = await fetch(`${API_BASE_URL}/user/reset-password`, {
           method: 'POST',
@@ -3430,6 +3699,10 @@ export default function PremiumRiceStore() {
     }
     if (!checkoutData.county || !checkoutData.town) {
       showToast('Please choose your delivery county and town.', 'error');
+      return;
+    }
+    if (String(checkoutData.shippingAddress || '').trim().length < 3) {
+      showToast('Please enter your street, building or landmark so we can find you.', 'error');
       return;
     }
 
@@ -4455,6 +4728,7 @@ export default function PremiumRiceStore() {
                           onChange={(e) => setCheckoutData(prev => ({ ...prev, county: e.target.value }))}
                           className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-bold bg-white focus:ring-2 focus:ring-emerald-500 cursor-pointer"
                         >
+                          <option value="" disabled>Choose your county…</option>
                           {ALL_47_COUNTIES.map(c => (
                             <option key={c} value={c}>{c}</option>
                           ))}
@@ -4466,9 +4740,11 @@ export default function PremiumRiceStore() {
                           <label className="block font-bold text-slate-700 mb-1">Town</label>
                           <select 
                             value={checkoutData.town}
+                            disabled={!checkoutData.county}
                             onChange={(e) => setCheckoutData(prev => ({ ...prev, town: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-medium bg-white cursor-pointer"
+                            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-medium bg-white cursor-pointer disabled:bg-slate-50 disabled:cursor-not-allowed"
                           >
+                            <option value="" disabled>Choose town…</option>
                             {getTownOptions(checkoutData.county).map((t) => (
                               <option key={t} value={t}>{t}</option>
                             ))}
@@ -4478,9 +4754,11 @@ export default function PremiumRiceStore() {
                           <label className="block font-bold text-slate-700 mb-1">Location</label>
                           <select 
                             value={checkoutData.location}
+                            disabled={!checkoutData.county}
                             onChange={(e) => setCheckoutData(prev => ({ ...prev, location: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-medium bg-white cursor-pointer"
+                            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-medium bg-white cursor-pointer disabled:bg-slate-50 disabled:cursor-not-allowed"
                           >
+                            <option value="" disabled>Choose location…</option>
                           {(REGIONAL_LOGISTICS_DATA[checkoutData.county as keyof typeof REGIONAL_LOGISTICS_DATA]?.locations || DEFAULT_REGIONAL_LOGISTICS.locations).map((l) => (
                               <option key={l} value={l}>{l}</option>
                             ))}
@@ -4493,9 +4771,11 @@ export default function PremiumRiceStore() {
                           <label className="block font-bold text-slate-700 mb-1">Sublocation</label>
                           <select 
                             value={checkoutData.sublocation}
+                            disabled={!checkoutData.county}
                             onChange={(e) => setCheckoutData(prev => ({ ...prev, sublocation: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-medium bg-white cursor-pointer"
+                            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-medium bg-white cursor-pointer disabled:bg-slate-50 disabled:cursor-not-allowed"
                           >
+                            <option value="" disabled>Choose sublocation…</option>
                            {(REGIONAL_LOGISTICS_DATA[checkoutData.county as keyof typeof REGIONAL_LOGISTICS_DATA]?.sublocations || DEFAULT_REGIONAL_LOGISTICS.sublocations).map((s) => (
                               <option key={s} value={s}>{s}</option>
                             ))}
@@ -4507,7 +4787,7 @@ export default function PremiumRiceStore() {
                             type="text"
                             value={checkoutData.shippingAddress}
                             onChange={(e) => setCheckoutData(prev => ({ ...prev, shippingAddress: e.target.value }))}
-                            placeholder="Building or Landmark"
+                            placeholder="Building, street or landmark"
                             className="w-full px-3 py-2.5 rounded-xl border border-slate-200 font-medium"
                           />
                         </div>
@@ -4571,7 +4851,7 @@ export default function PremiumRiceStore() {
                       </div>
                       <div className="flex justify-between text-slate-600 font-semibold">
                         <span>Freight Delivery ({checkoutData.county}):</span>
-                        <span className="font-extrabold text-slate-800">{formatKES(activeShippingFee)}</span>
+                        <span className="font-extrabold text-slate-800">{checkoutData.county ? formatKES(activeShippingFee) : 'Choose county'}</span>
                       </div>
                       <div className="flex justify-between text-emerald-700 font-bold">
                         <span>Expected Reward Points:</span>
@@ -4806,6 +5086,7 @@ export default function PremiumRiceStore() {
                           onChange={(e) => setFormData(prev => ({ ...prev, newPassword: e.target.value }))}
                           className="w-full px-4 py-3 rounded-xl border border-slate-200 text-xs font-semibold focus:ring-2 focus:ring-emerald-500"
                         />
+                        <PasswordStrength value={formData.newPassword} />
                       </div>
                     </>
                   )}
@@ -4864,6 +5145,8 @@ export default function PremiumRiceStore() {
                     />
                   </div>
 
+                  {!isLogin && !signupOtpStep && <PasswordStrength value={formData.password} />}
+
                   {!isLogin && !signupOtpStep && (
                     <div>
                       <label className="block font-bold text-slate-700 mb-1">Referral Code <span className="text-slate-400 font-medium">(optional)</span></label>
@@ -4879,6 +5162,17 @@ export default function PremiumRiceStore() {
                     </div>
                   )}
 
+                  {!isLogin && !signupOtpStep && (
+                    <label className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer">
+                      <input type="checkbox" checked={acceptedTerms} onChange={(e) => setAcceptedTerms(e.target.checked)} className="mt-0.5 w-4 h-4 accent-emerald-600 cursor-pointer" />
+                      <span className="text-[11px] text-slate-600 leading-snug">
+                        I have read and agree to the{' '}
+                        <button type="button" onClick={(e) => { e.preventDefault(); setShowTerms(true); }} className="font-black text-emerald-700 underline cursor-pointer">Terms and Conditions</button>
+                        {' '}and how my personal data is used.
+                      </span>
+                    </label>
+                  )}
+
                   {!isLogin && signupOtpStep && (
                     <div className="space-y-2">
                       <label className="block font-bold text-slate-700 mb-1">6-Digit Verification Code</label>
@@ -4888,7 +5182,7 @@ export default function PremiumRiceStore() {
                         inputMode="numeric"
                         maxLength={6}
                         value={signupOtp}
-                        onChange={(e) => setSignupOtp(e.target.value)}
+                        onChange={(e) => setSignupOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
                         className="w-full px-4 py-3 rounded-xl border border-slate-200 text-xs font-mono font-bold tracking-widest text-center focus:ring-2 focus:ring-emerald-500"
                         placeholder="123456"
                       />
@@ -6346,6 +6640,8 @@ export default function PremiumRiceStore() {
       </div>
 
       {/* FOOTER */}
+      {showTerms && <TermsModal onClose={() => setShowTerms(false)} onAccept={!user && !isLogin && !signupOtpStep ? () => { setAcceptedTerms(true); setShowTerms(false); } : undefined} />}
+
       <footer className="bg-slate-950 text-slate-400 text-xs py-12 border-t border-slate-900 mt-auto">
         <div className="container mx-auto px-4 grid grid-cols-1 md:grid-cols-4 gap-8">
           <div className="space-y-3">
@@ -6364,6 +6660,7 @@ export default function PremiumRiceStore() {
               <li><button onClick={() => setView('home')} className="hover:text-emerald-400 cursor-pointer">Home Storefront</button></li>
               <li><button onClick={() => setView('shop')} className="hover:text-emerald-400 cursor-pointer">Grain Catalog</button></li>
               <li><button onClick={() => setView('cart')} className="hover:text-emerald-400 cursor-pointer">Shopping Cart</button></li>
+              <li><button onClick={() => setShowTerms(true)} className="hover:text-emerald-400 cursor-pointer">Terms &amp; Conditions</button></li>
             </ul>
           </div>
 
