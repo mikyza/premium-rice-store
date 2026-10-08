@@ -1484,8 +1484,37 @@ async function applyRoleChange(req, user, role) {
   return false;
 }
 
-/** Looks the payment up on PayHero itself, so a forged callback cannot mark an order paid. */
-async function verifyPayHeroPayment(orderId) {
+const TERMS_VERSION = '2026-10';
+const TermsAcceptance = defineModel('TermsAcceptance', {
+  userId: { type: DataTypes.INTEGER, allowNull: false },
+  version: { type: DataTypes.STRING(20), allowNull: false },
+  ipAddress: { type: DataTypes.STRING(64), allowNull: true }
+});
+const termsAccepted = (body) => !!body && (body.acceptedTerms === true || body.acceptedTerms === 'true');
+const TERMS_REQUIRED_MESSAGE = 'You must read and accept the Terms and Conditions to create an account.';
+async function recordTermsAcceptance(userId, req) {
+  try {
+    const already = await TermsAcceptance.findOne({ where: { userId, version: TERMS_VERSION } });
+    if (already) return;
+    await TermsAcceptance.create({ userId, version: TERMS_VERSION, ipAddress: req && req.ip ? String(req.ip).slice(0, 64) : null });
+    await logEvent({ req, actor: { id: userId, role: 'customer', name: null }, action: 'TERMS_ACCEPTED', category: 'auth', targetType: 'user', targetId: userId,
+      summary: `User #${userId} accepted Terms and Conditions version ${TERMS_VERSION}` });
+  } catch (e) { console.error('⚠️ Terms record skipped:', e.message); }
+}
+
+/** Minimum 8 characters; weak-but-long passwords are allowed (the app only advises). bcrypt ignores bytes past 72, so cap there. */
+const validateNewPassword = (pw) => {
+  if (typeof pw !== 'string' || pw.length < 8) return 'Password must be at least 8 characters long.';
+  if (Buffer.byteLength(pw, 'utf8') > 72) return 'Password is too long (maximum 72 characters).';
+  return null;
+};
+
+// Wrong OTP guesses per account: after 5, the code is thrown away so a 6-digit code cannot be brute-forced.
+const OTP_MAX_WRONG = 5;
+const otpWrongGuesses = new Map();
+
+/** Looks a payment up on PayHero (read only). Never throws. */
+async function lookupPayHeroStatus(orderId) {
   try {
     const response = await axios.get(
       `https://backend.payhero.co.ke/api/v2/payments?external_reference=ORD-${orderId}`,
@@ -1493,11 +1522,17 @@ async function verifyPayHeroPayment(orderId) {
     );
     const data = response.data;
     const p = Array.isArray(data) ? data[0] : (data && (data.response || data));
-    const status = String((p && (p.status || p.Status)) || '').toUpperCase();
-    return status === 'SUCCESS' || status === 'PAID';
+    if (!p) return { reachable: true, status: 'NOT_FOUND' };
+    return { reachable: true, status: String(p.status || p.Status || 'UNKNOWN').toUpperCase(), amount: p.amount !== undefined ? Number(p.amount) : null };
   } catch (e) {
-    return false;
+    return { reachable: false, status: null, error: e.message };
   }
+}
+
+/** Looks the payment up on PayHero itself, so a forged callback cannot mark an order paid. */
+async function verifyPayHeroPayment(orderId) {
+  const r = await lookupPayHeroStatus(orderId);
+  return r.reachable && (r.status === 'SUCCESS' || r.status === 'PAID');
 }
 
 
@@ -2097,6 +2132,10 @@ async function startServer() {
         if (!password || !fullName || (!phoneNumber && !email)) {
           return res.status(400).json({ error: 'Full name, password, and at least a phone number or email are required.' });
         }
+        if (!(inputOtp && req.body && req.body.verifyOnly)) {
+          const pwProblem = validateNewPassword(password);
+          if (pwProblem) return res.status(400).json({ error: pwProblem });
+        }
 
         const searchCondition = [...identityConditions(email), ...identityConditions(phoneNumber)];
 
@@ -2136,6 +2175,9 @@ async function startServer() {
         if (existingUser && existingUser.isVerified !== false && existingUser.password) {
           return res.status(409).json({ error: 'An account with this phone number or email address already exists.' });
         }
+        if (!termsAccepted(req.body)) {
+          return res.status(400).json({ error: TERMS_REQUIRED_MESSAGE, requiresTerms: true });
+        }
 
         const hashedPassword = await bcrypt.hash(password, 12);
 
@@ -2163,6 +2205,7 @@ async function startServer() {
             await targetUser.save();
           }
 
+          await recordTermsAcceptance(targetUser.id, req);
           if (req.body && req.body.referralCode) await attachReferral(targetUser.id, req.body.referralCode, 'signup', req);
           const delivery = await dispatchOtp(targetUser, otpCode, 'signup');
           if (!delivery.anySent) {
@@ -2199,6 +2242,7 @@ async function startServer() {
           });
         }
         
+        await recordTermsAcceptance(newUser.id, req);
         if (req.body && req.body.referralCode) await attachReferral(newUser.id, req.body.referralCode, 'signup', req);
         await logEvent({ req, actor: { id: newUser.id, role: 'customer', name: newUser.fullName }, action: 'ACCOUNT_CREATED', category: 'auth', targetType: 'user', targetId: newUser.id, summary: `${newUser.fullName} created an account` });
         const token = jwt.sign({ id: newUser.id, role: await effectiveRoleFor(newUser) }, JWT_SECRET, { expiresIn: '7d' });
@@ -2233,6 +2277,13 @@ async function startServer() {
         if (existingUser && existingUser.isVerified !== false && existingUser.password) {
           return res.status(409).json({ error: 'An account with this phone number or email address already exists.' });
         }
+        if (!termsAccepted(req.body)) {
+          return res.status(400).json({ error: TERMS_REQUIRED_MESSAGE, requiresTerms: true });
+        }
+        if (password) {
+          const pwProblem = validateNewPassword(password);
+          if (pwProblem) return res.status(400).json({ error: pwProblem });
+        }
 
         const { otpCode, tokenExpiration } = issueSignupOtp(existingUser);
         let hashedPassword = existingUser ? existingUser.password : null;
@@ -2261,6 +2312,7 @@ async function startServer() {
           await userRecord.save();
         }
 
+        await recordTermsAcceptance(userRecord.id, req);
         if (req.body && req.body.referralCode) await attachReferral(userRecord.id, req.body.referralCode, 'signup', req);
         const delivery = await dispatchOtp(userRecord, otpCode, 'signup');
         if (!delivery.anySent) {
@@ -2299,19 +2351,41 @@ async function startServer() {
           return res.status(400).json({ error: 'Email or phone number and OTP verification code are required.' });
         }
 
-        const candidate = await User.findOne({ where: { [Op.or]: identityConditions(searchIdentifier) } });
-        if (!candidate) {
+        // Several records can match one phone/email spelling (old duplicates), so look at all of them: pending signups first.
+        const candidates = await User.findAll({ where: { [Op.or]: identityConditions(searchIdentifier) } });
+        candidates.sort((x, y) => (x.isVerified === false ? 0 : 1) - (y.isVerified === false ? 0 : 1));
+        if (!candidates.length) {
           console.warn(`⚠️ [VERIFY OTP] 400 no account matches "${searchIdentifier}".`);
           return res.status(400).json({ error: 'No pending signup found for this phone number or email. Please register again.' });
         }
-        if (!candidate.verificationOtp || String(candidate.verificationOtp).trim() !== inputOtp) {
-          console.warn(`⚠️ [VERIFY OTP] 400 code mismatch for user ${candidate.id} (phone ${candidate.phoneNumber || '-'}, request identity "${searchIdentifier}", code length ${inputOtp.length}).`);
-          return res.status(400).json({ error: 'Incorrect verification code. Use the code from the most recent SMS.' });
+        const digitsOnly = inputOtp.replace(/\D/g, '');
+        const codeMatches = (u) => u.verificationOtp && String(u.verificationOtp).trim() === digitsOnly;
+        const candidate = candidates.find(codeMatches);
+
+        if (!candidate) {
+          const pending = candidates.find(u => u.verificationOtp) || candidates[0];
+          if (pending.isVerified !== false && !pending.verificationOtp) {
+            return res.status(400).json({ error: 'This account is already verified. Please sign in.' });
+          }
+          const wrong = (otpWrongGuesses.get(pending.id) || 0) + 1;
+          otpWrongGuesses.set(pending.id, wrong);
+          console.warn(`⚠️ [VERIFY OTP] 400 code mismatch for user ${pending.id} (phone ${pending.phoneNumber || '-'}, identity "${searchIdentifier}", guess ${wrong}/${OTP_MAX_WRONG}).`);
+          if (wrong >= OTP_MAX_WRONG) {
+            pending.verificationOtp = null;
+            pending.verificationOtpExpires = null;
+            await pending.save();
+            otpWrongGuesses.delete(pending.id);
+            await logEvent({ req, actor: { id: pending.id, role: 'anonymous', name: pending.fullName }, action: 'OTP_LOCKED', category: 'auth', severity: 'warn', targetType: 'user', targetId: pending.id,
+              summary: `Signup code for ${pending.fullName} discarded after ${OTP_MAX_WRONG} wrong guesses` });
+            return res.status(400).json({ error: 'Too many incorrect codes. Please request a new code.' });
+          }
+          return res.status(400).json({ error: `That code is not correct. Use the code from your latest SMS (${OTP_MAX_WRONG - wrong} attempt(s) left).` });
         }
         if (!candidate.verificationOtpExpires || new Date(candidate.verificationOtpExpires).getTime() <= Date.now()) {
           console.warn(`⚠️ [VERIFY OTP] 400 code expired for user ${candidate.id}.`);
           return res.status(400).json({ error: 'This verification code has expired. Please request a new one.' });
         }
+        otpWrongGuesses.delete(candidate.id);
         const user = candidate;
 
         user.isVerified = true;
@@ -2446,7 +2520,20 @@ async function startServer() {
           return failLogin(401, 'Invalid credentials or account disabled.', 'wrong password', user);
         }
         if (user.isVerified === false) {
-          return res.status(403).json({ error: 'Please verify your phone number with the code we sent before signing in.' });
+          // Right password but the signup was never completed: send (or re-send) the code and let the page continue verification.
+          const { otpCode, tokenExpiration } = issueSignupOtp(user);
+          user.verificationOtp = otpCode;
+          user.verificationOtpExpires = tokenExpiration;
+          await user.save();
+          const delivery = await dispatchOtp(user, otpCode, 'signup');
+          await logEvent({ req, actor: { id: user.id, role: 'anonymous', name: user.fullName }, action: 'LOGIN_UNVERIFIED', category: 'auth', severity: 'warn', targetType: 'user', targetId: user.id,
+            summary: `${user.fullName} tried to sign in before verifying; a code was ${delivery.anySent ? 'sent' : 'NOT delivered'}` });
+          return res.status(403).json({
+            error: 'Your account is not verified yet. We sent you a verification code. Enter it to finish creating your account.',
+            requiresVerification: true,
+            smsSent: delivery.smsSent,
+            emailSent: delivery.emailSent
+          });
         }
         loginFailures.delete(throttleKey);
 
@@ -2500,6 +2587,10 @@ async function startServer() {
             if (!match) {
               return res.status(400).json({ error: 'Current password provided is incorrect.' });
             }
+          }
+          const newPwProblem = validateNewPassword(newPassword);
+          if (newPwProblem) {
+            return res.status(400).json({ error: newPwProblem });
           }
           user.password = await bcrypt.hash(newPassword, 12);
         }
@@ -2630,8 +2721,9 @@ async function startServer() {
           return res.status(400).json({ error: 'Email or phone number, OTP code, and new password are required.' });
         }
 
-        if (targetPassword.length < 6) {
-          return res.status(400).json({ error: 'Password must be at least 6 characters in length.' });
+        const resetPwProblem = validateNewPassword(targetPassword);
+        if (resetPwProblem) {
+          return res.status(400).json({ error: resetPwProblem });
         }
 
         const user = await User.findOne({ 
@@ -3022,6 +3114,9 @@ async function startServer() {
 
         // Resolve the delivery county/constituency against the official dataset BEFORE any stock is deducted.
         let activeCountyMap = countyOverrides;
+        if (!county || !String(county).trim() || !town || !String(town).trim()) {
+          return res.status(400).json({ error: 'Please choose your delivery county and town before placing the order.' });
+        }
         if (county) {
           const countyConfig = await SystemConfig.findOne({ where: { key: 'county_overrides' } });
           if (countyConfig && countyConfig.value) activeCountyMap = { ...countyOverrides, ...countyConfig.value };
@@ -3969,15 +4064,25 @@ async function startServer() {
     expressApp.get('/api/support/overview', ...supportOnly, async (req, res) => {
       try {
         const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-        const base = { role: { [Op.ne]: 'admin' } };
+        const base = {};
         const [total, suspended, newThisWeek, unverified] = await Promise.all([
           User.count({ where: base }),
           User.count({ where: { ...base, isActive: false } }),
           User.count({ where: { ...base, createdAt: { [Op.gte]: weekAgo } } }),
           User.count({ where: { ...base, isVerified: false } })
         ]);
-        const myRecent = await ActivityEvent.findAll({ where: { actorId: req.user.id, category: 'users' }, order: [['createdAt', 'DESC']], limit: 15 });
-        res.json({ totalCustomers: total, suspended, newThisWeek, unverified, myRecentActions: myRecent });
+        const myRecent = await ActivityEvent.findAll({ where: { actorId: req.user.id }, order: [['createdAt', 'DESC']], limit: 25 });
+        const latestOrders = await Order.findAll({ order: [['createdAt', 'DESC']], limit: 1500, attributes: ['id', 'status', 'paymentDetails', 'createdAt'] });
+        let pendingPayments = 0, failedPayments = 0, paidToday = 0, paidTodayValue = 0;
+        const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+        latestOrders.forEach((o) => {
+          const pd = o.paymentDetails || {};
+          if (pd.isPaid) {
+            if (pd.paidAt && new Date(pd.paidAt) >= startOfDay) { paidToday += 1; paidTodayValue += Number(pd.amount) || 0; }
+          } else if (o.status === 'payment_failed' || pd.failureReason) failedPayments += 1;
+          else pendingPayments += 1;
+        });
+        res.json({ totalCustomers: total, suspended, newThisWeek, unverified, pendingPayments, failedPayments, paidToday, paidTodayValue: round2(paidTodayValue), myRecentActions: myRecent });
       } catch (err) {
         console.error('❌ Support overview error:', err);
         res.status(500).json({ error: err.message });
@@ -3990,8 +4095,9 @@ async function startServer() {
         const status = String(req.query.status || 'all');
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
         const limit = Math.min(50, Math.max(5, parseInt(req.query.limit, 10) || 20));
-        const and = [{ role: { [Op.ne]: 'admin' } }];
+        const and = [];
         if (status === 'suspended') and.push({ isActive: false });
+        if (status === 'unverified') and.push({ isVerified: false });
         if (status === 'active') and.push({ isActive: true });
         if (search) {
           const digits = search.replace(/\D/g, '');
@@ -4002,7 +4108,7 @@ async function startServer() {
           if (/^\d{1,9}$/.test(search)) ors.push({ id: Number(search) });
           and.push({ [Op.or]: ors });
         }
-        const { rows, count } = await User.findAndCountAll({ where: { [Op.and]: and }, attributes: SUPPORT_USER_ATTRS, order: [['createdAt', 'DESC']], limit, offset: (page - 1) * limit });
+        const { rows, count } = await User.findAndCountAll({ where: and.length ? { [Op.and]: and } : {}, attributes: SUPPORT_USER_ATTRS, order: [['createdAt', 'DESC']], limit, offset: (page - 1) * limit });
         res.json({ users: await overlayStaffRoles(rows), total: count, page, pages: Math.max(1, Math.ceil(count / limit)) });
       } catch (err) {
         console.error('❌ Support users error:', err);
@@ -4013,7 +4119,7 @@ async function startServer() {
     expressApp.get('/api/support/users/:id', ...supportOnly, async (req, res) => {
       try {
         const user = await User.findByPk(req.params.id, { attributes: SUPPORT_USER_ATTRS });
-        if (!user || user.role === 'admin') return res.status(404).json({ error: 'User not found.' });
+        if (!user) return res.status(404).json({ error: 'User not found.' });
         const [profile] = await overlayStaffRoles([user]);
         const orders = await Order.findAll({ where: { userId: user.id }, order: [['createdAt', 'DESC']], limit: 50 });
         const notes = await SupportNote.findAll({ where: { customerId: user.id }, order: [['createdAt', 'DESC']], limit: 50 });
@@ -4040,6 +4146,85 @@ async function startServer() {
         });
       } catch (err) {
         console.error('❌ Support user detail error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // All orders & payments, searchable. Read-only for customer care.
+    const paymentStateOf = (o) => {
+      const pd = o.paymentDetails || {};
+      if (pd.isPaid) return 'paid';
+      if (o.status === 'payment_failed' || pd.failureReason) return 'failed';
+      return 'pending';
+    };
+
+    expressApp.get('/api/support/orders', ...supportOnly, async (req, res) => {
+      try {
+        const search = String(req.query.search || '').trim().toLowerCase().slice(0, 60);
+        const payment = String(req.query.payment || 'all');
+        const status = String(req.query.status || 'all');
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(50, Math.max(5, parseInt(req.query.limit, 10) || 20));
+
+        const recent = await Order.findAll({ order: [['createdAt', 'DESC']], limit: 1500 });
+        const userIds = [...new Set(recent.map(o => o.userId))];
+        const users = userIds.length ? await User.findAll({ where: { id: userIds }, attributes: ['id', 'fullName', 'phoneNumber', 'email'] }) : [];
+        const userMap = {};
+        users.forEach(u => { userMap[u.id] = u; });
+
+        const counts = { all: recent.length, paid: 0, pending: 0, failed: 0 };
+        const shaped = recent.map((o) => {
+          const pd = o.paymentDetails || {};
+          const state = paymentStateOf(o);
+          counts[state] += 1;
+          const u = userMap[o.userId];
+          const addr = o.shippingAddress || {};
+          return {
+            id: o.id, createdAt: o.createdAt, status: o.status, paymentState: state, paidTag: pd.paidTag || null, method: pd.method || null,
+            mpesaNumber: pd.mpesaNumber || null, mpesaReceipt: pd.mpesaReceipt || null, paidAt: pd.paidAt || null, failureReason: pd.failureReason || null,
+            grandTotal: Number(o.grandTotal) || 0, subTotal: Number(o.subTotal) || 0, transportFee: Number(o.transportFee) || 0,
+            customer: u ? { id: u.id, fullName: u.fullName, phone: u.phoneNumber, email: u.email } : { id: o.userId, fullName: `User #${o.userId}`, phone: null, email: null },
+            county: o.county, town: o.town, location: o.location || addr.location || '', sublocation: o.sublocation || addr.sublocation || '',
+            address: addr.details || [addr.streetAddress, o.sublocation, o.location, o.town, o.county].filter(Boolean).join(', '),
+            items: getOrderItems(o).map(i => `${i.quantity}× ${i.name || i.brandName}`).join(', '),
+            _hay: [o.id, `#${o.id}`, `ORD-${o.id}`, pd.mpesaReceipt, pd.mpesaNumber, u && u.fullName, u && u.phoneNumber, u && u.email].filter(Boolean).join(' ').toLowerCase()
+          };
+        });
+        const filtered = shaped.filter((o) => {
+          if (payment !== 'all' && o.paymentState !== payment) return false;
+          if (status !== 'all' && o.status !== status) return false;
+          if (search && !o._hay.includes(search) && !o._hay.includes(search.replace(/^0/, '254'))) return false;
+          return true;
+        }).map(({ _hay, ...rest }) => rest);
+        const total = filtered.length;
+        res.json({ orders: filtered.slice((page - 1) * limit, page * limit), total, page, pages: Math.max(1, Math.ceil(total / limit)), counts });
+      } catch (err) {
+        console.error('❌ Support orders error:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // Asks PayHero whether an order was paid. Read-only: it reports, it never changes the order.
+    expressApp.get('/api/support/orders/:id/payment-check', ...supportOnly, async (req, res) => {
+      try {
+        const order = await Order.findByPk(req.params.id);
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+        const pd = order.paymentDetails || {};
+        const live = await lookupPayHeroStatus(order.id);
+        const livePaid = live.reachable && (live.status === 'SUCCESS' || live.status === 'PAID');
+        let verdict, message;
+        if (!live.reachable) { verdict = 'UNKNOWN'; message = 'PayHero could not be reached right now. Try again in a moment.'; }
+        else if (pd.isPaid && livePaid) { verdict = 'CONFIRMED_PAID'; message = 'Paid. Our records and PayHero agree.'; }
+        else if (pd.isPaid && !livePaid) { verdict = 'RECORDED_PAID_UNCONFIRMED'; message = `Recorded as paid (receipt ${pd.mpesaReceipt || 'none'}), but PayHero shows "${live.status}". Ask an administrator to review.`; }
+        else if (!pd.isPaid && livePaid) { verdict = 'PAID_NOT_RECORDED'; message = 'PayHero shows this payment succeeded but the order is not marked paid yet. Escalate to an administrator.'; }
+        else { verdict = 'NOT_PAID'; message = `Not paid. PayHero status: ${live.status}.`; }
+
+        await logEvent({ req, action: verdict === 'PAID_NOT_RECORDED' || verdict === 'RECORDED_PAID_UNCONFIRMED' ? 'PAYMENT_MISMATCH' : 'SUPPORT_PAYMENT_CHECKED',
+          category: 'orders', severity: verdict === 'PAID_NOT_RECORDED' || verdict === 'RECORDED_PAID_UNCONFIRMED' ? 'alert' : 'info', targetType: 'order', targetId: order.id,
+          summary: `${req.user.fullName} checked payment on order #${order.id}: ${verdict}`, details: { verdict, payheroStatus: live.status, recordedPaid: !!pd.isPaid } });
+        res.json({ orderId: order.id, recordedPaid: !!pd.isPaid, mpesaReceipt: pd.mpesaReceipt || null, payheroReachable: live.reachable, payheroStatus: live.status, payheroAmount: live.amount ?? null, orderAmount: Number(order.grandTotal) || 0, verdict, message });
+      } catch (err) {
+        console.error('❌ Support payment check error:', err);
         res.status(500).json({ error: err.message });
       }
     });
@@ -4103,6 +4288,8 @@ async function startServer() {
     // ==========================================================================
     // AGENTS — referral partners who earn a share of profit
     // ==========================================================================
+    expressApp.get('/api/config/terms', (req, res) => res.json({ version: TERMS_VERSION }));
+
     expressApp.get('/api/referral/validate', async (req, res) => {
       try {
         const code = normalizeReferralCode(req.query.code);
