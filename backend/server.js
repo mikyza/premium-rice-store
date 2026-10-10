@@ -33,6 +33,8 @@ import fs from 'fs';
 import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
+import zlib from 'zlib';
+import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 
 // Payment & Webhook Controller Integrations
@@ -601,11 +603,14 @@ const sendOtpEmail = async (toEmail, toName, otpCode, type = 'reset') => {
   }
 
   const isSignup = type === 'signup' || type === 'account_creation';
-  const subject = isSignup 
+  const isAdminLogin = type === 'admin_login';
+  const subject = isAdminLogin ? '🔐 Your Admin Sign-in Code - Mwea Rice Hub' : isSignup 
     ? '🔐 Account Verification OTP Code - Mwea Rice Hub' 
     : '🔐 Your Password Reset OTP Code - Mwea Rice Hub';
-  const title = isSignup ? 'Account Verification' : 'Password Reset Request';
-  const description = isSignup
+  const title = isAdminLogin ? 'Admin Sign-in Verification' : isSignup ? 'Account Verification' : 'Password Reset Request';
+  const description = isAdminLogin
+    ? 'Someone just entered your admin password. To finish signing in, use this 6-digit code. If this was not you, change your password immediately:'
+    : isSignup
     ? 'Thank you for signing up with Mwea Rice Hub. Please use the following 6-digit One-Time Password (OTP) to verify and activate your new account:'
     : 'You recently requested to reset your password for your Mwea Rice Hub account. Please use the following 6-digit One-Time Password (OTP) to verify your request:';
 
@@ -727,7 +732,9 @@ const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
 
     const message = type === 'signup' 
       ? `Your Mwea Rice Hub account verification OTP is ${otpCode}. Valid for 10 mins.`
-      : `Your Mwea Rice Hub password reset OTP is ${otpCode}. Valid for 10 mins.`;
+      : type === 'admin_login'
+        ? `Your Mwea Rice Hub admin sign-in code is ${otpCode}. Valid for 5 mins. If this was not you, change your password now.`
+        : `Your Mwea Rice Hub password reset OTP is ${otpCode}. Valid for 10 mins.`;
 
     console.log(`📱 [SMS DISPATCH] Triggering SMS to ${formattedPhone} (type: ${type})`);
 
@@ -754,6 +761,7 @@ const sendOtpSms = async (phoneNumber, otpCode, type = 'reset') => {
       try { data = JSON.parse(data); } catch (_) { /* plain-text reply */ }
     }
     console.log('📨 [PING AFRICA RESPONSE]:', typeof data === 'string' ? data : JSON.stringify(data));
+    noteSmsBalance(data);
 
     if (data && typeof data === 'object') {
       const status = String(data.status || '').toLowerCase();
@@ -1484,7 +1492,7 @@ async function applyRoleChange(req, user, role) {
   return false;
 }
 
-const TERMS_VERSION = '2026-10';
+const TERMS_VERSION = '2026-11';
 const TermsAcceptance = defineModel('TermsAcceptance', {
   userId: { type: DataTypes.INTEGER, allowNull: false },
   version: { type: DataTypes.STRING(20), allowNull: false },
@@ -1523,7 +1531,13 @@ async function lookupPayHeroStatus(orderId) {
     const data = response.data;
     const p = Array.isArray(data) ? data[0] : (data && (data.response || data));
     if (!p) return { reachable: true, status: 'NOT_FOUND' };
-    return { reachable: true, status: String(p.status || p.Status || 'UNKNOWN').toUpperCase(), amount: p.amount !== undefined ? Number(p.amount) : null };
+    return {
+      reachable: true,
+      status: String(p.status || p.Status || 'UNKNOWN').toUpperCase(),
+      amount: p.amount !== undefined ? Number(p.amount) : null,
+      receipt: p.provider_reference || p.mpesa_receipt_number || p.MpesaReceiptNumber || p.receipt_number || null,
+      failureReason: p.failure_reason || p.message || p.ResultDesc || null
+    };
   } catch (e) {
     return { reachable: false, status: null, error: e.message };
   }
@@ -1534,6 +1548,696 @@ async function verifyPayHeroPayment(orderId) {
   const r = await lookupPayHeroStatus(orderId);
   return r.reachable && (r.status === 'SUCCESS' || r.status === 'PAID');
 }
+
+/**
+ * ==========================================
+ * 2c. OPERATIONS LAYER: settings, permissions, suppliers & purchases, expenses, reviews,
+ *     wholesale pricing, campaigns, reports, Excel export, SMS credit, background jobs
+ * ==========================================
+ */
+const Supplier = defineModel('Supplier', {
+  name: { type: DataTypes.STRING(120), allowNull: false },
+  phone: { type: DataTypes.STRING(40), allowNull: true },
+  location: { type: DataTypes.STRING(120), allowNull: true },
+  type: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'farmer' }, // farmer | miller | transporter | other
+  notes: { type: DataTypes.STRING(500), allowNull: true },
+  isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }
+});
+
+const Purchase = defineModel('Purchase', {
+  supplierId: { type: DataTypes.INTEGER, allowNull: true },
+  productId: { type: DataTypes.INTEGER, allowNull: true },
+  itemName: { type: DataTypes.STRING(160), allowNull: false },
+  quantity: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  unitCost: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
+  totalCost: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
+  amountPaid: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
+  paymentMethod: { type: DataTypes.STRING(30), allowNull: true },
+  reference: { type: DataTypes.STRING(120), allowNull: true },
+  purchaseDate: { type: DataTypes.DATEONLY, allowNull: false },
+  notes: { type: DataTypes.STRING(500), allowNull: true },
+  addedToStock: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  createdBy: { type: DataTypes.INTEGER, allowNull: true }
+});
+
+const Expense = defineModel('Expense', {
+  category: { type: DataTypes.STRING(30), allowNull: false },
+  description: { type: DataTypes.STRING(300), allowNull: true },
+  amount: { type: DataTypes.DECIMAL(12, 2), allowNull: false },
+  expenseDate: { type: DataTypes.DATEONLY, allowNull: false },
+  reference: { type: DataTypes.STRING(120), allowNull: true },
+  createdBy: { type: DataTypes.INTEGER, allowNull: true }
+});
+const EXPENSE_CATEGORIES = ['transport', 'packaging', 'salaries', 'rent', 'utilities', 'marketing', 'sms_airtime', 'licences_taxes', 'repairs', 'other'];
+
+const Review = defineModel('Review', {
+  productId: { type: DataTypes.INTEGER, allowNull: false },
+  userId: { type: DataTypes.INTEGER, allowNull: false },
+  orderId: { type: DataTypes.INTEGER, allowNull: true },
+  rating: { type: DataTypes.INTEGER, allowNull: false },
+  title: { type: DataTypes.STRING(120), allowNull: true },
+  comment: { type: DataTypes.TEXT, allowNull: true },
+  status: { type: DataTypes.STRING(12), allowNull: false, defaultValue: 'published' }, // published | hidden
+  adminReply: { type: DataTypes.STRING(600), allowNull: true }
+}, { indexes: [{ unique: true, fields: ['productId', 'userId'] }] });
+
+const Campaign = defineModel('Campaign', {
+  name: { type: DataTypes.STRING(120), allowNull: false },
+  message: { type: DataTypes.TEXT, allowNull: false },
+  filters: { type: DataTypes.JSON, allowNull: true },
+  status: { type: DataTypes.STRING(12), allowNull: false, defaultValue: 'sending' }, // sending | sent | failed | stopped
+  totalRecipients: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  sentCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  failedCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  optedOutSkipped: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  smsParts: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+  createdBy: { type: DataTypes.INTEGER, allowNull: true },
+  startedAt: { type: DataTypes.DATE, allowNull: true },
+  finishedAt: { type: DataTypes.DATE, allowNull: true }
+});
+
+const MarketingPref = defineModel('MarketingPref', {
+  userId: { type: DataTypes.INTEGER, allowNull: false, unique: true },
+  optedOut: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  source: { type: DataTypes.STRING(20), allowNull: true }
+});
+
+// ---------- Operations settings (one JSON document, editable by the admin) ----------
+const OPS_DEFAULTS = {
+  orderExpiryMinutes: 45,
+  lowStockDefault: 20,
+  lowStockPerProduct: {},
+  smsLowThreshold: 10,
+  smsCostPerPart: 0.2,
+  adminTwoFactor: true,
+  autoReconcile: true,
+  dailySummary: { enabled: true, time: '20:00', sms: true, email: true, extraPhones: [], extraEmails: [] }
+};
+let opsCache = { at: 0, value: null };
+async function getOps(force = false) {
+  if (!force && opsCache.value && Date.now() - opsCache.at < 20000) return opsCache.value;
+  let stored = {};
+  try { const row = await SystemConfig.findOne({ where: { key: 'ops_settings' } }); stored = (row && row.value) || {}; } catch (_) { /* table not ready */ }
+  const merged = { ...OPS_DEFAULTS, ...stored, dailySummary: { ...OPS_DEFAULTS.dailySummary, ...(stored.dailySummary || {}) } };
+  opsCache = { at: Date.now(), value: merged };
+  return merged;
+}
+async function saveOps(patch) {
+  const current = await getOps(true);
+  const next = { ...current, ...patch, dailySummary: { ...current.dailySummary, ...(patch.dailySummary || {}) } };
+  const [row] = await SystemConfig.findOrCreate({ where: { key: 'ops_settings' }, defaults: { value: next } });
+  row.value = next; row.changed('value', true); await row.save();
+  opsCache = { at: Date.now(), value: next };
+  return next;
+}
+
+// ---------- Permission editor ----------
+const PERMISSION_CATALOG = {
+  support: [
+    { key: 'users.view', label: 'View customer accounts' },
+    { key: 'users.rename', label: 'Correct a customer\'s name' },
+    { key: 'users.unsuspend', label: 'Reactivate suspended accounts' },
+    { key: 'users.notes', label: 'Add case notes' },
+    { key: 'orders.view', label: 'View all orders and delivery details' },
+    { key: 'payments.view', label: 'View payments and M-Pesa receipts' },
+    { key: 'payments.check', label: 'Check a payment with PayHero' },
+    { key: 'reviews.moderate', label: 'Hide or restore product reviews' }
+  ],
+  agent: [
+    { key: 'agent.customers', label: 'See the customers they referred' },
+    { key: 'agent.profit', label: 'See the profit figure behind each commission' }
+  ]
+};
+const PERMISSION_DEFAULTS = {
+  support: { 'users.view': true, 'users.rename': true, 'users.unsuspend': true, 'users.notes': true, 'orders.view': true, 'payments.view': true, 'payments.check': true, 'reviews.moderate': false },
+  agent: { 'agent.customers': true, 'agent.profit': true }
+};
+let permCache = { at: 0, value: null };
+async function getPermissions(force = false) {
+  if (!force && permCache.value && Date.now() - permCache.at < 20000) return permCache.value;
+  let stored = {};
+  try { const row = await SystemConfig.findOne({ where: { key: 'role_permissions' } }); stored = (row && row.value) || {}; } catch (_) { /* ignore */ }
+  const merged = {};
+  Object.keys(PERMISSION_DEFAULTS).forEach((role) => { merged[role] = { ...PERMISSION_DEFAULTS[role], ...(stored[role] || {}) }; });
+  permCache = { at: Date.now(), value: merged };
+  return merged;
+}
+async function savePermissions(role, changes) {
+  if (!PERMISSION_DEFAULTS[role]) throw httpError(400, 'Only customer care and agent permissions can be edited.');
+  const allowed = PERMISSION_CATALOG[role].map(p => p.key);
+  const current = await getPermissions(true);
+  const next = { ...current, [role]: { ...current[role] } };
+  Object.keys(changes || {}).forEach((k) => { if (allowed.includes(k)) next[role][k] = !!changes[k]; });
+  const [row] = await SystemConfig.findOrCreate({ where: { key: 'role_permissions' }, defaults: { value: next } });
+  row.value = next; row.changed('value', true); await row.save();
+  permCache = { at: Date.now(), value: next };
+  return next;
+}
+const hasPermission = async (role, key) => {
+  if (role === 'admin') return true;
+  const perms = await getPermissions();
+  return !!(perms[role] && perms[role][key]);
+};
+/** Allows an admin always; support/agent only when the permission is switched on. Pass several keys to mean "any of". */
+const requirePerm = (...keys) => async (req, res, next) => {
+  try {
+    for (const k of keys) { if (await hasPermission(req.user && req.user.role, k)) return next(); }
+    return res.status(403).json({ error: 'Your account has not been given access to this. Ask an administrator.' });
+  } catch (e) { return res.status(500).json({ error: 'Could not check permissions.' }); }
+};
+
+// ---------- Time helpers (the business runs on East Africa Time, UTC+3) ----------
+const EAT_OFFSET_MS = 3 * 60 * 60 * 1000;
+const eatNow = () => new Date(Date.now() + EAT_OFFSET_MS);
+const eatDateString = (d = new Date()) => new Date(d.getTime() + EAT_OFFSET_MS).toISOString().slice(0, 10);
+/** UTC start/end of a calendar day in EAT, given 'YYYY-MM-DD'. */
+const eatDayRange = (dateStr) => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const start = new Date(Date.UTC(y, m - 1, d, 0, 0, 0) - EAT_OFFSET_MS);
+  return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1) };
+};
+const parseRange = (q) => {
+  const toStr = /^\d{4}-\d{2}-\d{2}$/.test(String(q.to || '')) ? q.to : eatDateString();
+  const defaultFrom = new Date(Date.now() - 29 * 86400000);
+  const fromStr = /^\d{4}-\d{2}-\d{2}$/.test(String(q.from || '')) ? q.from : eatDateString(defaultFrom);
+  return { fromStr, toStr, from: eatDayRange(fromStr).start, to: eatDayRange(toStr).end };
+};
+
+// ---------- Wholesale (quantity) pricing ----------
+let tierCache = { at: 0, value: {} };
+async function getWholesaleTiers(force = false) {
+  if (!force && Date.now() - tierCache.at < 20000) return tierCache.value;
+  let value = {};
+  try { const row = await SystemConfig.findOne({ where: { key: 'wholesale_tiers' } }); value = (row && row.value) || {}; } catch (_) { /* ignore */ }
+  tierCache = { at: Date.now(), value };
+  return value;
+}
+const bestTier = (tiers, qty) => {
+  if (!Array.isArray(tiers)) return null;
+  return [...tiers].filter(t => Number(t.minQty) > 1 && Number(t.price) > 0 && qty >= Number(t.minQty)).sort((a, b) => Number(b.minQty) - Number(a.minQty))[0] || null;
+};
+const sanitizeTiers = (raw) => {
+  const seen = new Set();
+  return (Array.isArray(raw) ? raw : [])
+    .map(t => ({ minQty: Math.round(Number(t.minQty)), price: Math.round(Number(t.price) * 100) / 100 }))
+    .filter(t => Number.isFinite(t.minQty) && t.minQty >= 2 && t.minQty <= 100000 && Number.isFinite(t.price) && t.price > 0)
+    .filter(t => (seen.has(t.minQty) ? false : seen.add(t.minQty)))
+    .sort((a, b) => a.minQty - b.minQty)
+    .slice(0, 5);
+};
+
+/** Adds star ratings and bulk-price tiers to product objects for the storefront. */
+async function decorateProducts(list) {
+  try {
+    const ids = list.map(p => p.id);
+    const tiers = await getWholesaleTiers();
+    const ratingRows = ids.length ? await Review.findAll({ where: { productId: ids, status: 'published' }, attributes: ['productId', 'rating'] }) : [];
+    const agg = {};
+    ratingRows.forEach((r) => { const a = agg[r.productId] || (agg[r.productId] = { sum: 0, n: 0 }); a.sum += r.rating; a.n += 1; });
+    return list.map(p => ({
+      ...p,
+      ratingAvg: agg[p.id] ? Math.round((agg[p.id].sum / agg[p.id].n) * 10) / 10 : 0,
+      ratingCount: agg[p.id] ? agg[p.id].n : 0,
+      wholesaleTiers: Array.isArray(tiers[p.id]) ? tiers[p.id] : []
+    }));
+  } catch (e) { return list; }
+}
+
+// ---------- Low stock ----------
+const lowStockNotified = new Map();
+const lowStockThresholdFor = async (productId) => {
+  const ops = await getOps();
+  const own = ops.lowStockPerProduct && ops.lowStockPerProduct[productId];
+  return Number.isFinite(Number(own)) && Number(own) >= 0 && own !== undefined ? Number(own) : Number(ops.lowStockDefault) || 20;
+};
+async function notifyLowStock(product) {
+  try {
+    const last = lowStockNotified.get(product.id) || 0;
+    if (Date.now() - last < 12 * 60 * 60 * 1000) return;
+    lowStockNotified.set(product.id, Date.now());
+    await logEvent({ action: 'LOW_STOCK', category: 'inventory', severity: 'warn', targetType: 'product', targetId: product.id,
+      summary: `Low stock: ${product.brandName} has only ${product.stockQuantity} left`, details: { stock: product.stockQuantity } });
+    io.to('admin-dashboard-room').emit('lowStockAlert', { productId: product.id, name: product.brandName, remainingStock: product.stockQuantity });
+  } catch (_) { /* never block an order */ }
+}
+
+// ---------- SMS (campaigns, summaries) and SMS credit tracking ----------
+const smsState = { balance: null, at: null, lastAlertAt: 0, lastPersistAt: 0 };
+async function checkSmsLow() {
+  try {
+    const ops = await getOps();
+    if (smsState.balance === null || smsState.balance > Number(ops.smsLowThreshold)) return;
+    if (Date.now() - smsState.lastAlertAt < 6 * 60 * 60 * 1000) return;
+    smsState.lastAlertAt = Date.now();
+    await logEvent({ action: 'SMS_CREDIT_LOW', category: 'system', severity: 'alert',
+      summary: `SMS credit is low: ${smsState.balance} left (alert level ${ops.smsLowThreshold}). OTP codes will stop working at zero. Top up Ping Africa.`, details: { balance: smsState.balance } });
+    io.to('admin-dashboard-room').emit('smsCreditLow', { balance: smsState.balance });
+    const contacts = await getAdminContacts();
+    if (contacts.emails.length && process.env.EMAIL_USER) {
+      transporter.sendMail({ from: `"${SENDER_NAME}" <${EMAIL_FROM}>`, to: contacts.emails.join(','), subject: '⚠️ SMS credit is running low - Mwea Rice Hub',
+        text: `Your Ping Africa SMS credit is down to ${smsState.balance}. Customers will not receive OTP codes when it reaches zero. Please top up.` }).catch(() => {});
+    }
+  } catch (_) { /* best effort */ }
+}
+function noteSmsBalance(data) {
+  try {
+    if (!data || typeof data !== 'object' || data.new_balance === undefined) return;
+    const b = Number(data.new_balance);
+    if (!Number.isFinite(b)) return;
+    smsState.balance = b; smsState.at = Date.now();
+    if (Date.now() - smsState.lastPersistAt > 10 * 60 * 1000) {
+      smsState.lastPersistAt = Date.now();
+      SystemConfig.findOrCreate({ where: { key: 'sms_balance' }, defaults: { value: { balance: b, at: new Date() } } })
+        .then(([row, created]) => { if (!created) { row.value = { balance: b, at: new Date() }; row.changed('value', true); return row.save(); } }).catch(() => {});
+    }
+    checkSmsLow();
+  } catch (_) { /* ignore */ }
+}
+async function loadSmsBalanceFromDb() {
+  try {
+    const row = await SystemConfig.findOne({ where: { key: 'sms_balance' } });
+    if (row && row.value && smsState.balance === null) { smsState.balance = Number(row.value.balance); smsState.at = new Date(row.value.at).getTime(); }
+  } catch (_) { /* ignore */ }
+}
+
+/** Sends one plain SMS through Ping Africa. Returns { ok, error }. */
+async function sendSmsRaw(phone, message) {
+  try {
+    const to = normalizeKenyanPhone(phone);
+    if (!to) return { ok: false, error: 'invalid number' };
+    if (!process.env.PING_AFRICA_API_TOKEN) return { ok: false, error: 'SMS token not configured' };
+    const payload = { recipient: to, message };
+    if (process.env.PING_AFRICA_SENDER_ID) payload.sender_id = process.env.PING_AFRICA_SENDER_ID;
+    const response = await axios.post(process.env.PING_AFRICA_API_URL || 'https://bulk.ping.africa/api/v1/sms/send', payload, {
+      headers: { Authorization: `Bearer ${process.env.PING_AFRICA_API_TOKEN}`, 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 15000
+    });
+    let data = response.data;
+    if (typeof data === 'string') { try { data = JSON.parse(data); } catch (_) { /* text */ } }
+    noteSmsBalance(data);
+    if (data && typeof data === 'object' && (data.success === false || data.error)) return { ok: false, error: String(data.message || data.error).slice(0, 120) };
+    return { ok: true };
+  } catch (e) {
+    const d = e.response && e.response.data;
+    return { ok: false, error: String((d && (d.message || d.error)) || e.message).slice(0, 120) };
+  }
+}
+const smsPartsFor = (text) => { const len = String(text).length; return len <= 160 ? 1 : Math.ceil(len / 153); };
+
+async function getAdminContacts() {
+  const ops = await getOps();
+  const admins = await User.findAll({ where: { role: 'admin', isActive: true }, attributes: ['phoneNumber', 'email'] });
+  const phones = new Set(), emails = new Set();
+  admins.forEach((a) => { const p = normalizeKenyanPhone(a.phoneNumber); if (p) phones.add(p); if (a.email && String(a.email).includes('@')) emails.add(String(a.email).toLowerCase()); });
+  (ops.dailySummary.extraPhones || []).forEach((p) => { const n = normalizeKenyanPhone(p); if (n) phones.add(n); });
+  (ops.dailySummary.extraEmails || []).forEach((e) => { if (String(e).includes('@')) emails.add(String(e).toLowerCase()); });
+  return { phones: [...phones], emails: [...emails] };
+}
+
+// ---------- Marketing opt-out ----------
+const optOutSignature = (userId) => crypto.createHmac('sha256', JWT_SECRET).update(`optout:${userId}`).digest('hex').slice(0, 12);
+const optOutLink = (userId) => `${RENDER_BASE_URL}/api/optout/${userId}.${optOutSignature(userId)}`;
+
+// ---------- Profit engine (used by reports, exports, daily summary) ----------
+async function loadPaidOrdersInRange(from, to) {
+  const candidates = await Order.findAll({ where: { createdAt: { [Op.gte]: new Date(from.getTime() - 30 * 86400000) } }, order: [['createdAt', 'DESC']], limit: 20000 });
+  return candidates.filter((o) => {
+    const pd = o.paymentDetails || {};
+    if (pd.isPaid !== true) return false;
+    if (/cancel|refund|reject/i.test(String(o.status || ''))) return false;
+    const when = new Date(pd.paidAt || o.createdAt);
+    return when >= from && when <= to;
+  });
+}
+async function buildProfitReport(from, to, fromStr, toStr) {
+  const orders = await loadPaidOrdersInRange(from, to);
+  const orderIds = orders.map(o => o.id);
+  const [referrals, commissions, expenses] = await Promise.all([
+    CustomerReferral.findAll(),
+    orderIds.length ? AgentCommission.findAll({ where: { orderId: orderIds } }) : [],
+    Expense.findAll({ where: { expenseDate: { [Op.gte]: fromStr, [Op.lte]: toStr } }, order: [['expenseDate', 'DESC']] })
+  ]);
+  const refMap = {}; referrals.forEach(r => { refMap[r.customerId] = r.agentId; });
+  const comMap = {}; commissions.filter(c => c.status !== 'REVERSED').forEach(c => { comMap[c.orderId] = Number(c.amount) || 0; });
+  const agentIds = [...new Set(Object.values(refMap))];
+  const agentUsers = agentIds.length ? await User.findAll({ where: { id: agentIds }, attributes: ['id', 'fullName'] }) : [];
+  const agentName = {}; agentUsers.forEach(u => { agentName[u.id] = u.fullName; });
+  const productCostFallback = {};
+  const missingIds = new Set();
+  orders.forEach(o => getOrderItems(o).forEach(i => { if (!(Number(i.buyingPrice) > 0) && i.productId) missingIds.add(i.productId); }));
+  if (missingIds.size) (await RiceProduct.findAll({ where: { id: [...missingIds] }, attributes: ['id', 'buyingPrice'] })).forEach(p => { productCostFallback[p.id] = Number(p.buyingPrice) || 0; });
+
+  const totals = { orders: 0, kg: 0, riceRevenue: 0, deliveryIncome: 0, costOfGoods: 0, grossProfit: 0, commissions: 0, expenses: 0, netProfit: 0 };
+  const byProduct = {}, byCounty = {}, byAgent = {}, byMonth = {}, byDay = {};
+  const bump = (map, key, label, v) => {
+    const r = map[key] || (map[key] = { key, label, orders: 0, units: 0, kg: 0, revenue: 0, cost: 0, profit: 0, commission: 0 });
+    r.orders += v.orders || 0; r.units += v.units || 0; r.kg += v.kg || 0; r.revenue += v.revenue || 0; r.cost += v.cost || 0; r.profit += v.profit || 0; r.commission += v.commission || 0;
+  };
+  orders.forEach((o) => {
+    const items = getOrderItems(o);
+    let rev = 0, cost = 0;
+    items.forEach((i) => {
+      const qty = Number(i.quantity) || 0, price = Number(i.priceAtPurchase) || 0;
+      const unitCost = Number(i.buyingPrice) > 0 ? Number(i.buyingPrice) : (productCostFallback[i.productId] > 0 ? productCostFallback[i.productId] : price * 0.75);
+      rev += price * qty; cost += unitCost * qty;
+      const kg = (Number(i.weightKg) || 0) * qty;
+      bump(byProduct, String(i.productId || i.name), i.name || i.brandName || 'Rice', { units: qty, kg, revenue: price * qty, cost: unitCost * qty, profit: price * qty - unitCost * qty });
+    });
+    const profit = rev - cost;
+    const commission = comMap[o.id] || 0;
+    const kg = Number(o.totalWeightKg) || 0;
+    const delivery = Number(o.transportFee) || 0;
+    const pd = o.paymentDetails || {};
+    const when = new Date(pd.paidAt || o.createdAt);
+    const eat = new Date(when.getTime() + EAT_OFFSET_MS).toISOString();
+    totals.orders += 1; totals.kg += kg; totals.riceRevenue += rev; totals.deliveryIncome += delivery; totals.costOfGoods += cost; totals.commissions += commission;
+    const base = { orders: 1, kg, revenue: rev, cost, profit, commission };
+    bump(byCounty, o.county || 'Unknown', o.county || 'Unknown', base);
+    const aid = refMap[o.userId];
+    bump(byAgent, aid ? String(aid) : 'direct', aid ? (agentName[aid] || `Agent #${aid}`) : 'Direct (no agent)', base);
+    bump(byMonth, eat.slice(0, 7), eat.slice(0, 7), base);
+    bump(byDay, eat.slice(0, 10), eat.slice(0, 10), base);
+  });
+  totals.grossProfit = totals.riceRevenue - totals.costOfGoods;
+  totals.expenses = expenses.reduce((s, e) => s + Number(e.amount), 0);
+  totals.netProfit = totals.grossProfit + totals.deliveryIncome - totals.commissions - totals.expenses;
+  const fin = (r) => ({ ...r, kg: round2(r.kg), revenue: round2(r.revenue), cost: round2(r.cost), profit: round2(r.profit), commission: round2(r.commission), net: round2(r.profit - r.commission), margin: r.revenue > 0 ? Math.round((r.profit / r.revenue) * 1000) / 10 : 0 });
+  const list = (m, sortKey = 'profit') => Object.values(m).map(fin).sort((a, b) => sortKey === 'key' ? String(a.key).localeCompare(String(b.key)) : b[sortKey] - a[sortKey]);
+  const expenseByCategory = {};
+  expenses.forEach(e => { expenseByCategory[e.category] = round2((expenseByCategory[e.category] || 0) + Number(e.amount)); });
+  Object.keys(totals).forEach(k => { totals[k] = round2(totals[k]); });
+  return {
+    range: { from: fromStr, to: toStr }, totals,
+    margin: totals.riceRevenue > 0 ? Math.round((totals.grossProfit / totals.riceRevenue) * 1000) / 10 : 0,
+    byProduct: list(byProduct), byCounty: list(byCounty), byAgent: list(byAgent), byMonth: list(byMonth, 'key'), byDay: list(byDay, 'key'),
+    expenseByCategory, expenses: expenses.slice(0, 200).map(e => ({ id: e.id, category: e.category, description: e.description, amount: Number(e.amount), date: e.expenseDate }))
+  };
+}
+
+// ---------- Minimal dependency-free .xlsx writer (so no npm package has to be installed) ----------
+const crcTable = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = (buf) => { let c = 0xFFFFFFFF; for (let i = 0; i < buf.length; i++) c = crcTable[(c ^ buf[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+function zipBuffer(files) {
+  const parts = [], central = []; let offset = 0;
+  files.forEach((f) => {
+    const name = Buffer.from(f.name, 'utf8'), raw = Buffer.isBuffer(f.data) ? f.data : Buffer.from(f.data, 'utf8');
+    const comp = zlib.deflateRawSync(raw), crc = crc32(raw);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x0800, 6); local.writeUInt16LE(8, 8); local.writeUInt16LE(0, 10); local.writeUInt16LE(0x21, 12);
+    local.writeUInt32LE(crc, 14); local.writeUInt32LE(comp.length, 18); local.writeUInt32LE(raw.length, 22); local.writeUInt16LE(name.length, 26); local.writeUInt16LE(0, 28);
+    parts.push(local, name, comp);
+    const cen = Buffer.alloc(46);
+    cen.writeUInt32LE(0x02014b50, 0); cen.writeUInt16LE(20, 4); cen.writeUInt16LE(20, 6); cen.writeUInt16LE(0x0800, 8); cen.writeUInt16LE(8, 10); cen.writeUInt16LE(0, 12); cen.writeUInt16LE(0x21, 14);
+    cen.writeUInt32LE(crc, 16); cen.writeUInt32LE(comp.length, 20); cen.writeUInt32LE(raw.length, 24); cen.writeUInt16LE(name.length, 28); cen.writeUInt32LE(offset, 42);
+    central.push(cen, name);
+    offset += 30 + name.length + comp.length;
+  });
+  const cd = Buffer.concat(central), end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10); end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, cd, end]);
+}
+const xmlEsc = (v) => String(v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const colLetter = (n) => { let s = ''; n += 1; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
+/** sheets: [{ name, columns: [{ header, key, type?: 'text'|'number'|'money' }], rows: [{...}] }] */
+function buildXlsx(sheets) {
+  const sheetXml = sheets.map((sh) => {
+    const widths = sh.columns.map(c => Math.max(String(c.header).length + 2, 10));
+    const rowsXml = [];
+    rowsXml.push(`<row r="1">${sh.columns.map((c, ci) => `<c r="${colLetter(ci)}1" s="1" t="inlineStr"><is><t>${xmlEsc(c.header)}</t></is></c>`).join('')}</row>`);
+    sh.rows.forEach((row, ri) => {
+      const r = ri + 2;
+      rowsXml.push(`<row r="${r}">${sh.columns.map((c, ci) => {
+        const v = row[c.key]; const ref = `${colLetter(ci)}${r}`;
+        if (v === null || v === undefined || v === '') return '';
+        if ((c.type === 'number' || c.type === 'money') && Number.isFinite(Number(v))) {
+          return `<c r="${ref}"${c.type === 'money' ? ' s="2"' : ''}><v>${Number(v)}</v></c>`;
+        }
+        const t = String(v); widths[ci] = Math.min(60, Math.max(widths[ci], t.length + 2));
+        return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc(t)}</t></is></c>`;
+      }).join('')}</row>`);
+    });
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData>${rowsXml.join('')}</sheetData></worksheet>`;
+  });
+  const safeName = (n, i) => String(n || `Sheet${i + 1}`).replace(/[\[\]:*?\/\\]/g, ' ').slice(0, 31);
+  const files = [
+    { name: '[Content_Types].xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>` },
+    { name: '_rels/.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
+    { name: 'xl/workbook.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((s, i) => `<sheet name="${xmlEsc(safeName(s.name, i))}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>` },
+    { name: 'xl/_rels/workbook.xml.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
+    { name: 'xl/styles.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF166534"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>` },
+    ...sheetXml.map((x, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, data: x }))
+  ];
+  return zipBuffer(files);
+}
+
+// ---------- Payment confirmation shared by the status poll, callback and background job ----------
+const paymentLocks = new Set();
+async function confirmOrderPaid(order, source, receipt = null, rawCallback = null) {
+  if (paymentLocks.has(order.id)) return { confirmed: false, reason: 'busy' };
+  paymentLocks.add(order.id);
+  try {
+    const fresh = await Order.findByPk(order.id);
+    if (!fresh) return { confirmed: false, reason: 'missing' };
+    const pd = fresh.paymentDetails || {};
+    if (pd.isPaid === true) {
+      if (receipt && !pd.mpesaReceipt) { fresh.paymentDetails = { ...pd, mpesaReceipt: receipt }; await fresh.save(); }
+      return { confirmed: false, reason: 'already-paid', order: fresh };
+    }
+    // A payment that arrives after the order expired needs its stock taken back out again.
+    if (fresh.status === 'cancelled' && pd.expiredAt) {
+      let short = false;
+      const items = getOrderItems(fresh);
+      for (const i of items) {
+        const p = await RiceProduct.findByPk(i.productId);
+        if (!p || p.stockQuantity < i.quantity) { short = true; continue; }
+        p.stockQuantity -= i.quantity; await p.save();
+        io.emit('stockUpdated', { productId: p.id, newStockQuantity: p.stockQuantity });
+      }
+      if (short) {
+        await logEvent({ action: 'LATE_PAYMENT_STOCK_SHORT', category: 'orders', severity: 'alert', targetType: 'order', targetId: fresh.id,
+          summary: `Order #${fresh.id} was paid after it expired and some stock is no longer available. Fulfil it manually or refund the customer.` });
+      }
+    }
+    fresh.paymentDetails = { ...pd, isPaid: true, paidTag: 'PAID', paidAt: new Date(), mpesaReceipt: receipt || pd.mpesaReceipt || null, failureReason: null, expiredAt: null, ...(rawCallback ? { rawCallback } : {}) };
+    if (fresh.status === 'payment_failed' || fresh.status === 'cancelled') fresh.status = 'pending';
+    const points = Number(((Number(fresh.totalWeightKg) || 0) * 0.2).toFixed(2));
+    if (points > 0) {
+      const u = await User.findByPk(fresh.userId);
+      if (u) { u.rewardPoints = Number(((u.rewardPoints || 0) + points).toFixed(2)); await u.save(); }
+    }
+    await fresh.save();
+    await onOrderPaid(fresh, source);
+    io.to('admin-dashboard-room').emit('paymentReceived', { orderId: fresh.id, status: fresh.status, isPaid: true, mpesaReceipt: fresh.paymentDetails.mpesaReceipt, paymentDetails: fresh.paymentDetails });
+    io.emit('orderStatusUpdated', fresh);
+    return { confirmed: true, order: fresh };
+  } finally {
+    paymentLocks.delete(order.id);
+  }
+}
+
+/** Gives the reserved stock back and closes an order that was never paid. */
+async function expireUnpaidOrder(order, minutes) {
+  const fresh = await Order.findByPk(order.id);
+  if (!fresh || (fresh.paymentDetails || {}).isPaid === true || fresh.status === 'cancelled') return false;
+  for (const i of getOrderItems(fresh)) {
+    const p = await RiceProduct.findByPk(i.productId);
+    if (p) { p.stockQuantity += Number(i.quantity) || 0; await p.save(); io.emit('stockUpdated', { productId: p.id, newStockQuantity: p.stockQuantity }); }
+  }
+  fresh.status = 'cancelled';
+  fresh.paymentDetails = { ...(fresh.paymentDetails || {}), isPaid: false, paidTag: 'EXPIRED', failureReason: `Payment not received within ${minutes} minutes`, expiredAt: new Date() };
+  await fresh.save();
+  await logEvent({ action: 'ORDER_EXPIRED', category: 'orders', severity: 'warn', targetType: 'order', targetId: fresh.id,
+    summary: `Order #${fresh.id} expired unpaid after ${minutes} minutes; stock released`, details: { userId: fresh.userId } });
+  io.emit('orderStatusUpdated', fresh);
+  return true;
+}
+
+// ---------- Background jobs ----------
+const jobStatus = { paymentReconcile: { lastRun: null, checked: 0, confirmed: 0, failed: 0, expired: 0, error: null }, dailySummary: { lastRun: null, lastSentDate: null, error: null } };
+let reconcileRunning = false;
+async function runPaymentReconcile() {
+  if (reconcileRunning) return;
+  reconcileRunning = true;
+  const stat = { lastRun: new Date(), checked: 0, confirmed: 0, failed: 0, expired: 0, error: null };
+  try {
+    const ops = await getOps();
+    if (ops.autoReconcile === false) { jobStatus.paymentReconcile = { ...stat, error: 'switched off' }; return; }
+    const minutes = Math.max(10, Number(ops.orderExpiryMinutes) || 45);
+    const recent = await Order.findAll({ where: { createdAt: { [Op.gte]: new Date(Date.now() - 72 * 3600 * 1000) }, status: { [Op.in]: ['pending', 'payment_failed'] } }, order: [['createdAt', 'ASC']], limit: 200 });
+    const unpaid = recent.filter(o => (o.paymentDetails || {}).isPaid !== true && Date.now() - new Date(o.createdAt).getTime() > 90 * 1000).slice(0, 25);
+    for (const o of unpaid) {
+      stat.checked += 1;
+      const live = await lookupPayHeroStatus(o.id);
+      if (!live.reachable) continue;
+      if (live.status === 'SUCCESS' || live.status === 'PAID') {
+        const r = await confirmOrderPaid(o, 'background payment check', live.receipt || null);
+        if (r.confirmed) stat.confirmed += 1;
+        continue;
+      }
+      const ageMin = (Date.now() - new Date(o.createdAt).getTime()) / 60000;
+      if (['FAILED', 'CANCELLED', 'REJECTED'].includes(live.status) && o.status !== 'payment_failed') {
+        o.status = 'payment_failed';
+        o.paymentDetails = { ...(o.paymentDetails || {}), isPaid: false, paidTag: 'FAILED', failureReason: live.failureReason || 'Payment failed or was cancelled by the customer.' };
+        await o.save(); stat.failed += 1;
+        io.emit('orderStatusUpdated', o);
+      }
+      if (ageMin > minutes) { if (await expireUnpaidOrder(o, minutes)) stat.expired += 1; }
+    }
+  } catch (e) {
+    stat.error = e.message;
+    console.error('⚠️ Payment reconcile job error:', e.message);
+  } finally {
+    jobStatus.paymentReconcile = stat;
+    reconcileRunning = false;
+  }
+}
+
+async function buildDailySummary(dateStr) {
+  const { start, end } = eatDayRange(dateStr);
+  const [report, createdToday, newCustomers, lowStock, owedRows] = await Promise.all([
+    buildProfitReport(start, end, dateStr, dateStr),
+    Order.findAll({ where: { createdAt: { [Op.gte]: start, [Op.lte]: end } } }),
+    User.count({ where: { createdAt: { [Op.gte]: start, [Op.lte]: end }, isVerified: true } }),
+    RiceProduct.findAll({ where: { isAvailable: true }, attributes: ['id', 'brandName', 'stockQuantity'] }),
+    AgentCommission.findAll({ where: { status: 'PENDING' }, attributes: ['amount'] })
+  ]);
+  const ops = await getOps();
+  const low = [];
+  for (const p of lowStock) { if (p.stockQuantity <= (await lowStockThresholdFor(p.id))) low.push(`${p.brandName} (${p.stockQuantity})`); }
+  const pendingNow = createdToday.filter(o => (o.paymentDetails || {}).isPaid !== true && o.status === 'pending').length;
+  const failedNow = createdToday.filter(o => o.status === 'payment_failed').length;
+  const errorsToday = await ActivityEvent.count({ where: { category: 'system', severity: 'alert', createdAt: { [Op.gte]: start, [Op.lte]: end } } });
+  const owed = round2(owedRows.reduce((s, r) => s + Number(r.amount), 0));
+  const t = report.totals;
+  const topProducts = report.byProduct.slice(0, 3).map(p => `${p.label} ${p.kg}kg`);
+  const kes = (n) => `KES ${Math.round(Number(n) || 0).toLocaleString('en-KE')}`;
+  const sms = `Mwea Rice Hub ${dateStr}: ${t.orders} paid order(s), sales ${kes(t.riceRevenue + t.deliveryIncome)}, est. net profit ${kes(t.netProfit)}. Pending ${pendingNow}, failed ${failedNow}. New customers ${newCustomers}.${low.length ? ` LOW STOCK: ${low.slice(0, 3).join(', ')}.` : ''} Agent commission owed ${kes(owed)}.${smsState.balance !== null ? ` SMS credit ${smsState.balance}.` : ''}${errorsToday ? ` ${errorsToday} system alert(s).` : ''}`.slice(0, 450);
+  const rowsHtml = [
+    ['Paid orders', t.orders], ['Rice sales', kes(t.riceRevenue)], ['Delivery fees collected', kes(t.deliveryIncome)], ['Cost of rice sold', kes(t.costOfGoods)], ['Gross profit', kes(t.grossProfit)],
+    ['Agent commission earned', kes(t.commissions)], ['Expenses recorded', kes(t.expenses)], ['Estimated net profit', kes(t.netProfit)], ['Kg sold', t.kg],
+    ['Orders awaiting payment', pendingNow], ['Failed payments', failedNow], ['New customers', newCustomers], ['Agent commission still owed', kes(owed)],
+    ['SMS credit', smsState.balance !== null ? smsState.balance : 'unknown'], ['System alerts today', errorsToday], ['Top products', topProducts.join(', ') || '—'], ['Low stock', low.join(', ') || 'None']
+  ].map(([a, b]) => `<tr><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;color:#475569">${a}</td><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;font-weight:700;color:#0f172a;text-align:right">${b}</td></tr>`).join('');
+  const html = `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:560px;margin:auto"><h2 style="color:#166534">🌾 Mwea Rice Hub — daily summary</h2><p style="color:#64748b">${dateStr}</p><table style="width:100%;border-collapse:collapse;font-size:14px">${rowsHtml}</table><p style="font-size:12px;color:#94a3b8;margin-top:16px">Profit is estimated from your recorded buying prices and expenses.</p></div>`;
+  return { sms, html, subject: `Daily summary ${dateStr}: ${t.orders} orders, net ${kes(t.netProfit)}`, data: { ...t, pendingNow, failedNow, newCustomers, owed, low, errorsToday } };
+}
+async function sendDailySummary(dateStr, { force = false } = {}) {
+  const ops = await getOps();
+  const cfg = ops.dailySummary;
+  const summary = await buildDailySummary(dateStr);
+  const contacts = await getAdminContacts();
+  const result = { sms: 0, email: 0, errors: [] };
+  if (cfg.sms !== false) {
+    for (const p of contacts.phones) { const r = await sendSmsRaw(p, summary.sms); if (r.ok) result.sms += 1; else result.errors.push(`SMS ${p}: ${r.error}`); }
+  }
+  if (cfg.email !== false && contacts.emails.length && process.env.EMAIL_USER) {
+    try { await transporter.sendMail({ from: `"${SENDER_NAME}" <${EMAIL_FROM}>`, to: contacts.emails.join(','), subject: summary.subject, html: summary.html }); result.email = contacts.emails.length; }
+    catch (e) { result.errors.push(`Email: ${e.message}`); }
+  }
+  await logEvent({ action: 'DAILY_SUMMARY_SENT', category: 'system', severity: result.errors.length ? 'warn' : 'info', summary: `Daily summary ${dateStr} sent (${result.sms} SMS, ${result.email} email)${result.errors.length ? ' with problems: ' + result.errors.join('; ') : ''}`, details: result });
+  return { ...result, preview: summary.sms };
+}
+async function dailySummaryTick() {
+  try {
+    const ops = await getOps();
+    const cfg = ops.dailySummary;
+    if (!cfg.enabled) return;
+    const now = eatNow();
+    const today = now.toISOString().slice(0, 10);
+    const [hh, mm] = String(cfg.time || '20:00').split(':').map(Number);
+    if (now.getUTCHours() * 60 + now.getUTCMinutes() < (hh || 0) * 60 + (mm || 0)) return;
+    const [row] = await SystemConfig.findOrCreate({ where: { key: 'daily_summary_state' }, defaults: { value: { lastSentDate: null } } });
+    if ((row.value || {}).lastSentDate === today) return;
+    row.value = { lastSentDate: today }; row.changed('value', true); await row.save(); // claim the day first so it can never send twice
+    const r = await sendDailySummary(today);
+    jobStatus.dailySummary = { lastRun: new Date(), lastSentDate: today, error: r.errors.length ? r.errors.join('; ') : null };
+  } catch (e) {
+    jobStatus.dailySummary = { ...jobStatus.dailySummary, lastRun: new Date(), error: e.message };
+    console.error('⚠️ Daily summary job error:', e.message);
+  }
+}
+
+let jobsStarted = false;
+function startBackgroundJobs() {
+  if (jobsStarted || IS_VERCEL) return;
+  jobsStarted = true;
+  loadSmsBalanceFromDb();
+  Campaign.update({ status: 'stopped', finishedAt: new Date() }, { where: { status: 'sending' } }).catch(() => {});
+  setTimeout(runPaymentReconcile, 45 * 1000);
+  setInterval(runPaymentReconcile, 3 * 60 * 1000).unref?.();
+  setInterval(dailySummaryTick, 60 * 1000).unref?.();
+  console.log('⏱️ Background jobs started: payment re-check (every 3 min), unpaid-order expiry, daily summary.');
+}
+
+// ---------- Rate limiting & error capture helpers ----------
+const rateStores = [];
+function makeRateLimiter({ name, windowMs, max, keyFn, message }) {
+  const hits = new Map();
+  rateStores.push(hits);
+  let lastLog = 0;
+  return (req, res, next) => {
+    let key;
+    try { key = keyFn(req); } catch (_) { key = null; }
+    if (!key) return next();
+    const now = Date.now();
+    let rec = hits.get(key);
+    if (!rec || now - rec.start > windowMs) { rec = { start: now, count: 0 }; hits.set(key, rec); }
+    rec.count += 1;
+    if (rec.count > max) {
+      const retry = Math.max(1, Math.ceil((rec.start + windowMs - now) / 1000));
+      res.set('Retry-After', String(retry));
+      if (now - lastLog > 60 * 1000) {
+        lastLog = now;
+        logEvent({ req, actor: { id: null, role: 'anonymous', name: null }, action: 'RATE_LIMITED', category: 'auth', severity: 'warn', summary: `Too many ${name} requests from ${req.ip || 'unknown'}` });
+      }
+      return res.status(429).json({ error: message || 'Too many requests. Please wait a few minutes and try again.', retryAfterSeconds: retry });
+    }
+    next();
+  };
+}
+setInterval(() => { const now = Date.now(); rateStores.forEach(m => { for (const [k, v] of m) if (now - v.start > 2 * 60 * 60 * 1000) m.delete(k); }); }, 10 * 60 * 1000).unref?.();
+const bodyIdentity = (req) => {
+  const b = req.body || {};
+  const raw = b.phoneNumber || b.phone || b.identifier || b.email || '';
+  const phone = normalizeKenyanPhone(raw);
+  return phone || String(raw).toLowerCase().trim().slice(0, 80) || null;
+};
+
+const recentErrors = new Map();
+async function recordServerError(source, message, extra = {}) {
+  try {
+    const key = `${source}:${String(message).slice(0, 80)}`;
+    const last = recentErrors.get(key) || 0;
+    if (Date.now() - last < 60 * 1000) return; // same error at most once a minute
+    recentErrors.set(key, Date.now());
+    if (recentErrors.size > 500) recentErrors.clear();
+    await logEvent({ actor: { id: null, role: 'system', name: 'Server' }, action: 'SERVER_ERROR', category: 'system', severity: 'alert',
+      summary: `${source}: ${String(message).slice(0, 300)}`, details: extra });
+    if (sentryClient) { try { sentryClient.captureException(extra.error || new Error(String(message))); } catch (_) { /* ignore */ } }
+  } catch (_) { /* never throw from the error reporter */ }
+}
+let sentryClient = null;
+(async () => {
+  if (!process.env.SENTRY_DSN) return;
+  try {
+    const mod = await import('@sentry/node');
+    mod.init({ dsn: process.env.SENTRY_DSN, environment: process.env.NODE_ENV || 'production', tracesSampleRate: 0 });
+    sentryClient = mod;
+    console.log('🛰️ Sentry error monitoring is active.');
+  } catch (e) {
+    console.warn('⚠️ SENTRY_DSN is set but @sentry/node is not installed. Run "npm install @sentry/node" to enable it. Errors are still recorded in the Live Activity feed.');
+  }
+})();
+process.on('unhandledRejection', (reason) => { console.error('❌ Unhandled rejection:', reason); recordServerError('Unhandled promise rejection', reason && reason.message ? reason.message : reason, { error: reason instanceof Error ? reason : undefined }); });
+process.on('uncaughtException', (err) => { console.error('❌ Uncaught exception:', err); recordServerError('Uncaught exception', err.message, { stack: String(err.stack || '').split('\n').slice(0, 6).join('\n'), error: err }); });
+
+// ---------- Admin two-step sign-in ----------
+const twoFactorChallenges = new Map();
+setInterval(() => { const now = Date.now(); for (const [k, v] of twoFactorChallenges) if (v.expires < now) twoFactorChallenges.delete(k); }, 60 * 1000).unref?.();
+const twoFactorEnabled = async () => {
+  if (String(process.env.DISABLE_ADMIN_2FA || '').toLowerCase() === 'true') return false;
+  const ops = await getOps();
+  return ops.adminTwoFactor !== false;
+};
 
 
 // Serverless-safe flash sale sync: no timers, state is derived from the DB (cached for 5s).
@@ -1776,6 +2480,46 @@ expressApp.use(async (req, res, next) => {
     console.error('❌ Bootstrap failure while handling request:', bootErr.message);
     res.status(503).json({ error: 'Service is starting up or the database is unreachable. Please retry shortly.' });
   }
+});
+
+
+// ---------- Rate limits on public routes (protects your SMS credit and accounts) ----------
+const limitByIp = (req) => req.ip || 'unknown';
+const rl = (opts) => makeRateLimiter(opts);
+expressApp.post('/api/user/signup', rl({ name: 'signup', windowMs: 60 * 60 * 1000, max: 12, keyFn: limitByIp, message: 'Too many sign-up attempts from your network. Please try again in an hour.' }));
+expressApp.post('/api/user/signup', rl({ name: 'signup (per number)', windowMs: 60 * 60 * 1000, max: 6, keyFn: (r) => { const k = bodyIdentity(r); return k ? `signup:${k}` : null; }, message: 'Too many attempts for this phone number or email. Please wait an hour.' }));
+['/api/user/signup/request-otp', '/api/user/request-signup-otp', '/api/user/signup/resend-otp', '/api/user/resend-signup-otp'].forEach((p) => {
+  expressApp.post(p, rl({ name: 'OTP request', windowMs: 60 * 60 * 1000, max: 25, keyFn: limitByIp, message: 'Too many code requests from your network. Please try again later.' }));
+  expressApp.post(p, rl({ name: 'OTP request (per number)', windowMs: 30 * 60 * 1000, max: 4, keyFn: (r) => { const k = bodyIdentity(r); return k ? `otp:${k}` : null; }, message: 'We already sent several codes to this number. Please wait about 30 minutes before asking again.' }));
+});
+['/api/user/forgot-password', '/api/user/request-reset-otp'].forEach((p) => {
+  expressApp.post(p, rl({ name: 'password reset', windowMs: 60 * 60 * 1000, max: 20, keyFn: limitByIp, message: 'Too many password reset requests from your network. Try again later.' }));
+  expressApp.post(p, rl({ name: 'password reset (per number)', windowMs: 60 * 60 * 1000, max: 4, keyFn: (r) => { const k = bodyIdentity(r); return k ? `reset:${k}` : null; }, message: 'Too many reset codes requested for this account. Please wait an hour.' }));
+});
+['/api/user/signup/verify-otp', '/api/user/verify-signup-otp', '/api/user/verify-signup', '/api/user/reset-password', '/api/user/login/verify-2fa'].forEach((p) => {
+  expressApp.post(p, rl({ name: 'code check', windowMs: 15 * 60 * 1000, max: 40, keyFn: limitByIp, message: 'Too many attempts. Please wait a few minutes.' }));
+});
+expressApp.post('/api/user/login', rl({ name: 'login', windowMs: 15 * 60 * 1000, max: 60, keyFn: limitByIp, message: 'Too many sign-in attempts from your network. Please wait a few minutes.' }));
+expressApp.get('/api/referral/validate', rl({ name: 'referral check', windowMs: 60 * 1000, max: 40, keyFn: limitByIp, message: 'Slow down a little.' }));
+expressApp.post('/api/products/:id/reviews', rl({ name: 'review', windowMs: 60 * 60 * 1000, max: 20, keyFn: limitByIp, message: 'Too many reviews submitted. Please try again later.' }));
+
+// ---------- Server-side failures are recorded (and sent to Sentry when configured) ----------
+expressApp.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = (body) => {
+    try {
+      if (res.statusCode >= 500 && req.path.startsWith('/api/')) {
+        recordServerError(`${req.method} ${req.path} returned ${res.statusCode}`, (body && body.error) || 'Server error', { route: req.path, method: req.method, status: res.statusCode, userId: req.user ? req.user.id : null });
+      }
+    } catch (_) { /* never block the response */ }
+    return originalJson(body);
+  };
+  next();
+});
+
+expressApp.get('/api/health', async (req, res) => {
+  try { await sequelize.query('SELECT 1'); res.json({ ok: true, time: new Date().toISOString() }); }
+  catch (e) { res.status(503).json({ ok: false }); }
 });
 
 async function startServer() {
@@ -2537,6 +3281,25 @@ async function startServer() {
         }
         loginFailures.delete(throttleKey);
 
+        // Administrators sign in in two steps: password, then a code sent to their phone/email.
+        if ((await effectiveRoleFor(user)) === 'admin' && (await twoFactorEnabled())) {
+          const hasChannel = !!normalizeKenyanPhone(user.phoneNumber) || (user.email && String(user.email).includes('@'));
+          if (hasChannel) {
+            const code = String(crypto.randomInt(100000, 1000000));
+            const challengeId = crypto.randomBytes(18).toString('hex');
+            const delivery = await dispatchOtp(user, code, 'admin_login');
+            if (!delivery.anySent) {
+              await logEvent({ req, actor: { id: user.id, role: 'admin', name: user.fullName }, action: 'ADMIN_2FA_DELIVERY_FAILED', category: 'auth', severity: 'alert', targetType: 'user', targetId: user.id,
+                summary: `Could not deliver the admin sign-in code to ${user.fullName}. Check SMS credit and email settings, or set DISABLE_ADMIN_2FA=true temporarily.` });
+              return res.status(502).json({ error: 'We could not send your sign-in code (SMS or email). Check your SMS credit/email settings.' });
+            }
+            twoFactorChallenges.set(challengeId, { userId: user.id, code: crypto.createHash('sha256').update(code).digest('hex'), expires: Date.now() + 5 * 60 * 1000, attempts: 0, resends: 0 });
+            await logEvent({ req, actor: { id: user.id, role: 'admin', name: user.fullName }, action: 'ADMIN_2FA_SENT', category: 'auth', targetType: 'user', targetId: user.id, summary: `Sign-in code sent to administrator ${user.fullName}` });
+            return res.status(200).json({ requiresTwoFactor: true, challengeId, smsSent: delivery.smsSent, emailSent: delivery.emailSent,
+              message: `Enter the 6-digit code we sent to your ${delivery.smsSent ? 'phone' : 'email'}.` });
+          }
+        }
+
         const token = jwt.sign({ id: user.id, role: await effectiveRoleFor(user) }, JWT_SECRET, { expiresIn: '7d' });
         await logEvent({ req, actor: { id: user.id, role: await effectiveRoleFor(user), name: user.fullName }, action: 'LOGIN_SUCCESS', category: 'auth', targetType: 'user', targetId: user.id, summary: `${user.fullName} signed in` });
         res.json({ 
@@ -2897,7 +3660,7 @@ async function startServer() {
           };
         }).filter(item => !maxPrice || item.price <= Number(maxPrice));
 
-        res.json(optimizedCatalog);
+        res.json(await decorateProducts(optimizedCatalog));
       } catch (err) { 
         res.status(500).json({ error: err.message }); 
       }
@@ -2924,7 +3687,7 @@ async function startServer() {
           };
         });
 
-        res.json(formatted);
+        res.json(await decorateProducts(formatted));
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
@@ -3133,6 +3896,7 @@ async function startServer() {
         let calculatedSubtotal = 0;
         let totalWeightKg = 0;
         const builtOrderLineItems = [];
+        const wholesaleTiers = await getWholesaleTiers();
 
         for (const item of cartItems) {
           const targetId = item.productId || item.laptopId || item.id;
@@ -3146,6 +3910,11 @@ async function startServer() {
           if (flashSaleState.active && product.flashSalePrice !== null && product.flashSalePrice !== undefined) {
             purchasePrice = product.flashSalePrice;
           }
+
+          // Bulk pricing: the best price wins between the normal/flash price and the quantity tier
+          const tier = bestTier(wholesaleTiers[product.id], Number(item.quantity));
+          let wholesaleApplied = false;
+          if (tier && Number(tier.price) < Number(purchasePrice)) { purchasePrice = Number(tier.price); wholesaleApplied = true; }
 
           const itemKg = (product.weightKg || 0) * item.quantity;
           totalWeightKg += itemKg;
@@ -3162,18 +3931,15 @@ async function startServer() {
             weightKg: product.weightKg || 0,
             quantity: item.quantity, 
             priceAtPurchase: purchasePrice,
+            wholesaleApplied,
             buyingPrice: product.buyingPrice || (purchasePrice * 0.75),
             imageUrl: product.imageUrl || product.image || null
           });
           
           io.emit('stockUpdated', { productId: product.id, newStockQuantity: product.stockQuantity });
           
-          if (product.stockQuantity <= 10) {
-            io.to('admin-dashboard-room').emit('lowStockAlert', {
-              productId: product.id,
-              name: product.brandName,
-              remainingStock: product.stockQuantity
-            });
+          if (product.stockQuantity <= await lowStockThresholdFor(product.id)) {
+            await notifyLowStock(product);
           }
         }
 
@@ -3290,6 +4056,7 @@ async function startServer() {
         let heroStatusData = null;
         let failureReason = null;
         let isSuccess = false;
+        let receiptFromHero = null;
 
         try {
           const response = await axios.get(
@@ -3303,6 +4070,7 @@ async function startServer() {
             const rawStatus = String(paymentObj.status || paymentObj.Status || '').toUpperCase();
             if (rawStatus === 'SUCCESS' || rawStatus === 'PAID') {
               isSuccess = true;
+              receiptFromHero = paymentObj.provider_reference || paymentObj.mpesa_receipt_number || paymentObj.MpesaReceiptNumber || paymentObj.receipt_number || null;
             } else if (rawStatus === 'FAILED' || rawStatus === 'CANCELLED' || rawStatus === 'REJECTED') {
               failureReason = paymentObj.failure_reason || paymentObj.message || paymentObj.ResultDesc || 'Payment failed or was cancelled by user.';
             }
@@ -3312,24 +4080,7 @@ async function startServer() {
         }
 
         if (isSuccess && !order.paymentDetails?.isPaid) {
-          order.paymentDetails = {
-            ...order.paymentDetails,
-            isPaid: true,
-            paidTag: 'PAID',
-            paidAt: new Date()
-          };
-          if (order.status === 'payment_failed') order.status = 'pending';
-          
-          const totalKg = order.totalWeightKg || 0;
-          const points = Number((totalKg * 0.2).toFixed(2));
-          const user = await User.findByPk(order.userId);
-          if (user && points > 0) {
-            user.rewardPoints = Number(((user.rewardPoints || 0) + points).toFixed(2));
-            await user.save();
-          }
-          await order.save();
-          await onOrderPaid(order, 'payment status check');
-          io.emit('orderStatusUpdated', order);
+          await confirmOrderPaid(order, 'payment status check', receiptFromHero);
         } else if (failureReason) {
           order.paymentDetails = {
             ...order.paymentDetails,
@@ -3344,13 +4095,14 @@ async function startServer() {
           io.emit('orderStatusUpdated', order);
         }
 
+        const shown = (await Order.findByPk(order.id)) || order;
         res.json({
-          orderId: order.id,
-          status: order.status,
-          paymentStatus: order.paymentDetails?.paidTag || (order.paymentDetails?.isPaid ? 'PAID' : 'PENDING'),
-          paymentDetails: order.paymentDetails,
-          totalWeightKg: order.totalWeightKg || 0,
-          pointsEarned: order.pointsEarned || 0,
+          orderId: shown.id,
+          status: shown.status,
+          paymentStatus: shown.paymentDetails?.paidTag || (shown.paymentDetails?.isPaid ? 'PAID' : 'PENDING'),
+          paymentDetails: shown.paymentDetails,
+          totalWeightKg: shown.totalWeightKg || 0,
+          pointsEarned: shown.pointsEarned || 0,
           heroData: heroStatusData
         });
       } catch (err) {
@@ -3392,31 +4144,13 @@ async function startServer() {
             }
             
             if (isPaymentSuccessful) {
-              if (order.status === 'payment_failed' || order.status === 'pending') {
-                order.status = 'pending'; 
-              }
-              order.paymentDetails = {
-                ...existingPaymentDetails,
-                isPaid: true,
-                paidTag: 'PAID',
-                mpesaReceipt: mpesaReceipt,
-                paidAt: new Date(),
-                rawCallback: body
-              };
-
-              // Credit 0.2 points per kg bought to customer (only once, even if the callback repeats or the status poll already credited it)
-              if (existingPaymentDetails.isPaid !== true) {
-                const totalKg = order.totalWeightKg || 0;
-                const points = Number((totalKg * 0.2).toFixed(2));
-                const user = await User.findByPk(order.userId);
-                if (user && points > 0) {
-                  user.rewardPoints = Number(((user.rewardPoints || 0) + points).toFixed(2));
-                  await user.save();
-                }
-              }
-
-              console.log(`🎉 Payment VERIFIED for Order #${order.id}. M-Pesa Receipt: ${mpesaReceipt}`);
+              const confirmation = await confirmOrderPaid(order, 'M-Pesa callback', mpesaReceipt, body);
+              console.log(`🎉 Payment VERIFIED for Order #${order.id}. M-Pesa Receipt: ${mpesaReceipt} (${confirmation.confirmed ? 'newly confirmed' : confirmation.reason})`);
+              return res.status(200).json({ status: 'SUCCESS', message: 'Callback received and processed successfully.' });
             } else {
+              if (existingPaymentDetails.isPaid === true) {
+                return res.status(200).json({ status: 'SUCCESS', message: 'Ignored: this order is already paid.' });
+              }
               const reason = responseObj.message || responseObj.failure_reason || responseObj.ResultDesc || 'Insufficient M-Pesa balance or user cancelled transaction.';
               order.status = 'payment_failed';
               order.paymentDetails = {
@@ -4082,14 +4816,17 @@ async function startServer() {
           } else if (o.status === 'payment_failed' || pd.failureReason) failedPayments += 1;
           else pendingPayments += 1;
         });
-        res.json({ totalCustomers: total, suspended, newThisWeek, unverified, pendingPayments, failedPayments, paidToday, paidTodayValue: round2(paidTodayValue), myRecentActions: myRecent });
+        const seesPayments = await hasPermission(req.user.role, 'payments.view');
+        res.json({ totalCustomers: total, suspended, newThisWeek, unverified,
+          pendingPayments: seesPayments ? pendingPayments : null, failedPayments: seesPayments ? failedPayments : null,
+          paidToday: seesPayments ? paidToday : null, paidTodayValue: seesPayments ? round2(paidTodayValue) : null, myRecentActions: myRecent });
       } catch (err) {
         console.error('❌ Support overview error:', err);
         res.status(500).json({ error: err.message });
       }
     });
 
-    expressApp.get('/api/support/users', ...supportOnly, async (req, res) => {
+    expressApp.get('/api/support/users', ...supportOnly, requirePerm('users.view'), async (req, res) => {
       try {
         const search = String(req.query.search || '').trim().slice(0, 60);
         const status = String(req.query.status || 'all');
@@ -4116,7 +4853,7 @@ async function startServer() {
       }
     });
 
-    expressApp.get('/api/support/users/:id', ...supportOnly, async (req, res) => {
+    expressApp.get('/api/support/users/:id', ...supportOnly, requirePerm('users.view'), async (req, res) => {
       try {
         const user = await User.findByPk(req.params.id, { attributes: SUPPORT_USER_ATTRS });
         if (!user) return res.status(404).json({ error: 'User not found.' });
@@ -4158,7 +4895,7 @@ async function startServer() {
       return 'pending';
     };
 
-    expressApp.get('/api/support/orders', ...supportOnly, async (req, res) => {
+    expressApp.get('/api/support/orders', ...supportOnly, requirePerm('orders.view', 'payments.view'), async (req, res) => {
       try {
         const search = String(req.query.search || '').trim().toLowerCase().slice(0, 60);
         const payment = String(req.query.payment || 'all');
@@ -4205,7 +4942,7 @@ async function startServer() {
     });
 
     // Asks PayHero whether an order was paid. Read-only: it reports, it never changes the order.
-    expressApp.get('/api/support/orders/:id/payment-check', ...supportOnly, async (req, res) => {
+    expressApp.get('/api/support/orders/:id/payment-check', ...supportOnly, requirePerm('payments.check'), async (req, res) => {
       try {
         const order = await Order.findByPk(req.params.id);
         if (!order) return res.status(404).json({ error: 'Order not found.' });
@@ -4230,7 +4967,7 @@ async function startServer() {
     });
 
     // Customer care may change ONE thing about an account: the display name.
-    expressApp.put('/api/support/users/:id/name', ...supportOnly, async (req, res) => {
+    expressApp.put('/api/support/users/:id/name', ...supportOnly, requirePerm('users.rename'), async (req, res) => {
       try {
         const user = await User.findByPk(req.params.id);
         if (!(await supportTargetGuard(req, res, user))) return;
@@ -4252,7 +4989,7 @@ async function startServer() {
     });
 
     // ...and reactivate a suspended account. Suspending/deleting stays with administrators.
-    expressApp.post('/api/support/users/:id/unsuspend', ...supportOnly, async (req, res) => {
+    expressApp.post('/api/support/users/:id/unsuspend', ...supportOnly, requirePerm('users.unsuspend'), async (req, res) => {
       try {
         const user = await User.findByPk(req.params.id);
         if (!(await supportTargetGuard(req, res, user))) return;
@@ -4270,7 +5007,7 @@ async function startServer() {
       }
     });
 
-    expressApp.post('/api/support/users/:id/notes', ...supportOnly, async (req, res) => {
+    expressApp.post('/api/support/users/:id/notes', ...supportOnly, requirePerm('users.notes'), async (req, res) => {
       try {
         const user = await User.findByPk(req.params.id, { attributes: ['id', 'role', 'fullName'] });
         if (!user || user.role === 'admin') return res.status(404).json({ error: 'User not found.' });
@@ -4309,7 +5046,13 @@ async function startServer() {
         const staff = await StaffRole.findOne({ where: { userId: req.user.id } });
         if (!staff || staff.role !== 'agent') return res.status(403).json({ error: 'You are not an active agent.' });
         const snapshot = await buildAgentSnapshot(req.user.id, req.query.year);
-        res.json({ referralCode: staff.referralCode, agentSince: staff.createdAt, rates: await getCommissionRates(), ...snapshot });
+        const agentPerms = (await getPermissions()).agent || {};
+        if (!agentPerms['agent.customers']) snapshot.customers = [];
+        if (!agentPerms['agent.profit']) {
+          snapshot.summary.profitGenerated = null;
+          snapshot.commissions = snapshot.commissions.map(c => ({ ...c, profit: null }));
+        }
+        res.json({ referralCode: staff.referralCode, agentSince: staff.createdAt, rates: await getCommissionRates(), permissions: agentPerms, ...snapshot });
       } catch (err) {
         console.error('❌ Agent overview error:', err);
         res.status(500).json({ error: err.message });
@@ -4526,6 +5269,694 @@ async function startServer() {
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
+    });
+
+    // ==========================================================================
+    // SECURITY: admin two-step sign-in, personal permissions
+    // ==========================================================================
+    const issueLoginResponse = async (user) => {
+      const role = await effectiveRoleFor(user);
+      const token = jwt.sign({ id: user.id, role }, JWT_SECRET, { expiresIn: '7d' });
+      return { token, user: { id: user.id, fullName: user.fullName, role, phoneNumber: user.phoneNumber, email: user.email, rewardPoints: user.rewardPoints || 0 } };
+    };
+
+    expressApp.post('/api/user/login/verify-2fa', async (req, res) => {
+      try {
+        const { challengeId, code } = req.body || {};
+        const ch = twoFactorChallenges.get(String(challengeId || ''));
+        if (!ch || ch.expires < Date.now()) { twoFactorChallenges.delete(String(challengeId || '')); return res.status(400).json({ error: 'This sign-in code has expired. Please sign in again.', expired: true }); }
+        ch.attempts += 1;
+        if (ch.attempts > 5) { twoFactorChallenges.delete(challengeId); return res.status(400).json({ error: 'Too many wrong codes. Please sign in again.', expired: true }); }
+        const given = crypto.createHash('sha256').update(String(code || '').replace(/\D/g, '')).digest('hex');
+        const ok = given.length === ch.code.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(ch.code));
+        const user = await User.findByPk(ch.userId);
+        if (!ok) {
+          await logEvent({ req, actor: { id: ch.userId, role: 'anonymous', name: user ? user.fullName : null }, action: 'ADMIN_2FA_FAILED', category: 'auth', severity: 'alert', targetType: 'user', targetId: ch.userId, summary: `Wrong admin sign-in code entered for ${user ? user.fullName : 'user #' + ch.userId} (attempt ${ch.attempts})` });
+          return res.status(400).json({ error: `That code is not correct (${Math.max(0, 5 - ch.attempts)} attempt(s) left).` });
+        }
+        twoFactorChallenges.delete(challengeId);
+        if (!user || user.isActive === false) return res.status(403).json({ error: 'This account is not available.' });
+        await logEvent({ req, actor: { id: user.id, role: 'admin', name: user.fullName }, action: 'LOGIN_SUCCESS', category: 'auth', targetType: 'user', targetId: user.id, summary: `${user.fullName} signed in (two-step)` });
+        res.json(await issueLoginResponse(user));
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.post('/api/user/login/resend-2fa', async (req, res) => {
+      try {
+        const ch = twoFactorChallenges.get(String((req.body || {}).challengeId || ''));
+        if (!ch || ch.expires < Date.now()) return res.status(400).json({ error: 'This sign-in has expired. Please sign in again.', expired: true });
+        if (ch.resends >= 2) return res.status(429).json({ error: 'Code already re-sent twice. Please sign in again.' });
+        const user = await User.findByPk(ch.userId);
+        if (!user) return res.status(400).json({ error: 'Account not found.' });
+        const code = String(crypto.randomInt(100000, 1000000));
+        const delivery = await dispatchOtp(user, code, 'admin_login');
+        if (!delivery.anySent) return res.status(502).json({ error: 'We could not send the code. Check your SMS credit/email settings.' });
+        ch.code = crypto.createHash('sha256').update(code).digest('hex'); ch.expires = Date.now() + 5 * 60 * 1000; ch.attempts = 0; ch.resends += 1;
+        res.json({ message: 'A new code has been sent.' });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    expressApp.get('/api/me/permissions', authenticateToken, async (req, res) => {
+      try {
+        const role = req.user.role;
+        const perms = await getPermissions();
+        const flat = {};
+        Object.values(PERMISSION_CATALOG).flat().forEach((p) => { flat[p.key] = role === 'admin' ? true : !!(perms[role] && perms[role][p.key]); });
+        res.json({ role, permissions: flat });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    expressApp.get('/api/admin/permissions', authenticateToken, requireAdmin, async (req, res) => {
+      res.json({ catalog: PERMISSION_CATALOG, permissions: await getPermissions(true) });
+    });
+    expressApp.put('/api/admin/permissions', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const { role, changes } = req.body || {};
+        const before = (await getPermissions(true))[role] || {};
+        const next = await savePermissions(role, changes);
+        const diff = Object.keys(next[role]).filter(k => before[k] !== next[role][k]).map(k => `${k}: ${before[k] ? 'on' : 'off'} → ${next[role][k] ? 'on' : 'off'}`);
+        await logEvent({ req, action: 'PERMISSIONS_CHANGED', category: 'settings', severity: 'warn', targetType: 'config', targetId: role, summary: `${req.adminUser.fullName} changed ${role} permissions: ${diff.join(', ') || 'no change'}`, details: { role, changes: diff } });
+        res.json({ message: 'Permissions saved. They apply immediately.', permissions: next });
+      } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+    });
+
+    // ==========================================================================
+    // SYSTEM: settings, health, daily summary
+    // ==========================================================================
+    expressApp.get('/api/admin/ops-settings', authenticateToken, requireAdmin, async (req, res) => {
+      res.json({ ...(await getOps(true)), twoFactorForcedOff: String(process.env.DISABLE_ADMIN_2FA || '').toLowerCase() === 'true', sentryConfigured: !!process.env.SENTRY_DSN });
+    });
+    expressApp.put('/api/admin/ops-settings', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const b = req.body || {};
+        const patch = {};
+        const num = (v, min, max, label) => { const n = Number(v); if (!Number.isFinite(n) || n < min || n > max) throw httpError(400, `${label} must be between ${min} and ${max}.`); return n; };
+        if (b.orderExpiryMinutes !== undefined) patch.orderExpiryMinutes = Math.round(num(b.orderExpiryMinutes, 10, 1440, 'Unpaid order expiry (minutes)'));
+        if (b.lowStockDefault !== undefined) patch.lowStockDefault = Math.round(num(b.lowStockDefault, 0, 100000, 'Low stock level'));
+        if (b.smsLowThreshold !== undefined) patch.smsLowThreshold = num(b.smsLowThreshold, 0, 100000, 'SMS credit alert level');
+        if (b.smsCostPerPart !== undefined) patch.smsCostPerPart = num(b.smsCostPerPart, 0, 10, 'SMS cost per message');
+        if (b.adminTwoFactor !== undefined) patch.adminTwoFactor = !!b.adminTwoFactor;
+        if (b.autoReconcile !== undefined) patch.autoReconcile = !!b.autoReconcile;
+        if (b.dailySummary) {
+          const d = b.dailySummary; const ds = {};
+          if (d.enabled !== undefined) ds.enabled = !!d.enabled;
+          if (d.sms !== undefined) ds.sms = !!d.sms;
+          if (d.email !== undefined) ds.email = !!d.email;
+          if (d.time !== undefined) { if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(d.time))) throw httpError(400, 'Summary time must look like 20:00.'); ds.time = d.time; }
+          if (d.extraPhones !== undefined) ds.extraPhones = (Array.isArray(d.extraPhones) ? d.extraPhones : []).map(normalizeKenyanPhone).filter(Boolean).slice(0, 5);
+          if (d.extraEmails !== undefined) ds.extraEmails = (Array.isArray(d.extraEmails) ? d.extraEmails : []).map(e => String(e).trim().toLowerCase()).filter(e => /^\S+@\S+\.\S+$/.test(e)).slice(0, 5);
+          patch.dailySummary = ds;
+        }
+        const before = await getOps(true);
+        const next = await saveOps(patch);
+        const sev = (patch.adminTwoFactor === false && before.adminTwoFactor !== false) ? 'alert' : 'warn';
+        await logEvent({ req, action: 'SYSTEM_SETTINGS_CHANGED', category: 'settings', severity: sev, targetType: 'config', targetId: 'ops_settings',
+          summary: `${req.adminUser.fullName} changed system settings: ${Object.keys(patch).join(', ')}${patch.adminTwoFactor === false && before.adminTwoFactor !== false ? ' (admin two-step sign-in switched OFF)' : ''}`, details: patch });
+        res.json({ message: 'Settings saved.', settings: next });
+      } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+    });
+
+    expressApp.post('/api/admin/daily-summary/send-test', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const r = await sendDailySummary(eatDateString());
+        res.json({ message: `Summary sent: ${r.sms} SMS, ${r.email} email(s).${r.errors.length ? ' Problems: ' + r.errors.join('; ') : ''}`, ...r });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    expressApp.get('/api/admin/system/status', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const ops = await getOps();
+        await loadSmsBalanceFromDb();
+        const errors = await ActivityEvent.findAll({ where: { category: 'system', action: { [Op.in]: ['SERVER_ERROR', 'SMS_CREDIT_LOW', 'LATE_PAYMENT_STOCK_SHORT'] } }, order: [['createdAt', 'DESC']], limit: 15 });
+        const unpaid = await Order.count({ where: { status: { [Op.in]: ['pending', 'payment_failed'] } } });
+        let dbOk = true; try { await sequelize.query('SELECT 1'); } catch (_) { dbOk = false; }
+        res.json({
+          sms: { balance: smsState.balance, updatedAt: smsState.at, threshold: ops.smsLowThreshold, low: smsState.balance !== null && smsState.balance <= ops.smsLowThreshold },
+          jobs: jobStatus, unpaidOrders: unpaid, recentErrors: errors,
+          twoFactor: { enabled: await twoFactorEnabled(), forcedOffByEnv: String(process.env.DISABLE_ADMIN_2FA || '').toLowerCase() === 'true' },
+          sentry: !!sentryClient, sentryConfigured: !!process.env.SENTRY_DSN, database: dbOk, nodeVersion: process.version, uptimeMinutes: Math.round(process.uptime() / 60)
+        });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    expressApp.post('/api/admin/system/reconcile-now', authenticateToken, requireAdmin, async (req, res) => {
+      runPaymentReconcile();
+      res.json({ message: 'Payment re-check started. Results appear under System in a few seconds.' });
+    });
+
+    // ==========================================================================
+    // REPORTS & EXCEL EXPORTS
+    // ==========================================================================
+    expressApp.get('/api/admin/reports/profit', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const { from, to, fromStr, toStr } = parseRange(req.query);
+        res.json(await buildProfitReport(from, to, fromStr, toStr));
+      } catch (err) { console.error('❌ Profit report error:', err); res.status(500).json({ error: err.message }); }
+    });
+
+    expressApp.get('/api/admin/export/:type', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const type = req.params.type;
+        const { from, to, fromStr, toStr } = parseRange(req.query);
+        const money = 'money', num = 'number';
+        const orderLabel = (o) => { const pd = o.paymentDetails || {}; return pd.isPaid ? 'Paid' : (o.status === 'payment_failed' || pd.failureReason) ? 'Failed' : 'Pending'; };
+        let sheets = [], fileName = `${type}-${toStr}.xlsx`;
+
+        if (type === 'orders') {
+          const rows = (await Order.findAll({ where: { createdAt: { [Op.gte]: from, [Op.lte]: to } }, order: [['createdAt', 'DESC']], limit: 20000 }));
+          const users = rows.length ? await User.findAll({ where: { id: [...new Set(rows.map(o => o.userId))] }, attributes: ['id', 'fullName', 'phoneNumber', 'email'] }) : [];
+          const uMap = {}; users.forEach(u => { uMap[u.id] = u; });
+          const refs = await CustomerReferral.findAll(); const refMap = {}; refs.forEach(r => { refMap[r.customerId] = r.referralCode; });
+          const orderRows = [], itemRows = [];
+          rows.forEach((o) => {
+            const pd = o.paymentDetails || {}; const u = uMap[o.userId] || {};
+            orderRows.push({ id: o.id, date: new Date(o.createdAt).toISOString().slice(0, 16).replace('T', ' '), customer: u.fullName || `User #${o.userId}`, phone: u.phoneNumber, email: u.email, county: o.county, town: o.town, address: (o.shippingAddress && o.shippingAddress.details) || '',
+              items: getOrderItems(o).map(i => `${i.quantity}x ${i.name || i.brandName}`).join('; '), kg: Number(o.totalWeightKg) || 0, subtotal: Number(o.subTotal) || 0, delivery: Number(o.transportFee) || 0, total: Number(o.grandTotal) || 0,
+              payment: orderLabel(o), receipt: pd.mpesaReceipt, status: o.status, referral: refMap[o.userId] || '' });
+            getOrderItems(o).forEach((i) => itemRows.push({ orderId: o.id, product: i.name || i.brandName, qty: Number(i.quantity) || 0, price: Number(i.priceAtPurchase) || 0, cost: Number(i.buyingPrice) || 0, lineProfit: ((Number(i.priceAtPurchase) || 0) - (Number(i.buyingPrice) || 0)) * (Number(i.quantity) || 0), bulk: i.wholesaleApplied ? 'Yes' : '' }));
+          });
+          sheets = [
+            { name: 'Orders', columns: [{ header: 'Order #', key: 'id', type: num }, { header: 'Date', key: 'date' }, { header: 'Customer', key: 'customer' }, { header: 'Phone', key: 'phone' }, { header: 'Email', key: 'email' }, { header: 'County', key: 'county' }, { header: 'Town', key: 'town' }, { header: 'Address', key: 'address' }, { header: 'Items', key: 'items' }, { header: 'Kg', key: 'kg', type: num }, { header: 'Rice (KES)', key: 'subtotal', type: money }, { header: 'Delivery (KES)', key: 'delivery', type: money }, { header: 'Total (KES)', key: 'total', type: money }, { header: 'Payment', key: 'payment' }, { header: 'M-Pesa receipt', key: 'receipt' }, { header: 'Order status', key: 'status' }, { header: 'Referral code', key: 'referral' }], rows: orderRows },
+            { name: 'Order items', columns: [{ header: 'Order #', key: 'orderId', type: num }, { header: 'Product', key: 'product' }, { header: 'Qty', key: 'qty', type: num }, { header: 'Price (KES)', key: 'price', type: money }, { header: 'Buying price (KES)', key: 'cost', type: money }, { header: 'Line profit (KES)', key: 'lineProfit', type: money }, { header: 'Bulk price', key: 'bulk' }], rows: itemRows }
+          ];
+          fileName = `orders-${fromStr}-to-${toStr}.xlsx`;
+        } else if (type === 'customers') {
+          const users = await User.findAll({ attributes: ['id', 'fullName', 'phoneNumber', 'email', 'isActive', 'isVerified', 'role', 'rewardPoints', 'createdAt'], order: [['createdAt', 'DESC']], limit: 50000 });
+          const orders = await Order.findAll({ attributes: ['userId', 'grandTotal', 'paymentDetails', 'createdAt', 'county', 'status'], limit: 50000 });
+          const agg = {};
+          orders.forEach((o) => { const a = agg[o.userId] || (agg[o.userId] = { orders: 0, paid: 0, spent: 0, last: null, county: '' }); a.orders += 1; if ((o.paymentDetails || {}).isPaid) { a.paid += 1; a.spent += Number(o.grandTotal) || 0; if (!a.last || new Date(o.createdAt) > new Date(a.last)) { a.last = o.createdAt; a.county = o.county; } } });
+          const staff = await StaffRole.findAll(); const sMap = {}; staff.forEach(r => { if (STAFF_ROLES.includes(r.role)) sMap[r.userId] = r.role; });
+          const refs = await CustomerReferral.findAll(); const refMap = {}; refs.forEach(r => { refMap[r.customerId] = r.referralCode; });
+          const prefs = await MarketingPref.findAll({ where: { optedOut: true } }); const optMap = {}; prefs.forEach(p => { optMap[p.userId] = true; });
+          sheets = [{ name: 'Customers', columns: [{ header: 'ID', key: 'id', type: num }, { header: 'Name', key: 'name' }, { header: 'Phone', key: 'phone' }, { header: 'Email', key: 'email' }, { header: 'Joined', key: 'joined' }, { header: 'Role', key: 'role' }, { header: 'Active', key: 'active' }, { header: 'Verified', key: 'verified' }, { header: 'Orders', key: 'orders', type: num }, { header: 'Paid orders', key: 'paid', type: num }, { header: 'Total spent (KES)', key: 'spent', type: money }, { header: 'Last paid order', key: 'last' }, { header: 'Last county', key: 'county' }, { header: 'Reward points', key: 'points', type: num }, { header: 'Referral code used', key: 'ref' }, { header: 'Promo SMS opted out', key: 'opt' }],
+            rows: users.map((u) => { const a = agg[u.id] || {}; return { id: u.id, name: u.fullName, phone: u.phoneNumber, email: u.email, joined: new Date(u.createdAt).toISOString().slice(0, 10), role: u.role === 'admin' ? 'admin' : (sMap[u.id] || 'customer'), active: u.isActive === false ? 'Suspended' : 'Active', verified: u.isVerified === false ? 'No' : 'Yes', orders: a.orders || 0, paid: a.paid || 0, spent: a.spent || 0, last: a.last ? new Date(a.last).toISOString().slice(0, 10) : '', county: a.county || '', points: Number(u.rewardPoints) || 0, ref: refMap[u.id] || '', opt: optMap[u.id] ? 'Yes' : '' }; }) }];
+          fileName = `customers-${toStr}.xlsx`;
+        } else if (type === 'finances') {
+          const rep = await buildProfitReport(from, to, fromStr, toStr);
+          const t = rep.totals;
+          const purchases = await Purchase.findAll({ where: { purchaseDate: { [Op.gte]: fromStr, [Op.lte]: toStr } }, order: [['purchaseDate', 'DESC']] });
+          const suppliers = await Supplier.findAll(); const supMap = {}; suppliers.forEach(x => { supMap[x.id] = x.name; });
+          const commissions = await AgentCommission.findAll({ where: { createdAt: { [Op.gte]: from, [Op.lte]: to } }, order: [['createdAt', 'DESC']] });
+          const payouts = await AgentPayout.findAll({ where: { createdAt: { [Op.gte]: from, [Op.lte]: to } }, order: [['createdAt', 'DESC']] });
+          const agentIds = [...new Set([...commissions.map(c => c.agentId), ...payouts.map(p => p.agentId)])];
+          const agents = agentIds.length ? await User.findAll({ where: { id: agentIds }, attributes: ['id', 'fullName'] }) : []; const aMap = {}; agents.forEach(a => { aMap[a.id] = a.fullName; });
+          const groupCols = (label) => [{ header: label, key: 'label' }, { header: 'Orders', key: 'orders', type: num }, { header: 'Kg', key: 'kg', type: num }, { header: 'Revenue (KES)', key: 'revenue', type: money }, { header: 'Cost of rice (KES)', key: 'cost', type: money }, { header: 'Profit (KES)', key: 'profit', type: money }, { header: 'Agent commission (KES)', key: 'commission', type: money }, { header: 'Profit after commission (KES)', key: 'net', type: money }, { header: 'Margin %', key: 'margin', type: num }];
+          sheets = [
+            { name: 'Summary', columns: [{ header: 'Item', key: 'k' }, { header: 'Amount (KES)', key: 'v', type: money }], rows: [
+              { k: `Period ${fromStr} to ${toStr}`, v: '' }, { k: 'Paid orders', v: t.orders }, { k: 'Kg sold', v: t.kg }, { k: 'Rice sales', v: t.riceRevenue }, { k: 'Delivery fees collected', v: t.deliveryIncome }, { k: 'Cost of rice sold', v: t.costOfGoods },
+              { k: 'Gross profit on rice', v: t.grossProfit }, { k: 'Agent commissions', v: t.commissions }, { k: 'Expenses', v: t.expenses }, { k: 'NET PROFIT (gross + delivery - commissions - expenses)', v: t.netProfit } ] },
+            { name: 'By month', columns: groupCols('Month'), rows: rep.byMonth }, { name: 'By day', columns: groupCols('Day'), rows: rep.byDay }, { name: 'By product', columns: groupCols('Product'), rows: rep.byProduct },
+            { name: 'By county', columns: groupCols('County'), rows: rep.byCounty }, { name: 'By agent', columns: groupCols('Agent'), rows: rep.byAgent },
+            { name: 'Expenses', columns: [{ header: 'Date', key: 'date' }, { header: 'Category', key: 'category' }, { header: 'Description', key: 'description' }, { header: 'Amount (KES)', key: 'amount', type: money }], rows: rep.expenses },
+            { name: 'Purchases', columns: [{ header: 'Date', key: 'date' }, { header: 'Supplier', key: 'supplier' }, { header: 'Item', key: 'item' }, { header: 'Qty', key: 'qty', type: num }, { header: 'Unit cost', key: 'unit', type: money }, { header: 'Total', key: 'total', type: money }, { header: 'Paid', key: 'paid', type: money }, { header: 'Owed', key: 'owed', type: money }, { header: 'Reference', key: 'ref' }],
+              rows: purchases.map(p => ({ date: p.purchaseDate, supplier: supMap[p.supplierId] || '', item: p.itemName, qty: p.quantity, unit: Number(p.unitCost), total: Number(p.totalCost), paid: Number(p.amountPaid), owed: Number(p.totalCost) - Number(p.amountPaid), ref: p.reference })) },
+            { name: 'Agent commissions', columns: [{ header: 'Date', key: 'date' }, { header: 'Agent', key: 'agent' }, { header: 'Order #', key: 'order', type: num }, { header: 'Type', key: 'type' }, { header: 'Profit (KES)', key: 'profit', type: money }, { header: 'Rate', key: 'rate', type: num }, { header: 'Commission (KES)', key: 'amount', type: money }, { header: 'Status', key: 'status' }],
+              rows: commissions.map(c => ({ date: new Date(c.createdAt).toISOString().slice(0, 10), agent: aMap[c.agentId] || `#${c.agentId}`, order: c.orderId, type: c.type, profit: Number(c.orderProfit), rate: Number(c.rate), amount: Number(c.amount), status: c.status })) },
+            { name: 'Agent payouts', columns: [{ header: 'Date', key: 'date' }, { header: 'Agent', key: 'agent' }, { header: 'Amount (KES)', key: 'amount', type: money }, { header: 'Method', key: 'method' }, { header: 'Reference', key: 'ref' }],
+              rows: payouts.map(p => ({ date: new Date(p.createdAt).toISOString().slice(0, 10), agent: aMap[p.agentId] || `#${p.agentId}`, amount: Number(p.amount), method: p.method, ref: p.reference })) }
+          ];
+          fileName = `finances-${fromStr}-to-${toStr}.xlsx`;
+        } else if (type === 'stock') {
+          const products = await RiceProduct.findAll({ order: [['id', 'ASC']] });
+          const rowsOut = [];
+          for (const p of products) { const th = await lowStockThresholdFor(p.id); rowsOut.push({ id: p.id, name: p.brandName, variety: p.variety, kg: Number(p.weightKg) || 0, stock: p.stockQuantity, level: th, state: p.stockQuantity <= 0 ? 'Out of stock' : p.stockQuantity <= th ? 'Low' : 'OK', price: Number(p.basePrice || p.price) || 0, cost: Number(p.buyingPrice) || 0, value: (Number(p.buyingPrice) || 0) * p.stockQuantity }); }
+          sheets = [{ name: 'Stock', columns: [{ header: 'ID', key: 'id', type: num }, { header: 'Product', key: 'name' }, { header: 'Variety', key: 'variety' }, { header: 'Bag kg', key: 'kg', type: num }, { header: 'In stock', key: 'stock', type: num }, { header: 'Alert level', key: 'level', type: num }, { header: 'Status', key: 'state' }, { header: 'Selling price', key: 'price', type: money }, { header: 'Buying price', key: 'cost', type: money }, { header: 'Stock value at cost', key: 'value', type: money }], rows: rowsOut }];
+          fileName = `stock-${toStr}.xlsx`;
+        } else {
+          return res.status(400).json({ error: 'Choose orders, customers, finances or stock.' });
+        }
+
+        const buffer = buildXlsx(sheets);
+        await logEvent({ req, action: 'DATA_EXPORTED', category: 'admin', severity: 'warn', summary: `${req.adminUser.fullName} exported ${type} to Excel`, details: { type, from: fromStr, to: toStr } });
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        res.send(buffer);
+      } catch (err) { console.error('❌ Export error:', err); res.status(500).json({ error: err.message }); }
+    });
+
+    // ==========================================================================
+    // SUPPLIERS, PURCHASES, STOCK, EXPENSES
+    // ==========================================================================
+    const todayEat = () => eatDateString();
+    const validDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && !Number.isNaN(Date.parse(v));
+    const supplierLedger = async (supplierId) => {
+      const rows = await Purchase.findAll({ where: { supplierId }, order: [['purchaseDate', 'DESC']] });
+      const total = round2(rows.reduce((s, p) => s + Number(p.totalCost), 0));
+      const paid = round2(rows.reduce((s, p) => s + Number(p.amountPaid), 0));
+      return { purchases: rows, totalPurchased: total, totalPaid: paid, owed: round2(total - paid) };
+    };
+
+    expressApp.get('/api/admin/suppliers', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const suppliers = await Supplier.findAll({ order: [['name', 'ASC']] });
+        const all = await Purchase.findAll({ attributes: ['supplierId', 'totalCost', 'amountPaid', 'purchaseDate'] });
+        const agg = {}; all.forEach((p) => { const a = agg[p.supplierId] || (agg[p.supplierId] = { total: 0, paid: 0, last: null, count: 0 }); a.total += Number(p.totalCost); a.paid += Number(p.amountPaid); a.count += 1; if (!a.last || p.purchaseDate > a.last) a.last = p.purchaseDate; });
+        res.json(suppliers.map(x => ({ ...x.toJSON(), totalPurchased: round2((agg[x.id] || {}).total || 0), totalPaid: round2((agg[x.id] || {}).paid || 0), owed: round2(((agg[x.id] || {}).total || 0) - ((agg[x.id] || {}).paid || 0)), purchases: (agg[x.id] || {}).count || 0, lastPurchase: (agg[x.id] || {}).last || null })));
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+    const saveSupplier = async (req, res, existing) => {
+      try {
+        const b = req.body || {};
+        const name = String(b.name || '').trim().slice(0, 120);
+        if (name.length < 2) return res.status(400).json({ error: 'Enter the supplier\'s name.' });
+        const type = ['farmer', 'miller', 'transporter', 'other'].includes(b.type) ? b.type : 'farmer';
+        const data = { name, type, phone: b.phone ? String(b.phone).slice(0, 40) : null, location: b.location ? String(b.location).slice(0, 120) : null, notes: b.notes ? String(b.notes).slice(0, 500) : null, isActive: b.isActive === undefined ? (existing ? existing.isActive : true) : !!b.isActive };
+        const row = existing ? await existing.update(data) : await Supplier.create(data);
+        await logEvent({ req, action: existing ? 'SUPPLIER_UPDATED' : 'SUPPLIER_ADDED', category: 'inventory', targetType: 'supplier', targetId: row.id, summary: `${req.adminUser.fullName} ${existing ? 'updated' : 'added'} supplier ${row.name}` });
+        res.status(existing ? 200 : 201).json(row);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    };
+    expressApp.post('/api/admin/suppliers', authenticateToken, requireAdmin, (req, res) => saveSupplier(req, res, null));
+    expressApp.put('/api/admin/suppliers/:id', authenticateToken, requireAdmin, async (req, res) => {
+      const existing = await Supplier.findByPk(req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Supplier not found.' });
+      return saveSupplier(req, res, existing);
+    });
+    expressApp.get('/api/admin/suppliers/:id', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const sup = await Supplier.findByPk(req.params.id);
+        if (!sup) return res.status(404).json({ error: 'Supplier not found.' });
+        res.json({ supplier: sup, ...(await supplierLedger(sup.id)) });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    expressApp.get('/api/admin/purchases', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const { fromStr, toStr } = parseRange(req.query);
+        const where = { purchaseDate: { [Op.gte]: fromStr, [Op.lte]: toStr } };
+        if (req.query.supplierId && /^\d+$/.test(req.query.supplierId)) where.supplierId = Number(req.query.supplierId);
+        const rows = await Purchase.findAll({ where, order: [['purchaseDate', 'DESC'], ['id', 'DESC']], limit: 500 });
+        const sups = await Supplier.findAll(); const sMap = {}; sups.forEach(x => { sMap[x.id] = x.name; });
+        res.json({ purchases: rows.map(p => ({ ...p.toJSON(), supplierName: sMap[p.supplierId] || '—', unitCost: Number(p.unitCost), totalCost: Number(p.totalCost), amountPaid: Number(p.amountPaid), owed: round2(Number(p.totalCost) - Number(p.amountPaid)) })),
+          totals: { spent: round2(rows.reduce((s, p) => s + Number(p.totalCost), 0)), paid: round2(rows.reduce((s, p) => s + Number(p.amountPaid), 0)), owed: round2(rows.reduce((s, p) => s + Number(p.totalCost) - Number(p.amountPaid), 0)) } });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    expressApp.post('/api/admin/purchases', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const b = req.body || {};
+        const qty = Math.round(Number(b.quantity)), unit = Number(b.unitCost);
+        if (!Number.isFinite(qty) || qty <= 0 || qty > 1000000) return res.status(400).json({ error: 'Enter how many bags/units were bought.' });
+        if (!Number.isFinite(unit) || unit < 0 || unit > 10000000) return res.status(400).json({ error: 'Enter the cost per bag/unit.' });
+        const total = round2(qty * unit);
+        const paid = round2(Number(b.amountPaid) || 0);
+        if (paid < 0 || paid > total) return res.status(400).json({ error: 'Amount paid cannot be more than the total cost.' });
+        const date = validDate(b.purchaseDate) ? b.purchaseDate : todayEat();
+        let supplier = null;
+        if (b.supplierId) { supplier = await Supplier.findByPk(b.supplierId); if (!supplier) return res.status(400).json({ error: 'Supplier not found.' }); }
+        let product = null;
+        if (b.productId) { product = await RiceProduct.findByPk(b.productId); if (!product) return res.status(400).json({ error: 'Product not found.' }); }
+        const itemName = String(b.itemName || (product ? product.brandName : '')).trim().slice(0, 160);
+        if (!itemName) return res.status(400).json({ error: 'Say what was bought.' });
+        const addToStock = !!b.addToStock && !!product;
+        if (b.addToStock && !product) return res.status(400).json({ error: 'Choose the product to add the stock to.' });
+
+        const row = await sequelize.transaction(async (t) => {
+          const created = await Purchase.create({ supplierId: supplier ? supplier.id : null, productId: product ? product.id : null, itemName, quantity: qty, unitCost: unit, totalCost: total, amountPaid: paid,
+            paymentMethod: b.paymentMethod ? String(b.paymentMethod).slice(0, 30) : null, reference: b.reference ? String(b.reference).slice(0, 120) : null, purchaseDate: date, notes: b.notes ? String(b.notes).slice(0, 500) : null, addedToStock: addToStock, createdBy: req.adminUser.id }, { transaction: t });
+          if (addToStock) {
+            const oldStock = Math.max(0, Number(product.stockQuantity) || 0);
+            if (b.updateBuyingPrice) {
+              const oldCost = Number(product.buyingPrice) || 0;
+              product.buyingPrice = oldStock + qty > 0 ? round2(((oldStock * oldCost) + (qty * unit)) / (oldStock + qty)) : unit;
+            }
+            product.stockQuantity = oldStock + qty;
+            await product.save({ transaction: t });
+          }
+          return created;
+        });
+        if (addToStock) io.emit('stockUpdated', { productId: product.id, newStockQuantity: product.stockQuantity });
+        await logEvent({ req, action: 'PURCHASE_RECORDED', category: 'inventory', targetType: 'purchase', targetId: row.id,
+          summary: `${req.adminUser.fullName} recorded a purchase: ${qty} × ${itemName} at KES ${unit} = KES ${total}${supplier ? ' from ' + supplier.name : ''}${addToStock ? ` (stock now ${product.stockQuantity})` : ''}`, details: { total, paid, addToStock } });
+        res.status(201).json({ message: addToStock ? `Purchase saved and stock updated to ${product.stockQuantity}.` : 'Purchase saved.', purchase: row, newStock: addToStock ? product.stockQuantity : null, newBuyingPrice: product ? Number(product.buyingPrice) : null });
+      } catch (err) { console.error('❌ Purchase error:', err); res.status(err.status || 500).json({ error: err.message }); }
+    });
+
+    expressApp.post('/api/admin/purchases/:id/payment', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const p = await Purchase.findByPk(req.params.id);
+        if (!p) return res.status(404).json({ error: 'Purchase not found.' });
+        const amount = round2(Number((req.body || {}).amount));
+        const owed = round2(Number(p.totalCost) - Number(p.amountPaid));
+        if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'Enter the amount paid.' });
+        if (amount > owed) return res.status(400).json({ error: `Only KES ${owed} is still owed on this purchase.` });
+        p.amountPaid = round2(Number(p.amountPaid) + amount);
+        p.reference = (req.body || {}).reference ? String((req.body || {}).reference).slice(0, 120) : p.reference;
+        await p.save();
+        await logEvent({ req, action: 'SUPPLIER_PAID', category: 'inventory', severity: 'warn', targetType: 'purchase', targetId: p.id, summary: `${req.adminUser.fullName} paid KES ${amount} on purchase #${p.id} (${p.itemName})`, details: { amount, owedAfter: round2(owed - amount) } });
+        res.json({ message: `Payment of KES ${amount} recorded.`, purchase: p });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    expressApp.get('/api/admin/stock/overview', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const products = await RiceProduct.findAll({ order: [['brandName', 'ASC']] });
+        const ops = await getOps();
+        const since = new Date(Date.now() - 30 * 86400000);
+        const paid = await loadPaidOrdersInRange(since, new Date());
+        const sold = {}; paid.forEach(o => getOrderItems(o).forEach(i => { sold[i.productId] = (sold[i.productId] || 0) + (Number(i.quantity) || 0); }));
+        const lastBuy = {}; (await Purchase.findAll({ attributes: ['productId', 'purchaseDate', 'unitCost'], order: [['purchaseDate', 'DESC']], limit: 1000 })).forEach(p => { if (p.productId && !lastBuy[p.productId]) lastBuy[p.productId] = { date: p.purchaseDate, unitCost: Number(p.unitCost) }; });
+        const list = [];
+        for (const p of products) {
+          const th = await lowStockThresholdFor(p.id);
+          const perDay = (sold[p.id] || 0) / 30;
+          list.push({ id: p.id, name: p.brandName, variety: p.variety, weightKg: p.weightKg, stock: p.stockQuantity, threshold: th, customThreshold: ops.lowStockPerProduct && ops.lowStockPerProduct[p.id] !== undefined,
+            state: p.stockQuantity <= 0 ? 'out' : p.stockQuantity <= th ? 'low' : 'ok', sold30: sold[p.id] || 0, daysLeft: perDay > 0 ? Math.floor(p.stockQuantity / perDay) : null,
+            buyingPrice: Number(p.buyingPrice) || 0, price: Number(p.basePrice || p.price) || 0, lastPurchase: lastBuy[p.id] || null, stockValue: round2((Number(p.buyingPrice) || 0) * p.stockQuantity) });
+        }
+        res.json({ products: list, defaultThreshold: ops.lowStockDefault, lowCount: list.filter(x => x.state !== 'ok').length, stockValue: round2(list.reduce((s, x) => s + x.stockValue, 0)) });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+    expressApp.put('/api/admin/stock/thresholds', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const b = req.body || {};
+        const patch = {};
+        if (b.defaultThreshold !== undefined) { const n = Math.round(Number(b.defaultThreshold)); if (!Number.isFinite(n) || n < 0 || n > 100000) return res.status(400).json({ error: 'Enter a valid default level.' }); patch.lowStockDefault = n; }
+        if (b.productId !== undefined) {
+          const ops = await getOps(true); const per = { ...(ops.lowStockPerProduct || {}) };
+          if (b.threshold === null || b.threshold === '') delete per[b.productId];
+          else { const n = Math.round(Number(b.threshold)); if (!Number.isFinite(n) || n < 0 || n > 100000) return res.status(400).json({ error: 'Enter a valid level.' }); per[b.productId] = n; }
+          patch.lowStockPerProduct = per;
+        }
+        const next = await saveOps(patch);
+        res.json({ message: 'Stock alert levels saved.', defaultThreshold: next.lowStockDefault });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    expressApp.get('/api/admin/expenses', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const { fromStr, toStr } = parseRange(req.query);
+        const where = { expenseDate: { [Op.gte]: fromStr, [Op.lte]: toStr } };
+        if (req.query.category && EXPENSE_CATEGORIES.includes(req.query.category)) where.category = req.query.category;
+        const rows = await Expense.findAll({ where, order: [['expenseDate', 'DESC'], ['id', 'DESC']], limit: 1000 });
+        const byCategory = {}, byMonth = {};
+        rows.forEach((e) => { byCategory[e.category] = round2((byCategory[e.category] || 0) + Number(e.amount)); const m = String(e.expenseDate).slice(0, 7); byMonth[m] = round2((byMonth[m] || 0) + Number(e.amount)); });
+        res.json({ expenses: rows.map(e => ({ ...e.toJSON(), amount: Number(e.amount) })), total: round2(rows.reduce((s, e) => s + Number(e.amount), 0)), byCategory, byMonth, categories: EXPENSE_CATEGORIES });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+    const saveExpense = async (req, res, existing) => {
+      try {
+        const b = req.body || {};
+        const amount = round2(Number(b.amount));
+        if (!EXPENSE_CATEGORIES.includes(b.category)) return res.status(400).json({ error: 'Choose an expense category.' });
+        if (!Number.isFinite(amount) || amount <= 0 || amount > 100000000) return res.status(400).json({ error: 'Enter a valid amount.' });
+        const data = { category: b.category, amount, description: b.description ? String(b.description).trim().slice(0, 300) : null, reference: b.reference ? String(b.reference).slice(0, 120) : null, expenseDate: validDate(b.expenseDate) ? b.expenseDate : todayEat() };
+        const row = existing ? await existing.update(data) : await Expense.create({ ...data, createdBy: req.adminUser.id });
+        await logEvent({ req, action: existing ? 'EXPENSE_UPDATED' : 'EXPENSE_RECORDED', category: 'admin', severity: 'warn', targetType: 'expense', targetId: row.id, summary: `${req.adminUser.fullName} ${existing ? 'updated' : 'recorded'} a ${data.category} expense of KES ${amount}${data.description ? ' (' + data.description + ')' : ''}` });
+        res.status(existing ? 200 : 201).json(row);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    };
+    expressApp.post('/api/admin/expenses', authenticateToken, requireAdmin, (req, res) => saveExpense(req, res, null));
+    expressApp.put('/api/admin/expenses/:id', authenticateToken, requireAdmin, async (req, res) => {
+      const e = await Expense.findByPk(req.params.id);
+      if (!e) return res.status(404).json({ error: 'Expense not found.' });
+      return saveExpense(req, res, e);
+    });
+    expressApp.delete('/api/admin/expenses/:id', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const e = await Expense.findByPk(req.params.id);
+        if (!e) return res.status(404).json({ error: 'Expense not found.' });
+        await logEvent({ req, action: 'EXPENSE_DELETED', category: 'admin', severity: 'alert', targetType: 'expense', targetId: e.id, summary: `${req.adminUser.fullName} deleted a ${e.category} expense of KES ${Number(e.amount)} (${e.description || 'no note'}) dated ${e.expenseDate}`, details: e.toJSON() });
+        await e.destroy();
+        res.json({ message: 'Expense deleted.' });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // ==========================================================================
+    // WHOLESALE (BULK) PRICING
+    // ==========================================================================
+    expressApp.get('/api/admin/wholesale', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const tiers = await getWholesaleTiers(true);
+        const products = await RiceProduct.findAll({ order: [['brandName', 'ASC']] });
+        res.json(products.map(p => ({ id: p.id, name: p.brandName, weightKg: p.weightKg, price: Number(p.basePrice || p.price) || 0, buyingPrice: Number(p.buyingPrice) || 0, tiers: Array.isArray(tiers[p.id]) ? tiers[p.id] : [] })));
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+    expressApp.put('/api/admin/products/:id/wholesale-tiers', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const product = await RiceProduct.findByPk(req.params.id);
+        if (!product) return res.status(404).json({ error: 'Product not found.' });
+        const tiers = sanitizeTiers((req.body || {}).tiers);
+        const base = Number(product.basePrice || product.price) || 0;
+        const cost = Number(product.buyingPrice) || 0;
+        for (const t of tiers) {
+          if (base && t.price >= base) return res.status(400).json({ error: `A bulk price must be lower than the normal price (KES ${base}).` });
+          if (cost && t.price < cost && !(req.body || {}).force) return res.status(400).json({ error: `The ${t.minQty}+ bag price (KES ${t.price}) is below your buying price (KES ${cost}), so you would lose money. Tick "allow anyway" to save it.`, belowCost: true });
+        }
+        const [row] = await SystemConfig.findOrCreate({ where: { key: 'wholesale_tiers' }, defaults: { value: {} } });
+        const all = { ...(row.value || {}) };
+        if (tiers.length) all[product.id] = tiers; else delete all[product.id];
+        row.value = all; row.changed('value', true); await row.save();
+        tierCache = { at: 0, value: {} };
+        await logEvent({ req, action: 'WHOLESALE_PRICES_CHANGED', category: 'settings', severity: 'warn', targetType: 'product', targetId: product.id, summary: `${req.adminUser.fullName} set bulk prices for ${product.brandName}: ${tiers.map(t => `${t.minQty}+ @ KES ${t.price}`).join(', ') || 'none'}`, details: { tiers } });
+        io.emit('productsChanged', { productId: product.id });
+        res.json({ message: tiers.length ? 'Bulk prices saved.' : 'Bulk prices removed.', tiers });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // ==========================================================================
+    // PRODUCT REVIEWS (verified buyers only)
+    // ==========================================================================
+    const optionalUserId = (req) => {
+      try {
+        const header = req.headers['authorization'] || '';
+        const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+        if (!token) return null;
+        return jwt.verify(token, JWT_SECRET).id || null;
+      } catch (_) { return null; }
+    };
+    const userBoughtProduct = async (userId, productId) => {
+      const orders = await Order.findAll({ where: { userId }, attributes: ['id', 'items', 'paymentDetails', 'status'] });
+      const hit = orders.find(o => (o.paymentDetails || {}).isPaid === true && !/cancel|refund|reject/i.test(String(o.status || '')) && getOrderItems(o).some(i => Number(i.productId) === Number(productId)));
+      return hit ? hit.id : null;
+    };
+    const publicName = (full) => { const parts = String(full || 'Customer').trim().split(/\s+/); return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.` : parts[0]; };
+
+    expressApp.get('/api/products/:id/reviews', async (req, res) => {
+      try {
+        const productId = Number(req.params.id);
+        if (!Number.isFinite(productId)) return res.status(400).json({ error: 'Invalid product.' });
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const all = await Review.findAll({ where: { productId, status: 'published' }, order: [['createdAt', 'DESC']] });
+        const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }; all.forEach(r => { distribution[r.rating] += 1; });
+        const avg = all.length ? Math.round((all.reduce((s, r) => s + r.rating, 0) / all.length) * 10) / 10 : 0;
+        const slice = all.slice((page - 1) * 10, page * 10);
+        const users = slice.length ? await User.findAll({ where: { id: slice.map(r => r.userId) }, attributes: ['id', 'fullName'] }) : []; const uMap = {}; users.forEach(u => { uMap[u.id] = u.fullName; });
+        const me = optionalUserId(req);
+        let canReview = false, reason = 'Sign in to review products you have bought.', mine = null;
+        if (me) {
+          mine = await Review.findOne({ where: { productId, userId: me } });
+          const orderId = await userBoughtProduct(me, productId);
+          canReview = !!orderId; reason = orderId ? (mine ? 'You can update your review.' : 'Share your experience.') : 'Only customers who have bought and paid for this rice can review it.';
+        }
+        res.json({ summary: { average: avg, count: all.length, distribution }, reviews: slice.map(r => ({ id: r.id, rating: r.rating, title: r.title, comment: r.comment, author: publicName(uMap[r.userId]), createdAt: r.createdAt, reply: r.adminReply, verified: true, mine: me === r.userId })), page, pages: Math.max(1, Math.ceil(all.length / 10)), canReview, reason, myReview: mine ? { rating: mine.rating, title: mine.title, comment: mine.comment, status: mine.status } : null });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+    expressApp.post('/api/products/:id/reviews', authenticateToken, async (req, res) => {
+      try {
+        const productId = Number(req.params.id);
+        const product = await RiceProduct.findByPk(productId);
+        if (!product) return res.status(404).json({ error: 'Product not found.' });
+        const rating = Math.round(Number((req.body || {}).rating));
+        if (!Number.isFinite(rating) || rating < 1 || rating > 5) return res.status(400).json({ error: 'Choose a rating from 1 to 5 stars.' });
+        const comment = String((req.body || {}).comment || '').replace(/\s+/g, ' ').trim().slice(0, 1000);
+        const title = String((req.body || {}).title || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+        if (comment.length > 0 && comment.length < 3) return res.status(400).json({ error: 'Your comment is too short.' });
+        const orderId = await userBoughtProduct(req.user.id, productId);
+        if (!orderId) return res.status(403).json({ error: 'Only customers who have bought and paid for this rice can review it.' });
+        let review = await Review.findOne({ where: { productId, userId: req.user.id } });
+        if (review) { await review.update({ rating, title: title || null, comment: comment || null, status: review.status === 'hidden' ? 'hidden' : 'published' }); }
+        else review = await Review.create({ productId, userId: req.user.id, orderId, rating, title: title || null, comment: comment || null });
+        await logEvent({ req, action: 'REVIEW_POSTED', category: 'orders', targetType: 'product', targetId: productId, summary: `${req.user.fullName} rated ${product.brandName} ${rating}/5`, details: { reviewId: review.id } });
+        res.status(201).json({ message: review.status === 'hidden' ? 'Saved. This review is hidden by our team.' : 'Thank you! Your review is live.', review });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+    expressApp.get('/api/admin/reviews', authenticateToken, requirePerm('reviews.moderate'), async (req, res) => {
+      try {
+        const where = {}; if (req.query.status === 'hidden' || req.query.status === 'published') where.status = req.query.status;
+        const rows = await Review.findAll({ where, order: [['createdAt', 'DESC']], limit: 300 });
+        const users = rows.length ? await User.findAll({ where: { id: [...new Set(rows.map(r => r.userId))] }, attributes: ['id', 'fullName', 'phoneNumber'] }) : []; const uMap = {}; users.forEach(u => { uMap[u.id] = u; });
+        const prods = rows.length ? await RiceProduct.findAll({ where: { id: [...new Set(rows.map(r => r.productId))] }, attributes: ['id', 'brandName'] }) : []; const pMap = {}; prods.forEach(p => { pMap[p.id] = p.brandName; });
+        res.json(rows.map(r => ({ ...r.toJSON(), customer: uMap[r.userId] ? uMap[r.userId].fullName : `User #${r.userId}`, phone: uMap[r.userId] ? uMap[r.userId].phoneNumber : null, product: pMap[r.productId] || `Product #${r.productId}` })));
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+    expressApp.put('/api/admin/reviews/:id', authenticateToken, requirePerm('reviews.moderate'), async (req, res) => {
+      try {
+        const r = await Review.findByPk(req.params.id);
+        if (!r) return res.status(404).json({ error: 'Review not found.' });
+        const b = req.body || {};
+        if (b.status !== undefined) { if (!['published', 'hidden'].includes(b.status)) return res.status(400).json({ error: 'Invalid status.' }); r.status = b.status; }
+        if (b.reply !== undefined) r.adminReply = String(b.reply || '').trim().slice(0, 600) || null;
+        await r.save();
+        await logEvent({ req, action: b.status ? (b.status === 'hidden' ? 'REVIEW_HIDDEN' : 'REVIEW_RESTORED') : 'REVIEW_REPLIED', category: 'users', targetType: 'review', targetId: r.id, summary: `${req.user.fullName} ${b.status === 'hidden' ? 'hid' : b.status === 'published' ? 'restored' : 'replied to'} review #${r.id}` });
+        res.json(r);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // ==========================================================================
+    // PROMOTIONAL SMS: segments, campaigns, opt-out
+    // ==========================================================================
+    const optOutPage = (title, body) => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body style="font-family:Segoe UI,Arial,sans-serif;background:#f0fdf4;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0"><div style="background:#fff;border-radius:16px;padding:32px;max-width:420px;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.08)"><h2 style="color:#166534;margin-top:0">🌾 Mwea Rice Hub</h2>${body}</div></body></html>`;
+    const verifyOptToken = (token) => {
+      const [id, sig] = String(token || '').split('.');
+      if (!/^\d+$/.test(id || '') || !sig) return null;
+      const expected = optOutSignature(id);
+      if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+      return Number(id);
+    };
+    const setOptOut = async (userId, optedOut, source) => {
+      const [row] = await MarketingPref.findOrCreate({ where: { userId }, defaults: { optedOut, source } });
+      if (row.optedOut !== optedOut) { row.optedOut = optedOut; row.source = source; await row.save(); }
+      await logEvent({ actor: { id: userId, role: 'customer', name: null }, action: optedOut ? 'MARKETING_OPT_OUT' : 'MARKETING_OPT_IN', category: 'users', targetType: 'user', targetId: userId, summary: `User #${userId} ${optedOut ? 'opted out of' : 'opted back in to'} promotional SMS (${source})` });
+    };
+    expressApp.get('/api/optout/:token', async (req, res) => {
+      const id = verifyOptToken(req.params.token);
+      if (!id) return res.status(400).send(optOutPage('Invalid link', '<p>This opt-out link is not valid.</p>'));
+      await setOptOut(id, true, 'sms-link');
+      res.send(optOutPage('Unsubscribed', `<p>You will no longer receive promotional SMS from us.</p><p style="color:#64748b;font-size:13px">You will still get order, payment and security messages.</p><p style="font-size:13px"><a href="${RENDER_BASE_URL}/api/optin/${req.params.token}" style="color:#166534">Changed your mind? Subscribe again</a></p>`));
+    });
+    expressApp.get('/api/optin/:token', async (req, res) => {
+      const id = verifyOptToken(req.params.token);
+      if (!id) return res.status(400).send(optOutPage('Invalid link', '<p>This link is not valid.</p>'));
+      await setOptOut(id, false, 'sms-link');
+      res.send(optOutPage('Subscribed', '<p>Welcome back! You will receive our occasional offers.</p>'));
+    });
+    expressApp.get('/api/user/marketing-preference', authenticateToken, async (req, res) => {
+      const pref = await MarketingPref.findOne({ where: { userId: req.user.id } });
+      res.json({ optedOut: !!(pref && pref.optedOut) });
+    });
+    expressApp.put('/api/user/marketing-preference', authenticateToken, async (req, res) => {
+      try { const out = !!(req.body || {}).optedOut; await setOptOut(req.user.id, out, 'account'); res.json({ optedOut: out, message: out ? 'You will no longer receive promotional SMS.' : 'You will receive our occasional offers.' }); }
+      catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    const cleanFilters = (f = {}) => {
+      const int = (v, max = 100000) => (v === undefined || v === null || v === '' ? null : Math.min(max, Math.max(0, Math.round(Number(v)))));
+      return {
+        counties: (Array.isArray(f.counties) ? f.counties : []).map(c => String(c).slice(0, 40)).slice(0, 47),
+        minOrders: int(f.minOrders), maxOrders: int(f.maxOrders), minSpent: int(f.minSpent, 100000000),
+        inactiveDays: int(f.inactiveDays, 3650), joinedWithinDays: int(f.joinedWithinDays, 3650),
+        neverOrdered: !!f.neverOrdered, boughtProductIds: (Array.isArray(f.boughtProductIds) ? f.boughtProductIds : []).map(Number).filter(Number.isFinite).slice(0, 20),
+        referredOnly: !!f.referredOnly
+      };
+    };
+    const selectAudience = async (filters) => {
+      const f = cleanFilters(filters);
+      const users = await User.findAll({ where: { isActive: true, role: { [Op.ne]: 'admin' } }, attributes: ['id', 'fullName', 'phoneNumber', 'isVerified', 'createdAt'], limit: 50000 });
+      const staff = await StaffRole.findAll(); const staffIds = new Set(staff.filter(r => STAFF_ROLES.includes(r.role)).map(r => r.userId));
+      const orders = await Order.findAll({ attributes: ['userId', 'grandTotal', 'paymentDetails', 'county', 'createdAt', 'items', 'status'], limit: 50000 });
+      const agg = {};
+      orders.forEach((o) => {
+        if (!(o.paymentDetails || {}).isPaid) return;
+        const a = agg[o.userId] || (agg[o.userId] = { n: 0, spent: 0, last: 0, counties: new Set(), products: new Set() });
+        a.n += 1; a.spent += Number(o.grandTotal) || 0; a.last = Math.max(a.last, new Date(o.createdAt).getTime()); if (o.county) a.counties.add(normPlace(o.county));
+        getOrderItems(o).forEach(i => a.products.add(Number(i.productId)));
+      });
+      const refs = await CustomerReferral.findAll(); const referred = new Set(refs.map(r => r.customerId));
+      const optedOut = new Set((await MarketingPref.findAll({ where: { optedOut: true } })).map(p => p.userId));
+      const wantCounties = f.counties.map(normPlace);
+      const now = Date.now();
+      let noPhone = 0, optedOutCount = 0; const recipients = [];
+      for (const u of users) {
+        if (u.isVerified === false || staffIds.has(u.id)) continue;
+        const a = agg[u.id] || { n: 0, spent: 0, last: 0, counties: new Set(), products: new Set() };
+        if (f.neverOrdered && a.n > 0) continue;
+        if (f.minOrders !== null && a.n < f.minOrders) continue;
+        if (f.maxOrders !== null && a.n > f.maxOrders) continue;
+        if (f.minSpent !== null && a.spent < f.minSpent) continue;
+        if (f.inactiveDays !== null && !(a.n > 0 && now - a.last >= f.inactiveDays * 86400000)) continue;
+        if (f.joinedWithinDays !== null && now - new Date(u.createdAt).getTime() > f.joinedWithinDays * 86400000) continue;
+        if (wantCounties.length && !wantCounties.some(c => a.counties.has(c))) continue;
+        if (f.boughtProductIds.length && !f.boughtProductIds.some(id => a.products.has(id))) continue;
+        if (f.referredOnly && !referred.has(u.id)) continue;
+        const phone = normalizeKenyanPhone(u.phoneNumber);
+        if (!phone) { noPhone += 1; continue; }
+        if (optedOut.has(u.id)) { optedOutCount += 1; continue; }
+        recipients.push({ id: u.id, name: u.fullName, phone });
+      }
+      return { filters: f, recipients, optedOutCount, noPhone };
+    };
+    const normPlace = (v) => String(v || '').toLowerCase().replace(/\bcounty\b/g, '').replace(/[^a-z0-9]/g, '');
+    const MAX_CAMPAIGN = 1500;
+    const campaignMessageFor = (message, userId) => `${message}\nOpt out: ${optOutLink(userId)}`;
+    let campaignRunning = false;
+
+    expressApp.post('/api/admin/campaigns/preview', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const { message, filters } = req.body || {};
+        const aud = await selectAudience(filters);
+        const ops = await getOps();
+        const sample = campaignMessageFor(String(message || ''), 999999);
+        const parts = smsPartsFor(sample);
+        const cost = round2(aud.recipients.length * parts * Number(ops.smsCostPerPart));
+        res.json({ count: aud.recipients.length, optedOut: aud.optedOutCount, noPhone: aud.noPhone, parts, estimatedCost: cost, balance: smsState.balance, canAfford: smsState.balance === null ? null : smsState.balance >= cost,
+          tooMany: aud.recipients.length > MAX_CAMPAIGN, max: MAX_CAMPAIGN, sample: aud.recipients.slice(0, 8).map(r => ({ name: r.name, phone: maskPhone(r.phone) })), exampleMessage: sample });
+      } catch (err) { console.error('❌ Campaign preview error:', err); res.status(500).json({ error: err.message }); }
+    });
+
+    expressApp.post('/api/admin/campaigns', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const b = req.body || {};
+        const name = String(b.name || '').trim().slice(0, 120);
+        const message = String(b.message || '').replace(/\s+/g, ' ').trim();
+        if (name.length < 3) return res.status(400).json({ error: 'Give the campaign a name.' });
+        if (message.length < 10 || message.length > 320) return res.status(400).json({ error: 'The message must be between 10 and 320 characters (the opt-out link is added automatically).' });
+        if (b.confirm !== 'SEND') return res.status(400).json({ error: 'Type SEND to confirm.' });
+        if (campaignRunning) return res.status(409).json({ error: 'Another campaign is still sending. Wait for it to finish.' });
+        const hour = eatNow().getUTCHours();
+        if ((hour < 7 || hour >= 20) && !b.allowQuietHours) return res.status(400).json({ error: 'Promotions are not sent between 8pm and 7am. Try again in the morning, or tick "send anyway".', quietHours: true });
+        const aud = await selectAudience(b.filters);
+        if (!aud.recipients.length) return res.status(400).json({ error: 'No customers match this segment.' });
+        if (aud.recipients.length > MAX_CAMPAIGN) return res.status(400).json({ error: `This segment has ${aud.recipients.length} customers. The limit is ${MAX_CAMPAIGN} per campaign; narrow the segment.` });
+        const ops = await getOps();
+        const parts = smsPartsFor(campaignMessageFor(message, 999999));
+        const cost = round2(aud.recipients.length * parts * Number(ops.smsCostPerPart));
+        if (smsState.balance !== null && smsState.balance < cost) return res.status(400).json({ error: `Not enough SMS credit: this needs about ${cost} but you have ${smsState.balance}. Top up Ping Africa first.` });
+
+        const campaign = await Campaign.create({ name, message, filters: aud.filters, status: 'sending', totalRecipients: aud.recipients.length, smsParts: parts, optedOutSkipped: aud.optedOutCount, createdBy: req.adminUser.id, startedAt: new Date() });
+        await logEvent({ req, action: 'CAMPAIGN_STARTED', category: 'admin', severity: 'warn', targetType: 'campaign', targetId: campaign.id, summary: `${req.adminUser.fullName} started SMS campaign "${name}" to ${aud.recipients.length} customers (about ${cost} credit)`, details: { filters: aud.filters, parts } });
+        campaignRunning = true;
+        (async () => {
+          let sent = 0, failed = 0, i = 0;
+          try {
+            for (const r of aud.recipients) {
+              i += 1;
+              if (i % 10 === 1) { const fresh = await Campaign.findByPk(campaign.id); if (fresh && fresh.status === 'stopped') break; }
+              const pref = await MarketingPref.findOne({ where: { userId: r.id } });
+              if (pref && pref.optedOut) continue;
+              const result = await sendSmsRaw(r.phone, campaignMessageFor(message, r.id));
+              if (result.ok) sent += 1; else failed += 1;
+              if (i % 10 === 0) await Campaign.update({ sentCount: sent, failedCount: failed }, { where: { id: campaign.id } });
+              if (!result.ok && /credit|balance|insufficient|unauthor/i.test(String(result.error))) { failed += aud.recipients.length - i; break; }
+              await new Promise(rs => setTimeout(rs, 150));
+            }
+            const done = await Campaign.findByPk(campaign.id);
+            await Campaign.update({ sentCount: sent, failedCount: failed, status: done && done.status === 'stopped' ? 'stopped' : (sent === 0 ? 'failed' : 'sent'), finishedAt: new Date() }, { where: { id: campaign.id } });
+            await logEvent({ actor: { id: req.adminUser.id, role: 'admin', name: req.adminUser.fullName }, action: 'CAMPAIGN_FINISHED', category: 'admin', targetType: 'campaign', targetId: campaign.id, summary: `Campaign "${name}" finished: ${sent} sent, ${failed} failed` });
+          } catch (e) {
+            console.error('❌ Campaign run error:', e);
+            await Campaign.update({ sentCount: sent, failedCount: failed, status: 'failed', finishedAt: new Date() }, { where: { id: campaign.id } });
+          } finally { campaignRunning = false; }
+        })();
+        res.status(202).json({ message: `Sending to ${aud.recipients.length} customers. You can watch progress below.`, campaign });
+      } catch (err) { console.error('❌ Campaign error:', err); res.status(500).json({ error: err.message }); }
+    });
+    expressApp.get('/api/admin/campaigns', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const rows = await Campaign.findAll({ order: [['createdAt', 'DESC']], limit: 50 });
+        const optOuts = await MarketingPref.count({ where: { optedOut: true } });
+        res.json({ campaigns: rows, optOuts, balance: smsState.balance, running: campaignRunning });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+    expressApp.post('/api/admin/campaigns/:id/stop', authenticateToken, requireAdmin, async (req, res) => {
+      const c = await Campaign.findByPk(req.params.id);
+      if (!c) return res.status(404).json({ error: 'Campaign not found.' });
+      if (c.status === 'sending') { c.status = 'stopped'; await c.save(); await logEvent({ req, action: 'CAMPAIGN_STOPPED', category: 'admin', severity: 'warn', targetType: 'campaign', targetId: c.id, summary: `${req.adminUser.fullName} stopped campaign "${c.name}"` }); }
+      res.json({ message: 'The campaign will stop within a few messages.' });
     });
 
     // --- USER CLEARANCE MANAGEMENT ---
@@ -4808,11 +6239,13 @@ async function startServer() {
         expressApp.use((err, req, res, next) => {
           if (res.headersSent) return next(err);
           console.error('❌ Unhandled request error:', err.message);
+          if (!(err.status && err.status < 500) && err.code !== 'LIMIT_FILE_SIZE') recordServerError(`${req.method} ${req.path}`, err.message, { stack: String(err.stack || '').split('\n').slice(0, 5).join('\n'), error: err });
           const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : (err.status || err.statusCode || 400);
           res.status(status).json({ error: err.message || 'Unexpected server error.' });
         });
 
         if (!IS_VERCEL) {
+          startBackgroundJobs();
           console.log(`✅ System Active: Mwea Hub Server fully ready on port ${port}`);
           console.log(`✅ WebSocket Engine attached and listening for real-time events.`);
           console.log('====================================================================');
