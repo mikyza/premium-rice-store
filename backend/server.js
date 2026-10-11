@@ -1590,7 +1590,7 @@ const Expense = defineModel('Expense', {
 });
 const EXPENSE_CATEGORIES = ['transport', 'packaging', 'salaries', 'rent', 'utilities', 'marketing', 'sms_airtime', 'licences_taxes', 'repairs', 'other'];
 
-const Review = defineModel('Review', {
+const ProductReview = defineModel('ProductReview', {
   productId: { type: DataTypes.INTEGER, allowNull: false },
   userId: { type: DataTypes.INTEGER, allowNull: false },
   orderId: { type: DataTypes.INTEGER, allowNull: true },
@@ -1751,7 +1751,7 @@ async function decorateProducts(list) {
   try {
     const ids = list.map(p => p.id);
     const tiers = await getWholesaleTiers();
-    const ratingRows = ids.length ? await Review.findAll({ where: { productId: ids, status: 'published' }, attributes: ['productId', 'rating'] }) : [];
+    const ratingRows = ids.length ? await ProductReview.findAll({ where: { productId: ids, status: 'published' }, attributes: ['productId', 'rating'] }) : [];
     const agg = {};
     ratingRows.forEach((r) => { const a = agg[r.productId] || (agg[r.productId] = { sum: 0, n: 0 }); a.sum += r.rating; a.n += 1; });
     return list.map(p => ({
@@ -5741,7 +5741,7 @@ async function startServer() {
         const productId = Number(req.params.id);
         if (!Number.isFinite(productId)) return res.status(400).json({ error: 'Invalid product.' });
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-        const all = await Review.findAll({ where: { productId, status: 'published' }, order: [['createdAt', 'DESC']] });
+        const all = await ProductReview.findAll({ where: { productId, status: 'published' }, order: [['createdAt', 'DESC']] });
         const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }; all.forEach(r => { distribution[r.rating] += 1; });
         const avg = all.length ? Math.round((all.reduce((s, r) => s + r.rating, 0) / all.length) * 10) / 10 : 0;
         const slice = all.slice((page - 1) * 10, page * 10);
@@ -5749,7 +5749,7 @@ async function startServer() {
         const me = optionalUserId(req);
         let canReview = false, reason = 'Sign in to review products you have bought.', mine = null;
         if (me) {
-          mine = await Review.findOne({ where: { productId, userId: me } });
+          mine = await ProductReview.findOne({ where: { productId, userId: me } });
           const orderId = await userBoughtProduct(me, productId);
           canReview = !!orderId; reason = orderId ? (mine ? 'You can update your review.' : 'Share your experience.') : 'Only customers who have bought and paid for this rice can review it.';
         }
@@ -5768,9 +5768,9 @@ async function startServer() {
         if (comment.length > 0 && comment.length < 3) return res.status(400).json({ error: 'Your comment is too short.' });
         const orderId = await userBoughtProduct(req.user.id, productId);
         if (!orderId) return res.status(403).json({ error: 'Only customers who have bought and paid for this rice can review it.' });
-        let review = await Review.findOne({ where: { productId, userId: req.user.id } });
+        let review = await ProductReview.findOne({ where: { productId, userId: req.user.id } });
         if (review) { await review.update({ rating, title: title || null, comment: comment || null, status: review.status === 'hidden' ? 'hidden' : 'published' }); }
-        else review = await Review.create({ productId, userId: req.user.id, orderId, rating, title: title || null, comment: comment || null });
+        else review = await ProductReview.create({ productId, userId: req.user.id, orderId, rating, title: title || null, comment: comment || null });
         await logEvent({ req, action: 'REVIEW_POSTED', category: 'orders', targetType: 'product', targetId: productId, summary: `${req.user.fullName} rated ${product.brandName} ${rating}/5`, details: { reviewId: review.id } });
         res.status(201).json({ message: review.status === 'hidden' ? 'Saved. This review is hidden by our team.' : 'Thank you! Your review is live.', review });
       } catch (err) { res.status(500).json({ error: err.message }); }
@@ -5778,7 +5778,7 @@ async function startServer() {
     expressApp.get('/api/admin/reviews', authenticateToken, requirePerm('reviews.moderate'), async (req, res) => {
       try {
         const where = {}; if (req.query.status === 'hidden' || req.query.status === 'published') where.status = req.query.status;
-        const rows = await Review.findAll({ where, order: [['createdAt', 'DESC']], limit: 300 });
+        const rows = await ProductReview.findAll({ where, order: [['createdAt', 'DESC']], limit: 300 });
         const users = rows.length ? await User.findAll({ where: { id: [...new Set(rows.map(r => r.userId))] }, attributes: ['id', 'fullName', 'phoneNumber'] }) : []; const uMap = {}; users.forEach(u => { uMap[u.id] = u; });
         const prods = rows.length ? await RiceProduct.findAll({ where: { id: [...new Set(rows.map(r => r.productId))] }, attributes: ['id', 'brandName'] }) : []; const pMap = {}; prods.forEach(p => { pMap[p.id] = p.brandName; });
         res.json(rows.map(r => ({ ...r.toJSON(), customer: uMap[r.userId] ? uMap[r.userId].fullName : `User #${r.userId}`, phone: uMap[r.userId] ? uMap[r.userId].phoneNumber : null, product: pMap[r.productId] || `Product #${r.productId}` })));
@@ -5786,7 +5786,7 @@ async function startServer() {
     });
     expressApp.put('/api/admin/reviews/:id', authenticateToken, requirePerm('reviews.moderate'), async (req, res) => {
       try {
-        const r = await Review.findByPk(req.params.id);
+        const r = await ProductReview.findByPk(req.params.id);
         if (!r) return res.status(404).json({ error: 'Review not found.' });
         const b = req.body || {};
         if (b.status !== undefined) { if (!['published', 'hidden'].includes(b.status)) return res.status(400).json({ error: 'Invalid status.' }); r.status = b.status; }
