@@ -12,7 +12,7 @@ import {
   FileText, Percent, Layers, Globe, Sliders, Bell, ArrowRight,
   ChevronDown, ArrowUpRight, HelpCircle, Star, PhoneCall,
   XCircle, Zap, Ban, UserCheck, UserX, ShieldAlert, FileSpreadsheet,
-  Copy, Link2, Headphones, Wallet, Briefcase, StickyNote
+  Copy, Link2, Headphones, Wallet, Briefcase, StickyNote, MessageSquare
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 
@@ -34,6 +34,9 @@ export interface Product {
   description?: string | null;
   millingGrade?: string | null;
   isOrganic?: boolean;
+  ratingAvg?: number;
+  ratingCount?: number;
+  wholesaleTiers?: { minQty: number; price: number }[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -1502,18 +1505,28 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
 // Prioritizes phone screen priority (2 items per row on small devices, 4 on desktop)
 // ============================================================================
 
+/** Price per bag for a quantity: the best of the normal/flash price and any bulk tier (mirrors the server). */
+export const getUnitPrice = (p: any, qty: number, flashActive: boolean) => {
+  const base = flashActive && p.flashSalePrice ? p.flashSalePrice : (p.basePrice || p.price || 0);
+  const tiers: { minQty: number; price: number }[] = Array.isArray(p.wholesaleTiers) ? p.wholesaleTiers : [];
+  const tier = [...tiers].filter(t => qty >= t.minQty && t.price > 0).sort((a, b) => b.minQty - a.minQty)[0];
+  return tier && tier.price < base ? { price: tier.price, bulk: true, base } : { price: base, bulk: false, base };
+};
+
 interface ProductCardProps {
   product: Product;
   flashActive?: boolean;
   onAddToCart: () => void;
   onQuickView: () => void;
+  onReviews?: () => void;
 }
 
 const ProductCard: React.FC<ProductCardProps> = ({
   product,
   flashActive = false,
   onAddToCart,
-  onQuickView
+  onQuickView,
+  onReviews
 }) => {
   const effectivePrice = flashActive && product.flashSalePrice ? product.flashSalePrice : (product.basePrice || product.price || 0);
   const originalPrice = product.basePrice || product.price || 0;
@@ -1572,6 +1585,15 @@ const ProductCard: React.FC<ProductCardProps> = ({
           <h3 className="font-extrabold text-slate-900 text-sm sm:text-base leading-snug line-clamp-2 mt-0.5 group-hover:text-emerald-800 transition-colors">
             {product.brandName}
           </h3>
+          {onReviews && (
+            <button type="button" onClick={onReviews} className="flex items-center gap-1 mt-1 text-[11px] cursor-pointer hover:underline" aria-label="See reviews">
+              {(product.ratingCount || 0) > 0 ? (
+                <><StarRating value={product.ratingAvg || 0} size={12} /><span className="font-bold text-slate-700">{(product.ratingAvg || 0).toFixed(1)}</span><span className="text-slate-400">({product.ratingCount})</span></>
+              ) : (
+                <span className="text-slate-400">No reviews yet</span>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Pricing & Stock Indicator */}
@@ -1586,6 +1608,9 @@ const ProductCard: React.FC<ProductCardProps> = ({
               </span>
             )}
           </div>
+          {Array.isArray(product.wholesaleTiers) && product.wholesaleTiers.length > 0 && (
+            <p className="text-[10px] font-bold text-sky-700 mt-0.5">Bulk: {product.wholesaleTiers[0].minQty}+ bags at {formatKES(product.wholesaleTiers[0].price)} each</p>
+          )}
 
           {/* Stock Availability */}
           <div className="flex items-center justify-between text-[11px] mt-1">
@@ -1627,7 +1652,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
 // ============================================================================
 // TERMS & CONDITIONS, PASSWORD STRENGTH
 // ============================================================================
-const TERMS_VERSION = '2026-10';
+const TERMS_VERSION = '2026-11';
 const MIN_PASSWORD_LENGTH = 8;
 
 /** Advises on strength but never blocks: anything with 8+ characters is allowed. */
@@ -1697,7 +1722,7 @@ const TERMS_SECTIONS: { title: string; body: string[] }[] = [
     'You must be at least 18 years old, or have a parent or guardian\'s permission. We may suspend or close accounts that give false information, abuse the Service or are used for fraud.'
   ]},
   { title: '3. Products and prices', body: [
-    'All prices are in Kenyan Shillings (KES). Prices, stock and flash-sale offers can change at any time; the price shown when you pay is the price you are charged. Flash-sale prices apply only while the sale is running. Product pictures are for illustration and packaging may vary slightly.'
+    'All prices are in Kenyan Shillings (KES). Prices, stock, flash-sale offers and bulk (quantity) prices can change at any time; the price shown when you pay is the price you are charged. Flash-sale prices apply only while the sale is running, and where both a flash-sale price and a bulk price apply you get the lower one. Product pictures are for illustration and packaging may vary slightly.'
   ]},
   { title: '4. Orders and payment', body: [
     'Payment is made by M-Pesa STK push, processed by PayHero. An order is confirmed only after your payment is received and verified. If you do not complete the M-Pesa prompt, the order stays unpaid and may be cancelled.',
@@ -1708,6 +1733,9 @@ const TERMS_SECTIONS: { title: string; body: string[] }[] = [
   ]},
   { title: '6. Inspection, returns and refunds', body: [
     'Please inspect your rice on delivery. Report a damaged, wrong or short-weight order to customer care as soon as possible, ideally within 24 hours, with photos where you can. Where the problem is confirmed we will replace the item or refund you. Opened food products that are in good condition cannot normally be returned.'
+  ]},
+  { title: '6a. Reviews', body: [
+    'Only customers who have bought and paid for a product can review it. Reviews must be honest and respectful. We may hide reviews that are abusive, misleading, contain personal details or are unrelated to the product. Your first name and the initial of your last name are shown with your review.'
   ]},
   { title: '7. Reward points', body: [
     'You may earn reward points on paid orders. Points have no cash value, cannot be transferred and can be corrected or removed if they were earned by mistake or through misuse of the Service.'
@@ -1724,7 +1752,7 @@ const TERMS_SECTIONS: { title: string; body: string[] }[] = [
     'We share only what is needed with our payment provider (PayHero/M-Pesa), our SMS provider and delivery partners. We do not sell your personal data. Customer care staff can see your account and order details to help you. Under the Kenya Data Protection Act, 2019 you may ask to see, correct or delete your personal data by contacting us.'
   ]},
   { title: '11. Messages', body: [
-    'By registering you agree that we may send you SMS or email messages about verification codes, orders, payments and delivery.'
+    'By registering you agree that we may send you SMS or email messages about verification codes, orders, payments and delivery. We may also send occasional promotional offers by SMS. Every promotional message contains an opt-out link, and you can switch promotions off at any time in your account; you will still receive order, payment and security messages.'
   ]},
   { title: '12. Our responsibility', body: [
     'We take care to deliver safe, good quality rice, but to the extent allowed by law we are not liable for indirect losses, or for delays or failures outside our reasonable control, including network, M-Pesa or courier outages. Nothing in these terms limits rights you have under Kenyan consumer protection law.'
@@ -1759,6 +1787,875 @@ function TermsModal({ onClose, onAccept }: { onClose: () => void; onAccept?: () 
         <div className="px-6 py-4 border-t border-slate-100 flex flex-col sm:flex-row gap-2 sm:justify-end">
           <button type="button" onClick={onClose} className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer">Close</button>
           {onAccept && <button type="button" onClick={onAccept} className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs cursor-pointer">I have read and accept</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// OPERATIONS SCREENS: reports, stock & suppliers, expenses, campaigns, reviews, system
+// ============================================================================
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const rangePresets = () => {
+  const now = new Date();
+  const daysAgo = (n: number) => { const d = new Date(now); d.setDate(d.getDate() - n); return d; };
+  return [
+    { label: 'Today', from: ymd(now), to: ymd(now) },
+    { label: '7 days', from: ymd(daysAgo(6)), to: ymd(now) },
+    { label: '30 days', from: ymd(daysAgo(29)), to: ymd(now) },
+    { label: 'This month', from: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), to: ymd(now) },
+    { label: 'Last month', from: ymd(new Date(now.getFullYear(), now.getMonth() - 1, 1)), to: ymd(new Date(now.getFullYear(), now.getMonth(), 0)) },
+    { label: 'This year', from: ymd(new Date(now.getFullYear(), 0, 1)), to: ymd(now) }
+  ];
+};
+
+const downloadExcel = async (type: string, from: string, to: string, token: string | null, showToast: ToastFn) => {
+  try {
+    const res = await fetch(`${API_BASE_URL}/admin/export/${type}?from=${from}&to=${to}`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'Export failed'); }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${type}-${to}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    showToast('Excel file downloaded.', 'success');
+  } catch (err: any) { showToast(err.message, 'error'); }
+};
+
+const inputCls = 'w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white';
+const labelCls = 'block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1';
+const cardCls = 'bg-slate-900 rounded-3xl border border-slate-800';
+
+const DateRange = ({ from, to, onChange }: { from: string; to: string; onChange: (f: string, t: string) => void }) => (
+  <div className="flex flex-wrap items-center gap-2">
+    {rangePresets().map(p => (
+      <button key={p.label} onClick={() => onChange(p.from, p.to)} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer ${from === p.from && to === p.to ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{p.label}</button>
+    ))}
+    <input type="date" value={from} onChange={(e) => onChange(e.target.value, to)} className="px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-white" />
+    <span className="text-slate-500 text-xs">to</span>
+    <input type="date" value={to} onChange={(e) => onChange(from, e.target.value)} className="px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-white" />
+  </div>
+);
+
+// ---------------------------------------------------------------------------
+// PROFIT REPORTS & EXCEL EXPORTS
+// ---------------------------------------------------------------------------
+function AdminReportsPanel({ token, showToast }: { token: string | null; showToast: ToastFn }) {
+  const p30 = rangePresets()[2];
+  const [from, setFrom] = useState(p30.from);
+  const [to, setTo] = useState(p30.to);
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [group, setGroup] = useState<'byProduct' | 'byCounty' | 'byAgent' | 'byMonth' | 'byDay'>('byProduct');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setData(await staffApi(`/admin/reports/profit?from=${from}&to=${to}`, token)); }
+    catch (err: any) { showToast(err.message, 'error'); } finally { setLoading(false); }
+  }, [token, from, to]);
+  useEffect(() => { load(); }, [load]);
+
+  const t = data?.totals;
+  const rows: any[] = data ? data[group] : [];
+  const maxProfit = Math.max(1, ...rows.map(r => Math.abs(r.profit)));
+  const groupLabels: Record<string, string> = { byProduct: 'Product', byCounty: 'County', byAgent: 'Agent', byMonth: 'Month', byDay: 'Day' };
+
+  return (
+    <div className="space-y-6">
+      <div className={`${cardCls} p-5 space-y-4`}>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <h3 className="text-base font-black text-white flex items-center gap-2"><TrendingUp className="w-5 h-5 text-emerald-400" /> Profit reports</h3>
+            <p className="text-[11px] text-slate-500">Based on paid orders and the buying prices recorded when each order was placed.</p>
+          </div>
+          <DateRange from={from} to={to} onChange={(f, tt) => { setFrom(f); setTo(tt); }} />
+        </div>
+        <div className="flex flex-wrap gap-2 pt-3 border-t border-slate-800">
+          <span className="text-[10px] font-black uppercase text-slate-500 self-center mr-1">Download Excel:</span>
+          {[['orders', 'Orders'], ['customers', 'Customers'], ['finances', 'Finances (profit, expenses, commissions)'], ['stock', 'Stock']].map(([k, label]) => (
+            <button key={k} onClick={() => downloadExcel(k, from, to, token, showToast)} className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"><Download className="w-3.5 h-3.5" /> {label}</button>
+          ))}
+        </div>
+      </div>
+
+      {loading && !data && <p className="text-xs text-slate-500 font-bold">Calculating…</p>}
+      {t && (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StaffStat label="Rice sales" value={formatKES(t.riceRevenue)} hint={`${t.orders} paid orders · ${t.kg} kg`} />
+            <StaffStat label="Cost of rice sold" value={formatKES(t.costOfGoods)} tone="amber" />
+            <StaffStat label="Gross profit" value={formatKES(t.grossProfit)} tone="emerald" hint={`${data.margin}% margin`} />
+            <StaffStat label="Delivery fees collected" value={formatKES(t.deliveryIncome)} tone="sky" />
+            <StaffStat label="Agent commissions" value={formatKES(t.commissions)} tone="amber" />
+            <StaffStat label="Expenses" value={formatKES(t.expenses)} tone="amber" />
+            <StaffStat label="Net profit" value={formatKES(t.netProfit)} tone={t.netProfit >= 0 ? 'emerald' : 'rose'} hint="gross + delivery − commissions − expenses" />
+            <StaffStat label="Average per order" value={formatKES(t.orders ? t.netProfit / t.orders : 0)} />
+          </div>
+
+          <div className={`${cardCls} overflow-hidden`}>
+            <div className="p-3 flex flex-wrap gap-2 border-b border-slate-800">
+              {(Object.keys(groupLabels) as Array<keyof typeof groupLabels>).map(k => (
+                <button key={k} onClick={() => setGroup(k as any)} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer ${group === k ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>By {groupLabels[k].toLowerCase()}</button>
+              ))}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-950 text-slate-400 uppercase font-black"><tr><th className="p-3">{groupLabels[group]}</th><th className="p-3 text-right">Orders</th><th className="p-3 text-right">Kg</th><th className="p-3 text-right">Revenue</th><th className="p-3 text-right">Cost</th><th className="p-3 text-right">Profit</th><th className="p-3 text-right">Margin</th>{group === 'byAgent' && <th className="p-3 text-right">Commission</th>}{group === 'byAgent' && <th className="p-3 text-right">After commission</th>}<th className="p-3 w-32"></th></tr></thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {rows.length === 0 && <tr><td colSpan={10} className="p-6 text-center text-slate-500 font-bold">No paid orders in this period.</td></tr>}
+                  {rows.map((r: any) => (
+                    <tr key={r.key} className="hover:bg-slate-800/40">
+                      <td className="p-3 font-bold text-white">{r.label}</td>
+                      <td className="p-3 text-right">{r.orders}</td><td className="p-3 text-right">{r.kg}</td>
+                      <td className="p-3 text-right">{formatKES(r.revenue)}</td><td className="p-3 text-right text-slate-400">{formatKES(r.cost)}</td>
+                      <td className={`p-3 text-right font-black ${r.profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatKES(r.profit)}</td>
+                      <td className="p-3 text-right">{r.margin}%</td>
+                      {group === 'byAgent' && <td className="p-3 text-right text-amber-400">{formatKES(r.commission)}</td>}
+                      {group === 'byAgent' && <td className="p-3 text-right font-bold">{formatKES(r.net)}</td>}
+                      <td className="p-3"><div className="h-2 rounded-full bg-slate-800 overflow-hidden"><div className={`h-full rounded-full ${r.profit >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`} style={{ width: `${Math.max(2, (Math.abs(r.profit) / maxProfit) * 100)}%` }} /></div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {Object.keys(data.expenseByCategory).length > 0 && (
+            <div className={`${cardCls} p-5`}>
+              <p className="text-xs font-black text-white mb-3">Where the money went (expenses)</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {Object.entries(data.expenseByCategory).map(([c, v]: any) => (
+                  <div key={c} className="p-3 rounded-xl bg-slate-950 border border-slate-800"><p className="text-[10px] font-black uppercase text-slate-500">{String(c).replace('_', ' ')}</p><p className="text-sm font-black text-amber-400">{formatKES(v)}</p></div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// STOCK, SUPPLIERS, PURCHASES, BULK PRICING
+// ---------------------------------------------------------------------------
+function StockLevelsView({ token, showToast, onRecordPurchase }: { token: string | null; showToast: ToastFn; onRecordPurchase: (productId: number) => void }) {
+  const [data, setData] = useState<any>(null);
+  const [defaultLevel, setDefaultLevel] = useState('20');
+  const load = useCallback(async () => {
+    try { const d = await staffApi('/admin/stock/overview', token); setData(d); setDefaultLevel(String(d.defaultThreshold)); }
+    catch (err: any) { showToast(err.message, 'error'); }
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+  const saveDefault = async () => {
+    try { await staffApi('/admin/stock/thresholds', token, { method: 'PUT', body: { defaultThreshold: Number(defaultLevel) } }); showToast('Default alert level saved.', 'success'); load(); }
+    catch (err: any) { showToast(err.message, 'error'); }
+  };
+  const saveOne = async (productId: number, value: string) => {
+    try { await staffApi('/admin/stock/thresholds', token, { method: 'PUT', body: { productId, threshold: value === '' ? null : Number(value) } }); load(); }
+    catch (err: any) { showToast(err.message, 'error'); }
+  };
+  if (!data) return <p className="text-xs text-slate-500 font-bold">Loading stock…</p>;
+  const pill: Record<string, string> = { ok: 'bg-emerald-950 text-emerald-300 border-emerald-800', low: 'bg-amber-950 text-amber-300 border-amber-800', out: 'bg-rose-950 text-rose-300 border-rose-800' };
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StaffStat label="Products needing restock" value={data.lowCount} tone={data.lowCount ? 'rose' : 'emerald'} />
+        <StaffStat label="Stock value (at cost)" value={formatKES(data.stockValue)} />
+        <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800 col-span-2">
+          <p className={labelCls}>Alert me when a product has this many bags or fewer</p>
+          <div className="flex gap-2"><input type="number" min={0} value={defaultLevel} onChange={(e) => setDefaultLevel(e.target.value)} className={inputCls} /><button onClick={saveDefault} className="px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold cursor-pointer">Save</button></div>
+        </div>
+      </div>
+      <div className={`${cardCls} overflow-x-auto`}>
+        <table className="w-full text-left text-xs">
+          <thead className="bg-slate-950 text-slate-400 uppercase font-black"><tr><th className="p-3">Product</th><th className="p-3 text-right">In stock</th><th className="p-3">Status</th><th className="p-3 text-right">Alert at</th><th className="p-3 text-right">Sold (30d)</th><th className="p-3 text-right">Lasts about</th><th className="p-3 text-right">Buying price</th><th className="p-3">Last purchase</th><th className="p-3"></th></tr></thead>
+          <tbody className="divide-y divide-slate-800/60">
+            {data.products.map((p: any) => (
+              <tr key={p.id} className="hover:bg-slate-800/40">
+                <td className="p-3 font-bold text-white">{p.name} <span className="text-slate-500 font-medium">{p.weightKg}kg</span></td>
+                <td className="p-3 text-right font-black">{p.stock}</td>
+                <td className="p-3"><span className={`px-2 py-0.5 rounded-full border text-[9px] font-black uppercase ${pill[p.state]}`}>{p.state === 'ok' ? 'OK' : p.state === 'low' ? 'Low' : 'Out'}</span></td>
+                <td className="p-3 text-right"><input type="number" min={0} defaultValue={p.customThreshold ? p.threshold : ''} placeholder={String(p.threshold)} onBlur={(e) => { if (e.target.value !== String(p.customThreshold ? p.threshold : '')) saveOne(p.id, e.target.value); }} className="w-16 px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-right text-xs text-white" /></td>
+                <td className="p-3 text-right">{p.sold30}</td>
+                <td className="p-3 text-right text-slate-300">{p.daysLeft === null ? '—' : `${p.daysLeft} days`}</td>
+                <td className="p-3 text-right">{formatKES(p.buyingPrice)}</td>
+                <td className="p-3 text-slate-400">{p.lastPurchase ? `${p.lastPurchase.date} @ ${formatKES(p.lastPurchase.unitCost)}` : '—'}</td>
+                <td className="p-3 text-right"><button onClick={() => onRecordPurchase(p.id)} className="px-2.5 py-1.5 rounded-lg bg-sky-800 hover:bg-sky-700 text-white text-[10px] font-extrabold cursor-pointer">Record purchase</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[10px] text-slate-500">Leave “Alert at” empty to use the default. You get a warning on this page (and in Live Activity) the first time a product drops to its level, then again after 12 hours if it is still low.</p>
+    </div>
+  );
+}
+
+function SuppliersView({ token, showToast }: { token: string | null; showToast: ToastFn }) {
+  const [list, setList] = useState<any[]>([]);
+  const [form, setForm] = useState<any>({ name: '', type: 'farmer', phone: '', location: '', notes: '' });
+  const [editId, setEditId] = useState<number | null>(null);
+  const [ledger, setLedger] = useState<any>(null);
+  const load = useCallback(async () => { try { setList(await staffApi('/admin/suppliers', token)); } catch (err: any) { showToast(err.message, 'error'); } }, [token]);
+  useEffect(() => { load(); }, [load]);
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await staffApi(editId ? `/admin/suppliers/${editId}` : '/admin/suppliers', token, { method: editId ? 'PUT' : 'POST', body: form });
+      showToast(editId ? 'Supplier updated.' : 'Supplier added.', 'success');
+      setForm({ name: '', type: 'farmer', phone: '', location: '', notes: '' }); setEditId(null); load();
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+  const openLedger = async (id: number) => { try { setLedger(await staffApi(`/admin/suppliers/${id}`, token)); } catch (err: any) { showToast(err.message, 'error'); } };
+  return (
+    <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
+      <form onSubmit={save} className={`${cardCls} p-5 space-y-3`}>
+        <p className="text-xs font-black text-white">{editId ? 'Edit supplier' : 'Add a supplier'}</p>
+        <div><label className={labelCls}>Name *</label><input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} placeholder="e.g. Mwea Millers Co-op" /></div>
+        <div className="grid grid-cols-2 gap-2">
+          <div><label className={labelCls}>Type</label><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className={inputCls}><option value="farmer">Farmer</option><option value="miller">Miller</option><option value="transporter">Transporter</option><option value="other">Other</option></select></div>
+          <div><label className={labelCls}>Phone</label><input value={form.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} className={inputCls} /></div>
+        </div>
+        <div><label className={labelCls}>Location</label><input value={form.location || ''} onChange={(e) => setForm({ ...form, location: e.target.value })} className={inputCls} /></div>
+        <div><label className={labelCls}>Notes</label><input value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} className={inputCls} /></div>
+        <div className="flex gap-2"><button type="submit" className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold cursor-pointer">{editId ? 'Save changes' : 'Add supplier'}</button>{editId && <button type="button" onClick={() => { setEditId(null); setForm({ name: '', type: 'farmer', phone: '', location: '', notes: '' }); }} className="px-4 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold cursor-pointer">Cancel</button>}</div>
+      </form>
+      <div className={`xl:col-span-2 ${cardCls} overflow-x-auto`}>
+        <table className="w-full text-left text-xs">
+          <thead className="bg-slate-950 text-slate-400 uppercase font-black"><tr><th className="p-3">Supplier</th><th className="p-3">Type</th><th className="p-3 text-right">Bought</th><th className="p-3 text-right">Paid</th><th className="p-3 text-right">We owe</th><th className="p-3">Last</th><th className="p-3"></th></tr></thead>
+          <tbody className="divide-y divide-slate-800/60">
+            {list.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-slate-500 font-bold">No suppliers yet.</td></tr>}
+            {list.map(x => (
+              <tr key={x.id} className="hover:bg-slate-800/40">
+                <td className="p-3"><p className="font-bold text-white">{x.name}</p><p className="text-[10px] text-slate-500">{x.phone} {x.location ? `· ${x.location}` : ''}</p></td>
+                <td className="p-3 capitalize">{x.type}</td>
+                <td className="p-3 text-right">{formatKES(x.totalPurchased)}</td><td className="p-3 text-right text-emerald-400">{formatKES(x.totalPaid)}</td>
+                <td className={`p-3 text-right font-black ${x.owed > 0 ? 'text-amber-400' : 'text-slate-500'}`}>{formatKES(x.owed)}</td>
+                <td className="p-3 text-slate-400">{x.lastPurchase || '—'}</td>
+                <td className="p-3 text-right whitespace-nowrap"><button onClick={() => openLedger(x.id)} className="p-1.5 text-slate-400 hover:text-emerald-400 cursor-pointer" title="Ledger"><Eye className="w-4 h-4" /></button><button onClick={() => { setEditId(x.id); setForm({ name: x.name, type: x.type, phone: x.phone, location: x.location, notes: x.notes }); }} className="p-1.5 text-slate-400 hover:text-sky-400 cursor-pointer" title="Edit"><Edit className="w-4 h-4" /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {ledger && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-start justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-3xl my-8 space-y-4">
+            <div className="flex justify-between items-start"><div><h3 className="text-lg font-black text-white">{ledger.supplier.name}</h3><p className="text-xs text-slate-400">Bought {formatKES(ledger.totalPurchased)} · Paid {formatKES(ledger.totalPaid)} · <span className="text-amber-400 font-black">Owed {formatKES(ledger.owed)}</span></p></div><button onClick={() => setLedger(null)} className="p-2 rounded-xl bg-slate-800 text-slate-300 cursor-pointer"><X className="w-4 h-4" /></button></div>
+            <div className="overflow-x-auto max-h-80 overflow-y-auto rounded-2xl border border-slate-800"><table className="w-full text-left text-xs"><thead className="bg-slate-950 text-slate-400 uppercase font-black"><tr><th className="p-3">Date</th><th className="p-3">Item</th><th className="p-3 text-right">Qty</th><th className="p-3 text-right">Total</th><th className="p-3 text-right">Paid</th></tr></thead>
+              <tbody className="divide-y divide-slate-800/60">{ledger.purchases.map((p: any) => <tr key={p.id}><td className="p-3 text-slate-400">{p.purchaseDate}</td><td className="p-3 text-white font-bold">{p.itemName}</td><td className="p-3 text-right">{p.quantity}</td><td className="p-3 text-right">{formatKES(Number(p.totalCost))}</td><td className="p-3 text-right text-emerald-400">{formatKES(Number(p.amountPaid))}</td></tr>)}</tbody></table></div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PurchasesView({ token, showToast, presetProductId, onStockChanged }: { token: string | null; showToast: ToastFn; presetProductId: number | null; onStockChanged: () => void }) {
+  const p30 = rangePresets()[2];
+  const [from, setFrom] = useState(p30.from);
+  const [to, setTo] = useState(p30.to);
+  const [data, setData] = useState<any>({ purchases: [], totals: { spent: 0, paid: 0, owed: 0 } });
+  const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
+  const blank = { supplierId: '', productId: presetProductId ? String(presetProductId) : '', itemName: '', quantity: '', unitCost: '', amountPaid: '', paymentMethod: 'mpesa', reference: '', purchaseDate: ymd(new Date()), notes: '', addToStock: true, updateBuyingPrice: true };
+  const [form, setForm] = useState<any>(blank);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [p, s, st] = await Promise.all([staffApi(`/admin/purchases?from=${from}&to=${to}`, token), staffApi('/admin/suppliers', token), staffApi('/admin/stock/overview', token)]);
+      setData(p); setSuppliers(s); setProducts(st.products);
+    } catch (err: any) { showToast(err.message, 'error'); }
+  }, [token, from, to]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (presetProductId) setForm((f: any) => ({ ...f, productId: String(presetProductId) })); }, [presetProductId]);
+
+  const total = (Number(form.quantity) || 0) * (Number(form.unitCost) || 0);
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault(); setBusy(true);
+    try {
+      const body = { ...form, supplierId: form.supplierId ? Number(form.supplierId) : null, productId: form.productId ? Number(form.productId) : null, quantity: Number(form.quantity), unitCost: Number(form.unitCost), amountPaid: Number(form.amountPaid) || 0 };
+      const r = await staffApi('/admin/purchases', token, { method: 'POST', body });
+      showToast(r.message, 'success'); setForm({ ...blank, productId: '' }); load(); onStockChanged();
+    } catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(false); }
+  };
+  const payBalance = async (p: any) => {
+    const v = prompt(`How much are you paying now? (KES ${p.owed} is still owed)`, String(p.owed));
+    if (!v) return;
+    try { const r = await staffApi(`/admin/purchases/${p.id}/payment`, token, { method: 'POST', body: { amount: Number(v) } }); showToast(r.message, 'success'); load(); }
+    catch (err: any) { showToast(err.message, 'error'); }
+  };
+  return (
+    <div className="space-y-5">
+      <form onSubmit={save} className={`${cardCls} p-5 space-y-3`}>
+        <p className="text-xs font-black text-white flex items-center gap-2"><Package className="w-4 h-4 text-emerald-400" /> Record a purchase (what you buy from farmers or millers)</p>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div><label className={labelCls}>Supplier</label><select value={form.supplierId} onChange={(e) => setForm({ ...form, supplierId: e.target.value })} className={inputCls}><option value="">— none —</option>{suppliers.filter(s => s.isActive).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+          <div><label className={labelCls}>Product (to add stock to)</label><select value={form.productId} onChange={(e) => { const pr = products.find(x => String(x.id) === e.target.value); setForm({ ...form, productId: e.target.value, itemName: pr ? pr.name : form.itemName }); }} className={inputCls}><option value="">— not a product —</option>{products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.stock})</option>)}</select></div>
+          <div><label className={labelCls}>What was bought *</label><input required value={form.itemName} onChange={(e) => setForm({ ...form, itemName: e.target.value })} className={inputCls} placeholder="e.g. Pishori 50kg sacks" /></div>
+          <div><label className={labelCls}>Date</label><input type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} className={inputCls} /></div>
+          <div><label className={labelCls}>Bags / units *</label><input required type="number" min={1} value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} className={inputCls} /></div>
+          <div><label className={labelCls}>Cost per bag (KES) *</label><input required type="number" min={0} step="0.01" value={form.unitCost} onChange={(e) => setForm({ ...form, unitCost: e.target.value })} className={inputCls} /></div>
+          <div><label className={labelCls}>Paid so far (KES)</label><input type="number" min={0} step="0.01" value={form.amountPaid} onChange={(e) => setForm({ ...form, amountPaid: e.target.value })} className={inputCls} placeholder={String(total || 0)} /></div>
+          <div><label className={labelCls}>Reference</label><input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} className={inputCls} placeholder="M-Pesa code / receipt" /></div>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-slate-300">
+          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={form.addToStock} disabled={!form.productId} onChange={(e) => setForm({ ...form, addToStock: e.target.checked })} className="accent-emerald-500" /> Add these bags to the product&apos;s stock</label>
+          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={form.updateBuyingPrice} disabled={!form.productId || !form.addToStock} onChange={(e) => setForm({ ...form, updateBuyingPrice: e.target.checked })} className="accent-emerald-500" /> Update the product&apos;s buying price (average of old and new stock)</label>
+          <span className="ml-auto font-black text-white">Total: {formatKES(total)}</span>
+          <button type="submit" disabled={busy} className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold cursor-pointer">Save purchase</button>
+        </div>
+      </form>
+
+      <div className="flex flex-wrap items-center justify-between gap-3"><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
+        <p className="text-xs text-slate-400">Spent <b className="text-white">{formatKES(data.totals.spent)}</b> · Paid <b className="text-emerald-400">{formatKES(data.totals.paid)}</b> · Still owed <b className="text-amber-400">{formatKES(data.totals.owed)}</b></p></div>
+      <div className={`${cardCls} overflow-x-auto`}>
+        <table className="w-full text-left text-xs">
+          <thead className="bg-slate-950 text-slate-400 uppercase font-black"><tr><th className="p-3">Date</th><th className="p-3">Supplier</th><th className="p-3">Item</th><th className="p-3 text-right">Qty</th><th className="p-3 text-right">Unit</th><th className="p-3 text-right">Total</th><th className="p-3 text-right">Owed</th><th className="p-3">Stock</th><th className="p-3"></th></tr></thead>
+          <tbody className="divide-y divide-slate-800/60">
+            {data.purchases.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-slate-500 font-bold">No purchases in this period.</td></tr>}
+            {data.purchases.map((p: any) => (
+              <tr key={p.id} className="hover:bg-slate-800/40"><td className="p-3 text-slate-400 whitespace-nowrap">{p.purchaseDate}</td><td className="p-3">{p.supplierName}</td><td className="p-3 font-bold text-white">{p.itemName}</td><td className="p-3 text-right">{p.quantity}</td><td className="p-3 text-right">{formatKES(p.unitCost)}</td><td className="p-3 text-right font-bold">{formatKES(p.totalCost)}</td>
+                <td className={`p-3 text-right font-black ${p.owed > 0 ? 'text-amber-400' : 'text-slate-500'}`}>{formatKES(p.owed)}</td><td className="p-3">{p.addedToStock ? <span className="text-emerald-400 font-bold">Added</span> : <span className="text-slate-500">—</span>}</td>
+                <td className="p-3 text-right">{p.owed > 0 && <button onClick={() => payBalance(p)} className="px-2.5 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-600 text-white text-[10px] font-extrabold cursor-pointer">Pay balance</button>}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function BulkPricingView({ token, showToast }: { token: string | null; showToast: ToastFn }) {
+  const [products, setProducts] = useState<any[]>([]);
+  const [drafts, setDrafts] = useState<Record<number, { minQty: string; price: string }[]>>({});
+  const load = useCallback(async () => {
+    try {
+      const list = await staffApi('/admin/wholesale', token);
+      setProducts(list);
+      const d: Record<number, { minQty: string; price: string }[]> = {};
+      list.forEach((p: any) => { d[p.id] = (p.tiers || []).map((t: any) => ({ minQty: String(t.minQty), price: String(t.price) })); });
+      setDrafts(d);
+    } catch (err: any) { showToast(err.message, 'error'); }
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+  const save = async (p: any, force = false) => {
+    try {
+      const tiers = (drafts[p.id] || []).filter(t => t.minQty && t.price).map(t => ({ minQty: Number(t.minQty), price: Number(t.price) }));
+      const r = await staffApi(`/admin/products/${p.id}/wholesale-tiers`, token, { method: 'PUT', body: { tiers, force } });
+      showToast(r.message, 'success'); load();
+    } catch (err: any) {
+      if (err.message.includes('below your buying price') && confirm(`${err.message}\n\nSave anyway?`)) return save(p, true);
+      showToast(err.message, 'error');
+    }
+  };
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-slate-400">Give hotels, schools and shops a lower price per bag when they buy many. The best price wins automatically at checkout (it never stacks with the flash sale price). Customers see the bulk prices on the product and in their cart.</p>
+      {products.map(p => (
+        <div key={p.id} className={`${cardCls} p-4`}>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div><p className="text-sm font-black text-white">{p.name} <span className="text-slate-500 font-medium">{p.weightKg}kg</span></p><p className="text-[11px] text-slate-400">Normal price {formatKES(p.price)} · Your buying price {formatKES(p.buyingPrice)}</p></div>
+            <button onClick={() => save(p)} className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold cursor-pointer">Save bulk prices</button>
+          </div>
+          <div className="space-y-2">
+            {(drafts[p.id] || []).map((t, i) => {
+              const price = Number(t.price);
+              return (
+                <div key={i} className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-slate-400">Buy</span><input type="number" min={2} value={t.minQty} onChange={(e) => setDrafts(d => ({ ...d, [p.id]: d[p.id].map((x, j) => j === i ? { ...x, minQty: e.target.value } : x) }))} className="w-20 px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-white" />
+                  <span className="text-slate-400">or more bags — each at KES</span><input type="number" min={1} value={t.price} onChange={(e) => setDrafts(d => ({ ...d, [p.id]: d[p.id].map((x, j) => j === i ? { ...x, price: e.target.value } : x) }))} className="w-28 px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-white" />
+                  {price > 0 && p.price > 0 && <span className="text-emerald-400 font-bold">{Math.round((1 - price / p.price) * 100)}% off</span>}
+                  {price > 0 && p.buyingPrice > 0 && <span className={`font-bold ${price < p.buyingPrice ? 'text-rose-400' : 'text-slate-400'}`}>profit/bag {formatKES(price - p.buyingPrice)}</span>}
+                  <button onClick={() => setDrafts(d => ({ ...d, [p.id]: d[p.id].filter((_, j) => j !== i) }))} className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer"><Trash2 className="w-4 h-4" /></button>
+                </div>
+              );
+            })}
+            {(drafts[p.id] || []).length < 5 && <button onClick={() => setDrafts(d => ({ ...d, [p.id]: [...(d[p.id] || []), { minQty: '', price: '' }] }))} className="text-[11px] font-bold text-sky-400 hover:underline cursor-pointer">+ Add a bulk price</button>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AdminStockPanel({ token, showToast }: { token: string | null; showToast: ToastFn }) {
+  const [tab, setTab] = useState<'levels' | 'purchases' | 'suppliers' | 'bulk'>('levels');
+  const [presetProduct, setPresetProduct] = useState<number | null>(null);
+  const [refresh, setRefresh] = useState(0);
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap gap-2">
+        {([['levels', 'Stock levels & alerts'], ['purchases', 'Purchases'], ['suppliers', 'Suppliers'], ['bulk', 'Bulk (wholesale) prices']] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === id ? 'bg-emerald-700 text-white' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'}`}>{label}</button>
+        ))}
+      </div>
+      {tab === 'levels' && <StockLevelsView key={refresh} token={token} showToast={showToast} onRecordPurchase={(id) => { setPresetProduct(id); setTab('purchases'); }} />}
+      {tab === 'purchases' && <PurchasesView token={token} showToast={showToast} presetProductId={presetProduct} onStockChanged={() => setRefresh(r => r + 1)} />}
+      {tab === 'suppliers' && <SuppliersView token={token} showToast={showToast} />}
+      {tab === 'bulk' && <BulkPricingView token={token} showToast={showToast} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// EXPENSES
+// ---------------------------------------------------------------------------
+function AdminExpensesPanel({ token, showToast }: { token: string | null; showToast: ToastFn }) {
+  const p30 = rangePresets()[3];
+  const [from, setFrom] = useState(p30.from);
+  const [to, setTo] = useState(p30.to);
+  const [category, setCategory] = useState('all');
+  const [data, setData] = useState<any>({ expenses: [], total: 0, byCategory: {}, byMonth: {}, categories: [] });
+  const blank = { category: 'transport', amount: '', description: '', reference: '', expenseDate: ymd(new Date()) };
+  const [form, setForm] = useState<any>(blank);
+  const [editId, setEditId] = useState<number | null>(null);
+  const load = useCallback(async () => {
+    try { setData(await staffApi(`/admin/expenses?from=${from}&to=${to}${category !== 'all' ? `&category=${category}` : ''}`, token)); }
+    catch (err: any) { showToast(err.message, 'error'); }
+  }, [token, from, to, category]);
+  useEffect(() => { load(); }, [load]);
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await staffApi(editId ? `/admin/expenses/${editId}` : '/admin/expenses', token, { method: editId ? 'PUT' : 'POST', body: { ...form, amount: Number(form.amount) } });
+      showToast(editId ? 'Expense updated.' : 'Expense recorded.', 'success'); setForm(blank); setEditId(null); load();
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+  const del = async (x: any) => {
+    if (!confirm(`Delete this ${x.category} expense of ${formatKES(x.amount)}? This is recorded in the activity log.`)) return;
+    try { await staffApi(`/admin/expenses/${x.id}`, token, { method: 'DELETE' }); showToast('Expense deleted.', 'success'); load(); } catch (err: any) { showToast(err.message, 'error'); }
+  };
+  const cats: string[] = data.categories || [];
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
+        <form onSubmit={save} className={`${cardCls} p-5 space-y-3`}>
+          <p className="text-xs font-black text-white flex items-center gap-2"><Wallet className="w-4 h-4 text-amber-400" /> {editId ? 'Edit expense' : 'Record an expense'}</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div><label className={labelCls}>Category</label><select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputCls}>{cats.map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}</select></div>
+            <div><label className={labelCls}>Amount (KES)</label><input required type="number" min={1} step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className={inputCls} /></div>
+          </div>
+          <div><label className={labelCls}>What was it for?</label><input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={inputCls} placeholder="e.g. Lorry to Mombasa, 200 packaging bags" /></div>
+          <div className="grid grid-cols-2 gap-2"><div><label className={labelCls}>Date</label><input type="date" value={form.expenseDate} onChange={(e) => setForm({ ...form, expenseDate: e.target.value })} className={inputCls} /></div><div><label className={labelCls}>Reference</label><input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} className={inputCls} /></div></div>
+          <div className="flex gap-2"><button type="submit" className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold cursor-pointer">{editId ? 'Save changes' : 'Record expense'}</button>{editId && <button type="button" onClick={() => { setEditId(null); setForm(blank); }} className="px-4 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold cursor-pointer">Cancel</button>}</div>
+          <p className="text-[10px] text-slate-500">Don&apos;t record rice you buy here — use Stock &amp; Suppliers → Purchases. Expenses are for running costs and reduce your net profit.</p>
+        </form>
+        <div className="xl:col-span-2 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3"><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
+            <select value={category} onChange={(e) => setCategory(e.target.value)} className="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-white cursor-pointer"><option value="all">All categories</option>{cats.map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}</select></div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StaffStat label="Total expenses" value={formatKES(data.total)} tone="amber" />
+            {Object.entries(data.byCategory).sort((a: any, b: any) => b[1] - a[1]).slice(0, 3).map(([c, v]: any) => <StaffStat key={c} label={String(c).replace('_', ' ')} value={formatKES(v)} />)}
+          </div>
+          <div className={`${cardCls} overflow-x-auto`}>
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-950 text-slate-400 uppercase font-black"><tr><th className="p-3">Date</th><th className="p-3">Category</th><th className="p-3">Details</th><th className="p-3 text-right">Amount</th><th className="p-3"></th></tr></thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {data.expenses.length === 0 && <tr><td colSpan={5} className="p-6 text-center text-slate-500 font-bold">No expenses in this period.</td></tr>}
+                {data.expenses.map((x: any) => (
+                  <tr key={x.id} className="hover:bg-slate-800/40"><td className="p-3 text-slate-400 whitespace-nowrap">{x.expenseDate}</td><td className="p-3 capitalize font-bold text-white">{x.category.replace('_', ' ')}</td><td className="p-3 text-slate-300">{x.description || '—'}{x.reference && <span className="block text-[10px] font-mono text-slate-500">{x.reference}</span>}</td><td className="p-3 text-right font-black text-amber-400">{formatKES(x.amount)}</td>
+                    <td className="p-3 text-right whitespace-nowrap"><button onClick={() => { setEditId(x.id); setForm({ category: x.category, amount: String(x.amount), description: x.description || '', reference: x.reference || '', expenseDate: x.expenseDate }); }} className="p-1.5 text-slate-400 hover:text-sky-400 cursor-pointer"><Edit className="w-4 h-4" /></button><button onClick={() => del(x)} className="p-1.5 text-slate-400 hover:text-rose-400 cursor-pointer"><Trash2 className="w-4 h-4" /></button></td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CUSTOMER SEGMENTS & SMS CAMPAIGNS
+// ---------------------------------------------------------------------------
+function AdminCampaignsPanel({ token, showToast }: { token: string | null; showToast: ToastFn }) {
+  const blankF = { counties: [] as string[], minOrders: '', maxOrders: '', minSpent: '', inactiveDays: '', joinedWithinDays: '', neverOrdered: false, referredOnly: false, boughtProductIds: [] as number[] };
+  const [f, setF] = useState<any>(blankF);
+  const [name, setName] = useState('');
+  const [message, setMessage] = useState('');
+  const [preview, setPreview] = useState<any>(null);
+  const [confirmText, setConfirmText] = useState('');
+  const [allowQuiet, setAllowQuiet] = useState(false);
+  const [history, setHistory] = useState<any>({ campaigns: [], optOuts: 0, balance: null, running: false });
+  const [products, setProducts] = useState<any[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const loadHistory = useCallback(async () => { try { setHistory(await staffApi('/admin/campaigns', token)); } catch (_) { /* ignore */ } }, [token]);
+  useEffect(() => { loadHistory(); staffApi('/admin/wholesale', token).then(setProducts).catch(() => {}); }, [loadHistory, token]);
+  useEffect(() => { if (!history.running && !history.campaigns.some((c: any) => c.status === 'sending')) return; const t = setInterval(loadHistory, 4000); return () => clearInterval(t); }, [history, loadHistory]);
+
+  const filterBody = () => ({ ...f, minOrders: f.minOrders === '' ? null : Number(f.minOrders), maxOrders: f.maxOrders === '' ? null : Number(f.maxOrders), minSpent: f.minSpent === '' ? null : Number(f.minSpent), inactiveDays: f.inactiveDays === '' ? null : Number(f.inactiveDays), joinedWithinDays: f.joinedWithinDays === '' ? null : Number(f.joinedWithinDays) });
+  const runPreview = async () => {
+    setBusy(true);
+    try { setPreview(await staffApi('/admin/campaigns/preview', token, { method: 'POST', body: { message, filters: filterBody() } })); }
+    catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(false); }
+  };
+  const send = async () => {
+    setBusy(true);
+    try {
+      const r = await staffApi('/admin/campaigns', token, { method: 'POST', body: { name, message, filters: filterBody(), confirm: confirmText, allowQuietHours: allowQuiet } });
+      showToast(r.message, 'success'); setConfirmText(''); setPreview(null); setMessage(''); setName(''); loadHistory();
+    } catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(false); }
+  };
+  const stop = async (id: number) => { try { await staffApi(`/admin/campaigns/${id}/stop`, token, { method: 'POST' }); showToast('Stopping…', 'info'); loadHistory(); } catch (err: any) { showToast(err.message, 'error'); } };
+  const toggleCounty = (c: string) => setF((x: any) => ({ ...x, counties: x.counties.includes(c) ? x.counties.filter((y: string) => y !== c) : [...x.counties, c] }));
+  const presets: { label: string; apply: any }[] = [
+    { label: 'Everyone', apply: blankF },
+    { label: 'Never ordered', apply: { ...blankF, neverOrdered: true } },
+    { label: 'Repeat buyers (2+ orders)', apply: { ...blankF, minOrders: '2' } },
+    { label: 'Big spenders (KES 10,000+)', apply: { ...blankF, minSpent: '10000' } },
+    { label: 'Haven\'t ordered in 60 days', apply: { ...blankF, inactiveDays: '60' } },
+    { label: 'Joined in the last 14 days', apply: { ...blankF, joinedWithinDays: '14' } }
+  ];
+  const parts = smsPartsOf(message);
+  const statusPill: Record<string, string> = { sending: 'bg-sky-950 text-sky-300 border-sky-800', sent: 'bg-emerald-950 text-emerald-300 border-emerald-800', failed: 'bg-rose-950 text-rose-300 border-rose-800', stopped: 'bg-amber-950 text-amber-300 border-amber-800' };
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StaffStat label="SMS credit" value={history.balance === null ? 'Unknown' : history.balance} tone={history.balance !== null && history.balance < 10 ? 'rose' : 'emerald'} hint="Updates after each SMS sent" />
+        <StaffStat label="Opted out of promotions" value={history.optOuts} hint="Never messaged again" />
+        <StaffStat label="Campaigns sent" value={history.campaigns.filter((c: any) => c.status === 'sent').length} />
+        <StaffStat label="Status" value={history.running ? 'Sending…' : 'Idle'} tone={history.running ? 'sky' : 'slate'} />
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
+        <div className={`${cardCls} p-5 space-y-4`}>
+          <p className="text-xs font-black text-white flex items-center gap-2"><Users className="w-4 h-4 text-sky-400" /> 1 · Choose who gets it</p>
+          <div className="flex flex-wrap gap-2">{presets.map(p => <button key={p.label} onClick={() => { setF(p.apply); setPreview(null); }} className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold cursor-pointer">{p.label}</button>)}</div>
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div><label className={labelCls}>At least this many orders</label><input type="number" min={0} value={f.minOrders} onChange={(e) => setF({ ...f, minOrders: e.target.value })} className={inputCls} /></div>
+            <div><label className={labelCls}>At most this many orders</label><input type="number" min={0} value={f.maxOrders} onChange={(e) => setF({ ...f, maxOrders: e.target.value })} className={inputCls} /></div>
+            <div><label className={labelCls}>Spent at least (KES)</label><input type="number" min={0} value={f.minSpent} onChange={(e) => setF({ ...f, minSpent: e.target.value })} className={inputCls} /></div>
+            <div><label className={labelCls}>Last order older than (days)</label><input type="number" min={0} value={f.inactiveDays} onChange={(e) => setF({ ...f, inactiveDays: e.target.value })} className={inputCls} /></div>
+            <div><label className={labelCls}>Joined within (days)</label><input type="number" min={0} value={f.joinedWithinDays} onChange={(e) => setF({ ...f, joinedWithinDays: e.target.value })} className={inputCls} /></div>
+            <div><label className={labelCls}>Bought this rice</label><select value={f.boughtProductIds[0] || ''} onChange={(e) => setF({ ...f, boughtProductIds: e.target.value ? [Number(e.target.value)] : [] })} className={inputCls}><option value="">Any</option>{products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+          </div>
+          <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-300">
+            <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={f.neverOrdered} onChange={(e) => setF({ ...f, neverOrdered: e.target.checked })} className="accent-emerald-500" /> Never paid for an order</label>
+            <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={f.referredOnly} onChange={(e) => setF({ ...f, referredOnly: e.target.checked })} className="accent-emerald-500" /> Only customers referred by an agent</label>
+          </div>
+          <div>
+            <label className={labelCls}>Counties they have ordered from {f.counties.length > 0 && <span className="text-emerald-400">({f.counties.length} chosen)</span>}</label>
+            <div className="max-h-28 overflow-y-auto p-2 rounded-xl bg-slate-950 border border-slate-800 flex flex-wrap gap-1.5">
+              {ALL_47_COUNTIES.map(c => <button key={c} onClick={() => toggleCounty(c)} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${f.counties.includes(c) ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{c}</button>)}
+            </div>
+          </div>
+        </div>
+
+        <div className={`${cardCls} p-5 space-y-4`}>
+          <p className="text-xs font-black text-white flex items-center gap-2"><MessageSquare className="w-4 h-4 text-emerald-400" /> 2 · Write the message</p>
+          <div><label className={labelCls}>Campaign name (only you see this)</label><input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. October bulk offer" /></div>
+          <div>
+            <label className={labelCls}>Message (an opt-out link is added automatically)</label>
+            <textarea rows={4} maxLength={320} value={message} onChange={(e) => { setMessage(e.target.value); setPreview(null); }} className={inputCls} placeholder="Mwea Rice Hub: Buy 10+ bags of Pishori and pay only KES 1,100 each. Order now at ..." />
+            <p className="text-[10px] text-slate-500 mt-1">{message.length}/320 characters · about {parts} SMS per customer including the opt-out link</p>
+          </div>
+          <button onClick={runPreview} disabled={busy || message.trim().length < 10} className="w-full py-2.5 rounded-xl bg-sky-700 hover:bg-sky-600 disabled:opacity-40 text-white text-xs font-extrabold cursor-pointer">Check who this reaches and what it costs</button>
+          {preview && (
+            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div><p className={labelCls}>Customers reached</p><p className="text-xl font-black text-white">{preview.count}</p></div>
+                <div><p className={labelCls}>Estimated SMS credit</p><p className="text-xl font-black text-amber-400">{preview.estimatedCost}</p></div>
+              </div>
+              <p className="text-[11px] text-slate-400">Skipped: {preview.optedOut} opted out · {preview.noPhone} without a valid phone. {preview.canAfford === false && <b className="text-rose-400">You do not have enough SMS credit ({preview.balance}).</b>} {preview.tooMany && <b className="text-rose-400">Over the limit of {preview.max} — narrow the segment.</b>}</p>
+              {preview.sample.length > 0 && <p className="text-[11px] text-slate-500">Examples: {preview.sample.map((s: any) => `${s.name} (${s.phone})`).join(', ')}</p>}
+              <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-slate-300 whitespace-pre-wrap">{preview.exampleMessage}</div>
+              <div className="space-y-2 pt-2 border-t border-slate-800">
+                <label className="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer"><input type="checkbox" checked={allowQuiet} onChange={(e) => setAllowQuiet(e.target.checked)} className="accent-emerald-500" /> Send even outside 7am–8pm</label>
+                <div className="flex gap-2"><input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="Type SEND to confirm" className={inputCls} />
+                  <button onClick={send} disabled={busy || confirmText !== 'SEND' || preview.count === 0 || preview.tooMany || name.trim().length < 3} className="px-5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-extrabold cursor-pointer whitespace-nowrap">Send now</button></div>
+                {name.trim().length < 3 && <p className="text-[10px] text-amber-400">Give the campaign a name first.</p>}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className={`${cardCls} overflow-x-auto`}>
+        <p className="p-4 text-xs font-black text-white border-b border-slate-800">Campaign history</p>
+        <table className="w-full text-left text-xs">
+          <thead className="bg-slate-950 text-slate-400 uppercase font-black"><tr><th className="p-3">Campaign</th><th className="p-3">Started</th><th className="p-3">Status</th><th className="p-3 text-right">Targeted</th><th className="p-3 text-right">Sent</th><th className="p-3 text-right">Failed</th><th className="p-3 text-right">Opted-out skipped</th><th className="p-3"></th></tr></thead>
+          <tbody className="divide-y divide-slate-800/60">
+            {history.campaigns.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-slate-500 font-bold">No campaigns yet.</td></tr>}
+            {history.campaigns.map((c: any) => (
+              <tr key={c.id}><td className="p-3"><p className="font-bold text-white">{c.name}</p><p className="text-[10px] text-slate-500 max-w-xs truncate">{c.message}</p></td><td className="p-3 text-slate-400 whitespace-nowrap">{formatWhen(c.startedAt)}</td>
+                <td className="p-3"><span className={`px-2 py-0.5 rounded-full border text-[9px] font-black uppercase ${statusPill[c.status] || ''}`}>{c.status}</span></td><td className="p-3 text-right">{c.totalRecipients}</td><td className="p-3 text-right text-emerald-400 font-bold">{c.sentCount}</td><td className="p-3 text-right text-rose-400">{c.failedCount}</td><td className="p-3 text-right text-slate-400">{c.optedOutSkipped}</td>
+                <td className="p-3 text-right">{c.status === 'sending' && <button onClick={() => stop(c.id)} className="px-2.5 py-1.5 rounded-lg bg-rose-800 hover:bg-rose-700 text-white text-[10px] font-extrabold cursor-pointer">Stop</button>}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+const smsPartsOf = (text: string) => { const len = text.length + 1 + 12 + 'Opt out: '.length + 60; return len <= 160 ? 1 : Math.ceil(len / 153); };
+
+// ---------------------------------------------------------------------------
+// REVIEWS (storefront widgets + moderation)
+// ---------------------------------------------------------------------------
+function StarRating({ value, size = 14, onChange }: { value: number; size?: number; onChange?: (v: number) => void }) {
+  return (
+    <span className="inline-flex items-center gap-0.5" aria-label={`${value} out of 5 stars`}>
+      {[1, 2, 3, 4, 5].map(i => (
+        <button key={i} type="button" disabled={!onChange} onClick={() => onChange && onChange(i)} className={onChange ? 'cursor-pointer' : 'cursor-default'} aria-label={`${i} star`}>
+          <Star style={{ width: size, height: size }} className={i <= Math.round(value) ? 'text-amber-400 fill-amber-400' : 'text-slate-300'} />
+        </button>
+      ))}
+    </span>
+  );
+}
+
+function ReviewsModal({ product, token, user, onClose, showToast, onChanged }: { product: Product; token: string | null; user: UserAccount | null; onClose: () => void; showToast: ToastFn; onChanged: () => void }) {
+  const [data, setData] = useState<any>(null);
+  const [page, setPage] = useState(1);
+  const [rating, setRating] = useState(0);
+  const [title, setTitle] = useState('');
+  const [comment, setComment] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/products/${product.id}/reviews?page=${page}`, { headers: token ? { 'Authorization': `Bearer ${token}` } : {} });
+      const d = await res.json(); setData(d);
+      if (d.myReview) { setRating(d.myReview.rating); setTitle(d.myReview.title || ''); setComment(d.myReview.comment || ''); }
+    } catch (_) { /* ignore */ }
+  }, [product.id, page, token]);
+  useEffect(() => { load(); }, [load]);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rating) { showToast('Choose a star rating first.', 'error'); return; }
+    setBusy(true);
+    try { const r = await staffApi(`/products/${product.id}/reviews`, token, { method: 'POST', body: { rating, title, comment } }); showToast(r.message, 'success'); await load(); onChanged(); }
+    catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(false); }
+  };
+  const sum = data?.summary;
+  return (
+    <div className="fixed inset-0 z-[90] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-3" role="dialog" aria-modal="true">
+      <div className="bg-white rounded-3xl w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+          <div><h3 className="font-black text-slate-900 text-base">{product.brandName}</h3>
+            {sum && <div className="flex items-center gap-2 mt-1"><StarRating value={sum.average} /><span className="text-xs font-bold text-slate-700">{sum.count ? sum.average.toFixed(1) : 'No reviews yet'}</span>{sum.count > 0 && <span className="text-[11px] text-slate-400">({sum.count} review{sum.count > 1 ? 's' : ''})</span>}</div>}</div>
+          <button onClick={onClose} className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 cursor-pointer" aria-label="Close"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="px-6 py-4 overflow-y-auto space-y-4">
+          {sum && sum.count > 0 && (
+            <div className="space-y-1">{[5, 4, 3, 2, 1].map(n => (<div key={n} className="flex items-center gap-2 text-[11px] text-slate-500"><span className="w-3">{n}</span><Star className="w-3 h-3 text-amber-400 fill-amber-400" /><div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-amber-400" style={{ width: `${(sum.distribution[n] / sum.count) * 100}%` }} /></div><span className="w-6 text-right">{sum.distribution[n]}</span></div>))}</div>
+          )}
+          {data && (data.canReview ? (
+            <form onSubmit={submit} className="p-4 rounded-2xl bg-emerald-50 border border-emerald-100 space-y-2">
+              <p className="text-xs font-black text-emerald-900">{data.myReview ? 'Update your review' : 'Write a review'} <span className="font-medium text-emerald-700">· verified buyer</span></p>
+              <StarRating value={rating} size={26} onChange={setRating} />
+              <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={100} placeholder="Headline (optional)" className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs" />
+              <textarea value={comment} onChange={(e) => setComment(e.target.value)} maxLength={1000} rows={3} placeholder="How was the rice? Cooking, aroma, packaging, delivery…" className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs" />
+              <button type="submit" disabled={busy} className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-extrabold cursor-pointer">{data.myReview ? 'Update review' : 'Post review'}</button>
+            </form>
+          ) : <p className="text-[11px] text-slate-500 p-3 rounded-xl bg-slate-50 border border-slate-100">{data.reason}</p>)}
+          <div className="space-y-3">
+            {data && data.reviews.length === 0 && <p className="text-xs text-slate-400 text-center py-4">Be the first to review this rice.</p>}
+            {data && data.reviews.map((r: any) => (
+              <div key={r.id} className="p-3 rounded-2xl border border-slate-100 space-y-1">
+                <div className="flex items-center justify-between"><div className="flex items-center gap-2"><StarRating value={r.rating} size={12} /><span className="text-xs font-bold text-slate-800">{r.author}</span></div><span className="text-[10px] text-slate-400">{new Date(r.createdAt).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}</span></div>
+                <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase text-emerald-700"><Check className="w-3 h-3" /> Verified buyer</span>
+                {r.title && <p className="text-xs font-extrabold text-slate-900">{r.title}</p>}
+                {r.comment && <p className="text-xs text-slate-600 leading-relaxed">{r.comment}</p>}
+                {r.reply && <p className="text-[11px] text-slate-600 bg-slate-50 rounded-xl p-2 border-l-2 border-emerald-500"><b>Mwea Rice Hub:</b> {r.reply}</p>}
+              </div>
+            ))}
+            {data && data.pages > 1 && <div className="flex justify-between text-xs"><button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1.5 rounded-lg bg-slate-100 disabled:opacity-40 cursor-pointer">Newer</button><button disabled={page >= data.pages} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 rounded-lg bg-slate-100 disabled:opacity-40 cursor-pointer">Older</button></div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminReviewsPanel({ token, showToast }: { token: string | null; showToast: ToastFn }) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [status, setStatus] = useState<'all' | 'published' | 'hidden'>('all');
+  const load = useCallback(async () => { try { setRows(await staffApi(`/admin/reviews${status !== 'all' ? `?status=${status}` : ''}`, token)); } catch (err: any) { showToast(err.message, 'error'); } }, [token, status]);
+  useEffect(() => { load(); }, [load]);
+  const update = async (id: number, body: any) => { try { await staffApi(`/admin/reviews/${id}`, token, { method: 'PUT', body }); load(); } catch (err: any) { showToast(err.message, 'error'); } };
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">{(['all', 'published', 'hidden'] as const).map(s => <button key={s} onClick={() => setStatus(s)} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold capitalize cursor-pointer ${status === s ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{s}</button>)}</div>
+      <div className="space-y-3">
+        {rows.length === 0 && <p className="text-xs text-slate-500 font-bold p-6 text-center bg-slate-900 rounded-2xl border border-slate-800">No reviews yet.</p>}
+        {rows.map(r => (
+          <div key={r.id} className={`${cardCls} p-4 space-y-2 ${r.status === 'hidden' ? 'opacity-60' : ''}`}>
+            <div className="flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2"><StarRating value={r.rating} size={13} /><span className="text-xs font-bold text-white">{r.product}</span></div><span className="text-[10px] text-slate-500">{r.customer} · {formatWhen(r.createdAt)}</span></div>
+            {r.title && <p className="text-xs font-extrabold text-slate-200">{r.title}</p>}
+            {r.comment && <p className="text-xs text-slate-300">{r.comment}</p>}
+            {r.adminReply && <p className="text-[11px] text-emerald-300">Your reply: {r.adminReply}</p>}
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button onClick={() => update(r.id, { status: r.status === 'hidden' ? 'published' : 'hidden' })} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer ${r.status === 'hidden' ? 'bg-emerald-700 text-white' : 'bg-rose-900 text-rose-100'}`}>{r.status === 'hidden' ? 'Restore' : 'Hide'}</button>
+              <button onClick={() => { const v = prompt('Your public reply to this review:', r.adminReply || ''); if (v !== null) update(r.id, { reply: v }); }} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 text-[11px] font-bold cursor-pointer">{r.adminReply ? 'Edit reply' : 'Reply'}</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ADMIN SIGN-IN SECOND STEP
+// ---------------------------------------------------------------------------
+function TwoFactorModal({ challenge, onSuccess, onClose, showToast }: { challenge: { challengeId: string; message: string }; onSuccess: (data: any) => void; onClose: () => void; showToast: ToastFn }) {
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!/^\d{6}$/.test(code)) { showToast('Enter the 6-digit code.', 'error'); return; }
+    setBusy(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/user/login/verify-2fa`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challengeId: challenge.challengeId, code }) });
+      const d = await res.json();
+      if (res.ok && d.token) onSuccess(d);
+      else { showToast(d.error || 'Could not verify the code.', 'error'); if (d.expired) onClose(); }
+    } catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(false); }
+  };
+  const resend = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/user/login/resend-2fa`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challengeId: challenge.challengeId }) });
+      const d = await res.json(); showToast(d.message || d.error, res.ok ? 'success' : 'error'); if (d.expired) onClose();
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+  return (
+    <div className="fixed inset-0 z-[110] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4" role="dialog" aria-modal="true">
+      <form onSubmit={submit} className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+        <div className="text-center space-y-1"><ShieldAlert className="w-10 h-10 text-emerald-600 mx-auto" /><h3 className="font-black text-slate-900">Confirm it&apos;s you</h3><p className="text-xs text-slate-500">{challenge.message}</p></div>
+        <input autoFocus inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••••" className="w-full text-center tracking-[0.5em] text-2xl font-black px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500" />
+        <button type="submit" disabled={busy || code.length !== 6} className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-extrabold text-xs cursor-pointer">Verify and sign in</button>
+        <div className="flex justify-between text-[11px]"><button type="button" onClick={resend} className="font-bold text-emerald-700 cursor-pointer">Send a new code</button><button type="button" onClick={onClose} className="font-bold text-slate-500 cursor-pointer">Cancel</button></div>
+      </form>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ADMIN: SYSTEM (health, safety settings, daily summary, permissions)
+// ---------------------------------------------------------------------------
+function AdminSystemPanel({ token, showToast }: { token: string | null; showToast: ToastFn }) {
+  const [status, setStatus] = useState<any>(null);
+  const [ops, setOps] = useState<any>(null);
+  const [perms, setPerms] = useState<any>(null);
+  const [extra, setExtra] = useState({ phones: '', emails: '' });
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [s, o, p] = await Promise.all([staffApi('/admin/system/status', token), staffApi('/admin/ops-settings', token), staffApi('/admin/permissions', token)]);
+      setStatus(s); setOps(o); setPerms(p);
+      setExtra({ phones: (o.dailySummary.extraPhones || []).join(', '), emails: (o.dailySummary.extraEmails || []).join(', ') });
+    } catch (err: any) { showToast(err.message, 'error'); }
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+
+  const saveOps = async (patch: any, okMsg = 'Settings saved.') => {
+    setBusy(true);
+    try { await staffApi('/admin/ops-settings', token, { method: 'PUT', body: patch }); showToast(okMsg, 'success'); await load(); }
+    catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(false); }
+  };
+  const togglePerm = async (role: string, key: string, value: boolean) => {
+    try { const r = await staffApi('/admin/permissions', token, { method: 'PUT', body: { role, changes: { [key]: value } } }); setPerms((p: any) => ({ ...p, permissions: r.permissions })); showToast('Permission updated.', 'success'); }
+    catch (err: any) { showToast(err.message, 'error'); }
+  };
+  const sendTest = async () => {
+    setBusy(true);
+    try { const r = await staffApi('/admin/daily-summary/send-test', token, { method: 'POST' }); showToast(r.message, r.errors && r.errors.length ? 'warning' : 'success'); }
+    catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(false); }
+  };
+  const reconcile = async () => { try { const r = await staffApi('/admin/system/reconcile-now', token, { method: 'POST' }); showToast(r.message, 'info'); setTimeout(load, 6000); } catch (err: any) { showToast(err.message, 'error'); } };
+
+  if (!status || !ops || !perms) return <p className="text-xs text-slate-500 font-bold">Loading system status…</p>;
+  const job = status.jobs.paymentReconcile;
+  const smsPct = status.sms.balance === null ? 0 : Math.min(100, (status.sms.balance / Math.max(1, status.sms.threshold * 4)) * 100);
+  const roleLabels: Record<string, string> = { support: 'Customer care', agent: 'Agents' };
+
+  return (
+    <div className="space-y-6">
+      {/* HEALTH */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className={`rounded-2xl p-4 border ${status.sms.low ? 'bg-rose-950/50 border-rose-800' : 'bg-slate-900 border-slate-800'}`}>
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">SMS credit (OTP codes)</p>
+          <p className={`text-xl font-black mt-1 ${status.sms.low ? 'text-rose-400' : 'text-emerald-400'}`}>{status.sms.balance === null ? 'Not known yet' : status.sms.balance}</p>
+          <div className="h-1.5 rounded-full bg-slate-800 mt-2 overflow-hidden"><div className={`h-full ${status.sms.low ? 'bg-rose-500' : 'bg-emerald-500'}`} style={{ width: `${smsPct}%` }} /></div>
+          <p className="text-[10px] text-slate-500 mt-1">{status.sms.low ? 'LOW — top up Ping Africa now' : `Alert below ${status.sms.threshold}`}</p>
+        </div>
+        <StaffStat label="Database" value={status.database ? 'Connected' : 'DOWN'} tone={status.database ? 'emerald' : 'rose'} hint={`Server up ${status.uptimeMinutes} min · Node ${status.nodeVersion}`} />
+        <StaffStat label="Unpaid orders now" value={status.unpaidOrders} tone={status.unpaidOrders > 10 ? 'amber' : 'slate'} hint="Checked every 3 minutes" />
+        <StaffStat label="Error monitoring" value={status.sentry ? 'Sentry on' : 'Built-in log'} tone={status.sentry ? 'emerald' : 'sky'} hint={status.sentryConfigured && !status.sentry ? 'DSN set but package missing' : 'Errors appear in Live Activity'} />
+      </div>
+
+      {/* PAYMENT SAFETY NET */}
+      <div className={`${cardCls} p-5 space-y-3`}>
+        <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-black text-white flex items-center gap-2"><RefreshCw className="w-4 h-4 text-emerald-400" /> Payment safety net</p><button onClick={reconcile} className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold cursor-pointer">Re-check payments now</button></div>
+        <p className="text-[11px] text-slate-400">Every 3 minutes the server asks PayHero about unpaid orders. Paid ones are confirmed even if the customer closed the page; orders still unpaid after the time below are cancelled and their stock is released.</p>
+        <p className="text-[11px] text-slate-500">Last run: {job.lastRun ? formatWhen(job.lastRun) : 'not yet'} · checked {job.checked} · confirmed {job.confirmed} · failed {job.failed} · expired {job.expired}{job.error ? ` · ${job.error}` : ''}</p>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-2 border-t border-slate-800">
+          <div><label className={labelCls}>Cancel unpaid orders after (minutes)</label><input type="number" min={10} max={1440} defaultValue={ops.orderExpiryMinutes} onBlur={(e) => Number(e.target.value) !== ops.orderExpiryMinutes && saveOps({ orderExpiryMinutes: Number(e.target.value) })} className={inputCls} /></div>
+          <div><label className={labelCls}>Low stock default (bags)</label><input type="number" min={0} defaultValue={ops.lowStockDefault} onBlur={(e) => Number(e.target.value) !== ops.lowStockDefault && saveOps({ lowStockDefault: Number(e.target.value) })} className={inputCls} /></div>
+          <div><label className={labelCls}>SMS credit alert level</label><input type="number" min={0} defaultValue={ops.smsLowThreshold} onBlur={(e) => Number(e.target.value) !== ops.smsLowThreshold && saveOps({ smsLowThreshold: Number(e.target.value) })} className={inputCls} /></div>
+          <div><label className={labelCls}>Credit used per SMS</label><input type="number" min={0} step="0.05" defaultValue={ops.smsCostPerPart} onBlur={(e) => Number(e.target.value) !== ops.smsCostPerPart && saveOps({ smsCostPerPart: Number(e.target.value) })} className={inputCls} /></div>
+        </div>
+        <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer"><input type="checkbox" checked={ops.autoReconcile !== false} onChange={(e) => saveOps({ autoReconcile: e.target.checked })} className="accent-emerald-500" /> Automatic payment re-check and unpaid-order expiry is ON</label>
+      </div>
+
+      {/* SECURITY */}
+      <div className={`${cardCls} p-5 space-y-2`}>
+        <p className="text-xs font-black text-white flex items-center gap-2"><ShieldAlert className="w-4 h-4 text-amber-400" /> Administrator sign-in security</p>
+        <label className="flex items-start gap-2 text-xs text-slate-300 cursor-pointer"><input type="checkbox" checked={ops.adminTwoFactor !== false} onChange={(e) => { if (!e.target.checked && !confirm('Turn OFF two-step sign-in for administrators? Anyone with an admin password could then get in. This is recorded as a security alert.')) return; saveOps({ adminTwoFactor: e.target.checked }); }} className="accent-emerald-500 mt-0.5" /> <span>Require a 6-digit code (sent by SMS and email) after the password when an administrator signs in.</span></label>
+        {status.twoFactor.forcedOffByEnv && <p className="text-[11px] text-amber-400 font-bold">Currently forced OFF by the DISABLE_ADMIN_2FA setting on your server. Remove that setting to turn it back on.</p>}
+        <p className="text-[10px] text-slate-500">If SMS credit runs out and you cannot receive the email, set DISABLE_ADMIN_2FA=true on Render to get back in, then remove it.</p>
+      </div>
+
+      {/* DAILY SUMMARY */}
+      <div className={`${cardCls} p-5 space-y-3`}>
+        <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-black text-white flex items-center gap-2"><MessageSquare className="w-4 h-4 text-sky-400" /> Daily summary</p><button onClick={sendTest} disabled={busy} className="px-3 py-1.5 rounded-lg bg-sky-800 hover:bg-sky-700 text-white text-[11px] font-extrabold cursor-pointer">Send today&apos;s summary now</button></div>
+        <p className="text-[11px] text-slate-400">Sales, payments, profit estimate, low stock, commissions owed and alerts, sent to every administrator.</p>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-300">
+          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={ops.dailySummary.enabled} onChange={(e) => saveOps({ dailySummary: { enabled: e.target.checked } })} className="accent-emerald-500" /> Send every day at</label>
+          <input type="time" defaultValue={ops.dailySummary.time} onBlur={(e) => e.target.value && e.target.value !== ops.dailySummary.time && saveOps({ dailySummary: { time: e.target.value } })} className="px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-white" /><span className="text-slate-500 text-[11px]">(Kenya time)</span>
+          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={ops.dailySummary.sms} onChange={(e) => saveOps({ dailySummary: { sms: e.target.checked } })} className="accent-emerald-500" /> SMS</label>
+          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={ops.dailySummary.email} onChange={(e) => saveOps({ dailySummary: { email: e.target.checked } })} className="accent-emerald-500" /> Email</label>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div><label className={labelCls}>Extra phone numbers (comma separated)</label><input value={extra.phones} onChange={(e) => setExtra({ ...extra, phones: e.target.value })} onBlur={() => saveOps({ dailySummary: { extraPhones: extra.phones.split(',').map(s => s.trim()).filter(Boolean) } })} className={inputCls} placeholder="0712345678, 0722000000" /></div>
+          <div><label className={labelCls}>Extra email addresses</label><input value={extra.emails} onChange={(e) => setExtra({ ...extra, emails: e.target.value })} onBlur={() => saveOps({ dailySummary: { extraEmails: extra.emails.split(',').map(s => s.trim()).filter(Boolean) } })} className={inputCls} placeholder="accountant@example.com" /></div>
+        </div>
+        <p className="text-[10px] text-slate-500">Administrators&apos; own phone numbers and emails (from their accounts) always receive it.</p>
+      </div>
+
+      {/* PERMISSIONS */}
+      <div className={`${cardCls} p-5 space-y-4`}>
+        <p className="text-xs font-black text-white flex items-center gap-2"><Shield className="w-4 h-4 text-emerald-400" /> Role permissions</p>
+        <p className="text-[11px] text-slate-400">Switch abilities on or off for each staff type. Changes apply immediately. Administrators always have full access.</p>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {Object.keys(perms.catalog).map(role => (
+            <div key={role} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+              <p className="text-[11px] font-black uppercase tracking-wider text-sky-400">{roleLabels[role] || role}</p>
+              {perms.catalog[role].map((p: any) => (
+                <label key={p.key} className="flex items-center justify-between gap-3 text-xs text-slate-200 cursor-pointer py-1">
+                  <span>{p.label}</span>
+                  <input type="checkbox" checked={!!perms.permissions[role][p.key]} onChange={(e) => togglePerm(role, p.key, e.target.checked)} className="accent-emerald-500 w-4 h-4" />
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* RECENT PROBLEMS */}
+      <div className={`${cardCls} overflow-hidden`}>
+        <p className="p-4 text-xs font-black text-white border-b border-slate-800">Recent problems & warnings</p>
+        <div className="divide-y divide-slate-800/60 max-h-72 overflow-y-auto">
+          {status.recentErrors.length === 0 && <p className="p-6 text-center text-xs text-emerald-400 font-bold">Nothing wrong has been recorded. 🎉</p>}
+          {status.recentErrors.map((e: any) => (<div key={e.id} className="p-3"><p className="text-xs text-slate-200"><span className="font-mono text-[10px] text-rose-400">{e.action}</span> {e.summary}</p><p className="text-[10px] text-slate-500 mt-0.5">{formatWhen(e.createdAt)}</p></div>))}
         </div>
       </div>
     </div>
@@ -1914,7 +2811,7 @@ function AgentDashboard({ token, user, showToast, onSessionExpired }: { token: s
           <StaffStat label="Paid orders" value={sm.orders} hint={`${sm.newCustomerOrders} first orders · ${sm.repeatOrders} repeat`} />
           <StaffStat label="Rice sold" value={`${sm.kgSold.toLocaleString()} kg`} tone="emerald" />
           <StaffStat label="Sales value" value={formatKES(sm.salesValue)} />
-          <StaffStat label="Profit you generated" value={formatKES(sm.profitGenerated)} />
+          <StaffStat label="Profit you generated" value={sm.profitGenerated === null ? '—' : formatKES(sm.profitGenerated)} />
           <StaffStat label="Commission pending" value={formatKES(sm.commissionPending)} tone="amber" hint="Awaiting payout" />
           <StaffStat label="Commission paid" value={formatKES(sm.commissionPaid)} tone="emerald" />
           <StaffStat label="Total earned" value={formatKES(sm.commissionTotal)} tone="emerald" />
@@ -1938,7 +2835,7 @@ function AgentDashboard({ token, user, showToast, onSessionExpired }: { token: s
         <div className="flex flex-wrap gap-2">
           {([
             ['commissions', 'My Sales & Commission'], ['customers', 'My Customers'], ['rice', 'Rice I Have Sold'], ['payouts', 'Payouts Received']
-          ] as const).map(([id, label]) => (
+          ] as const).filter(([id]) => id !== 'customers' || data.permissions?.['agent.customers'] !== false).map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === id ? 'bg-emerald-700 text-white' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'}`}>{label}</button>
           ))}
         </div>
@@ -1959,7 +2856,7 @@ function AgentDashboard({ token, user, showToast, onSessionExpired }: { token: s
                       <td className="p-3 font-bold text-white">{c.customer}</td>
                       <td className="p-3 text-slate-300 max-w-[220px] truncate" title={c.items}>{c.items}</td>
                       <td className="p-3"><span className={`px-2 py-0.5 rounded-md font-black text-[9px] uppercase ${c.type === 'NEW_CUSTOMER' ? 'bg-sky-950 text-sky-300' : 'bg-slate-800 text-slate-300'}`}>{c.type === 'NEW_CUSTOMER' ? 'New customer' : 'Repeat'}</span></td>
-                      <td className="p-3 text-right">{formatKES(c.profit)}</td>
+                      <td className="p-3 text-right">{c.profit === null ? '—' : formatKES(c.profit)}</td>
                       <td className="p-3 text-right text-slate-300">{Math.round(c.rate * 100)}%</td>
                       <td className="p-3 text-right font-black text-emerald-400">{formatKES(c.amount)}</td>
                       <td className="p-3"><StatusPill status={c.status} /></td>
@@ -2037,11 +2934,14 @@ function AgentDashboard({ token, user, showToast, onSessionExpired }: { token: s
 // CUSTOMER CARE DASHBOARD — fixed navigation panel on the left, work area on the right
 // Can view every account, order and payment. The only changes allowed: fix a name, reactivate an account.
 // ---------------------------------------------------------------------------
-type SupportSection = 'overview' | 'customers' | 'orders' | 'payments' | 'activity';
+type SupportSection = 'overview' | 'customers' | 'orders' | 'payments' | 'reviews' | 'activity';
 
 function SupportDashboard({ token, user, showToast, onSessionExpired }: { token: string | null; user: UserAccount; showToast: ToastFn; onSessionExpired: () => void }) {
   const [section, setSection] = useState<SupportSection>('overview');
   const [overview, setOverview] = useState<any>(null);
+  const [perms, setPerms] = useState<Record<string, boolean> | null>(null);
+  const can = (k: string) => !!(perms && perms[k]);
+  useEffect(() => { staffApi('/me/permissions', token).then(d => setPerms(d.permissions)).catch(() => setPerms({})); }, [token]);
 
   // customers
   const [list, setList] = useState<any>({ users: [], total: 0, page: 1, pages: 1 });
@@ -2125,13 +3025,16 @@ function SupportDashboard({ token, user, showToast, onSessionExpired }: { token:
 
   const u = selected?.user;
   const readOnly = !!u && (u.role === 'admin' || u.role === 'support' || u.id === user.id);
-  const navItems: { id: SupportSection; label: string; icon: any; badge?: number }[] = [
+  const allNav: { id: SupportSection; label: string; icon: any; badge?: number; perm?: string[] }[] = [
     { id: 'overview', label: 'Overview', icon: Activity },
-    { id: 'customers', label: 'Customers', icon: Users, badge: overview?.suspended },
-    { id: 'orders', label: 'Orders', icon: Package },
-    { id: 'payments', label: 'Payments', icon: Wallet, badge: overview ? overview.pendingPayments + overview.failedPayments : undefined },
+    { id: 'customers', label: 'Customers', icon: Users, badge: overview?.suspended, perm: ['users.view'] },
+    { id: 'orders', label: 'Orders', icon: Package, perm: ['orders.view'] },
+    { id: 'payments', label: 'Payments', icon: Wallet, badge: overview && overview.pendingPayments !== null ? overview.pendingPayments + overview.failedPayments : undefined, perm: ['payments.view'] },
+    { id: 'reviews', label: 'Reviews', icon: Star, perm: ['reviews.moderate'] },
     { id: 'activity', label: 'My Activity', icon: Clock }
   ];
+  const navItems = allNav.filter(n => !n.perm || n.perm.some(k => can(k)));
+  useEffect(() => { if (perms && !navItems.some(n => n.id === section)) setSection('overview'); }, [perms]);
   const verdictStyle: Record<string, string> = {
     CONFIRMED_PAID: 'bg-emerald-950 border-emerald-800 text-emerald-200', NOT_PAID: 'bg-slate-800 border-slate-700 text-slate-200',
     PAID_NOT_RECORDED: 'bg-rose-950 border-rose-800 text-rose-200', RECORDED_PAID_UNCONFIRMED: 'bg-amber-950 border-amber-800 text-amber-200', UNKNOWN: 'bg-slate-800 border-slate-700 text-slate-300'
@@ -2173,7 +3076,7 @@ function SupportDashboard({ token, user, showToast, onSessionExpired }: { token:
                     <td className="p-3 text-right font-bold">{formatKES(o.grandTotal)}</td>
                     <td className="p-3"><span className={`px-2 py-0.5 rounded-full border text-[9px] font-black uppercase ${payPill(o.paymentState)}`}>{o.paymentState}</span></td>
                     <td className="p-3 text-right whitespace-nowrap space-x-1.5">
-                      <button onClick={() => checkPayment(o.id)} disabled={checking === o.id} className="px-2.5 py-1.5 rounded-lg bg-sky-800 hover:bg-sky-700 disabled:opacity-50 text-white text-[10px] font-extrabold cursor-pointer">{checking === o.id ? 'Checking…' : 'Check payment'}</button>
+                      <button style={{ display: can('payments.check') ? undefined : 'none' }} onClick={() => checkPayment(o.id)} disabled={checking === o.id} className="px-2.5 py-1.5 rounded-lg bg-sky-800 hover:bg-sky-700 disabled:opacity-50 text-white text-[10px] font-extrabold cursor-pointer">{checking === o.id ? 'Checking…' : 'Check payment'}</button>
                       <button onClick={() => setOpenOrder(openOrder === o.id ? null : o.id)} className="p-1.5 text-slate-400 hover:text-white cursor-pointer" title="Details"><Eye className="w-4 h-4" /></button>
                     </td>
                   </tr>
@@ -2240,14 +3143,14 @@ function SupportDashboard({ token, user, showToast, onSessionExpired }: { token:
                   <StaffStat label="Suspended" value={overview.suspended} tone="rose" />
                   <StaffStat label="Not verified" value={overview.unverified} tone="amber" />
                   <StaffStat label="New this week" value={overview.newThisWeek} tone="emerald" />
-                  <StaffStat label="Paid today" value={overview.paidToday} tone="emerald" hint={formatKES(overview.paidTodayValue)} />
-                  <StaffStat label="Awaiting payment" value={overview.pendingPayments} tone="amber" />
-                  <StaffStat label="Failed payments" value={overview.failedPayments} tone="rose" />
+                  {overview.paidToday !== null && <StaffStat label="Paid today" value={overview.paidToday} tone="emerald" hint={formatKES(overview.paidTodayValue)} />}
+                  {overview.pendingPayments !== null && <StaffStat label="Awaiting payment" value={overview.pendingPayments} tone="amber" />}
+                  {overview.failedPayments !== null && <StaffStat label="Failed payments" value={overview.failedPayments} tone="rose" />}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <button onClick={() => { setStatus('suspended'); setPage(1); setSection('customers'); }} className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-rose-700 text-left cursor-pointer"><p className="text-xs font-black text-white flex items-center gap-2"><Ban className="w-4 h-4 text-rose-400" /> Suspended accounts</p><p className="text-[11px] text-slate-400 mt-1">Review and reactivate customers who were suspended.</p></button>
-                  <button onClick={() => { setPayFilter('failed'); setOrderPage(1); setSection('payments'); }} className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-rose-700 text-left cursor-pointer"><p className="text-xs font-black text-white flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-rose-400" /> Failed payments</p><p className="text-[11px] text-slate-400 mt-1">Help customers whose M-Pesa payment did not go through.</p></button>
-                  <button onClick={() => { setPayFilter('pending'); setOrderPage(1); setSection('payments'); }} className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-amber-700 text-left cursor-pointer"><p className="text-xs font-black text-white flex items-center gap-2"><Clock className="w-4 h-4 text-amber-400" /> Awaiting payment</p><p className="text-[11px] text-slate-400 mt-1">Check whether pending orders were actually paid.</p></button>
+                  {can('payments.view') && <button onClick={() => { setPayFilter('failed'); setOrderPage(1); setSection('payments'); }} className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-rose-700 text-left cursor-pointer"><p className="text-xs font-black text-white flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-rose-400" /> Failed payments</p><p className="text-[11px] text-slate-400 mt-1">Help customers whose M-Pesa payment did not go through.</p></button>}
+                  {can('payments.view') && <button onClick={() => { setPayFilter('pending'); setOrderPage(1); setSection('payments'); }} className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-amber-700 text-left cursor-pointer"><p className="text-xs font-black text-white flex items-center gap-2"><Clock className="w-4 h-4 text-amber-400" /> Awaiting payment</p><p className="text-[11px] text-slate-400 mt-1">Check whether pending orders were actually paid.</p></button>}
                 </div>
               </>
             ) : <p className="text-xs text-slate-500 font-bold">Loading…</p>}
@@ -2310,11 +3213,11 @@ function SupportDashboard({ token, user, showToast, onSessionExpired }: { token:
                       <p className="text-[11px] font-bold text-slate-400 pt-3 border-t border-slate-800">This is a staff or administrator account, so it is view-only for you.</p>
                     ) : (
                       <>
-                        <form onSubmit={saveName} className="flex flex-col sm:flex-row gap-2 pt-3 border-t border-slate-800">
+                        <form onSubmit={saveName} style={{ display: can('users.rename') ? undefined : 'none' }} className="flex flex-col sm:flex-row gap-2 pt-3 border-t border-slate-800">
                           <input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} className="flex-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-bold text-white" placeholder="Correct full name" />
                           <button type="submit" disabled={busy || nameDraft.trim() === u.fullName} className="px-4 py-2.5 rounded-xl bg-sky-700 hover:bg-sky-600 disabled:opacity-40 text-white text-xs font-extrabold cursor-pointer">Update name</button>
                         </form>
-                        {u.isActive === false && (
+                        {u.isActive === false && can('users.unsuspend') && (
                           <form onSubmit={unsuspend} className="space-y-2 pt-3 border-t border-slate-800">
                             <p className="text-[11px] font-bold text-rose-300 flex items-center gap-1.5"><Ban className="w-3.5 h-3.5" /> Suspended: this customer cannot sign in.</p>
                             <input value={reason} onChange={(e) => setReason(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white" placeholder="Why is it being reactivated? (required)" />
@@ -2351,7 +3254,7 @@ function SupportDashboard({ token, user, showToast, onSessionExpired }: { token:
                   <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
                     <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 space-y-3">
                       <p className="text-xs font-black text-white flex items-center gap-2"><StickyNote className="w-4 h-4 text-amber-400" /> Case notes</p>
-                      <form onSubmit={addNote} className="flex gap-2">
+                      <form onSubmit={addNote} style={{ display: can('users.notes') ? undefined : 'none' }} className="flex gap-2">
                         <input value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white" placeholder="Add a note about this customer…" />
                         <button type="submit" disabled={busy || noteDraft.trim().length < 3 || u.role === 'admin'} className="px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-white text-xs font-bold cursor-pointer">Add</button>
                       </form>
@@ -2376,6 +3279,8 @@ function SupportDashboard({ token, user, showToast, onSessionExpired }: { token:
 
         {section === 'orders' && <><h2 className="text-xl font-black text-white">All orders</h2>{OrdersTable({ mode: 'orders' })}</>}
         {section === 'payments' && <><h2 className="text-xl font-black text-white">Payments</h2><p className="text-xs text-slate-400 -mt-2">Use <span className="font-bold text-sky-300">Check payment</span> to ask PayHero if an order was really paid. It only reports; it never changes the order.</p>{OrdersTable({ mode: 'payments' })}</>}
+
+        {section === 'reviews' && <><h2 className="text-xl font-black text-white">Customer reviews</h2><AdminReviewsPanel token={token} showToast={showToast} /></>}
 
         {section === 'activity' && (
           <>
@@ -2846,10 +3751,13 @@ export default function PremiumRiceStore() {
   const [referralCheck, setReferralCheck] = useState<{ state: 'idle' | 'checking' | 'valid' | 'invalid'; agentName?: string }>({ state: 'idle' });
   const [signupOtp, setSignupOtp] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [twoFactor, setTwoFactor] = useState<{ challengeId: string; message: string } | null>(null);
+  const [reviewProduct, setReviewProduct] = useState<Product | null>(null);
+  const [marketingOptOut, setMarketingOptOut] = useState<boolean | null>(null);
   const [showTerms, setShowTerms] = useState(false);
   
   // ADMIN PANEL NAVIGATION & DATA STATES
-  const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'finances' | 'users' | 'config' | 'carousel' | 'logs' | 'agents' | 'activity'>('inventory');
+  const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'finances' | 'users' | 'config' | 'carousel' | 'logs' | 'agents' | 'activity' | 'reports' | 'stock' | 'expenses' | 'campaigns' | 'reviews' | 'system'>('inventory');
   const [newProduct, setNewProduct] = useState({ 
     brandName: '', variety: '', weightKg: '', basePrice: '', buyingPrice: '', flashSalePrice: '', stockQuantity: '', imageUrl: '', description: '', isOrganic: false 
   });
@@ -3015,6 +3923,9 @@ export default function PremiumRiceStore() {
       });
 
       newSocket.on('connect', () => { fetchFlashSale(); });
+      newSocket.on('smsCreditLow', (d: any) => showToast(`SMS credit is low (${d?.balance}). Customers may stop receiving OTP codes. Top up Ping Africa.`, 'warning'));
+      newSocket.on('lowStockAlert', (d: any) => showToast(`Low stock: ${d?.name} has ${d?.remainingStock} left.`, 'warning'));
+      newSocket.on('productsChanged', () => fetchProducts());
 
       newSocket.on('countyFeesUpdated', (fees: any) => {
         if (fees && typeof fees === 'object') setCountyOverrides(fees);
@@ -3118,6 +4029,23 @@ export default function PremiumRiceStore() {
     if (view === 'agent' && user?.role !== 'agent') setView(user ? 'home' : 'login');
     if (view === 'support' && user?.role !== 'support') setView(user ? 'home' : 'login');
   }, [view, user?.role]);
+
+  // Cart lines use the newest product details (stock, bulk prices) whenever the catalog reloads
+  useEffect(() => {
+    if (!products.length) return;
+    setCart(prev => {
+      let changed = false;
+      const next = prev.map(i => { const fresh = products.find(p => p.id === i.productId); if (fresh && fresh !== i.product) { changed = true; return { ...i, product: fresh }; } return i; });
+      return changed ? next : prev;
+    });
+  }, [products]);
+
+  // Whether this customer wants promotional SMS
+  useEffect(() => {
+    if (!token || view !== 'profile') return;
+    fetch(`${API_BASE_URL}/user/marketing-preference`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json()).then(d => setMarketingOptOut(!!d.optedOut)).catch(() => {});
+  }, [token, view]);
 
   // CONFIRM THE SAVED LOGIN IS STILL VALID (expired / deleted / suspended accounts are signed out)
   useEffect(() => {
@@ -3476,8 +4404,7 @@ export default function PremiumRiceStore() {
   const cartSubtotal = useMemo(() => {
     return cart.reduce((sum, item) => {
       const p = item.product || {};
-      const effectivePrice = flashSale.active && p.flashSalePrice ? p.flashSalePrice : (p.basePrice || p.price || 0);
-      return sum + (effectivePrice * item.quantity);
+      return sum + (getUnitPrice(p, item.quantity, flashSale.active).price * item.quantity);
     }, 0);
   }, [cart, flashSale.active]);
 
@@ -3511,6 +4438,17 @@ export default function PremiumRiceStore() {
   const buildIdentityPayload = (raw: string) => {
     const value = (raw || '').trim();
     return value.includes('@') ? { email: value } : { phoneNumber: value };
+  };
+
+  // Second step of an administrator sign-in
+  const finishTwoFactorSignIn = (data: any) => {
+    setTwoFactor(null);
+    setToken(data.token);
+    setUser(data.user);
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('user', JSON.stringify(data.user));
+    showToast(`Welcome back, ${data.user.fullName}!`, 'success');
+    setView('admin');
   };
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
@@ -3566,6 +4504,12 @@ export default function PremiumRiceStore() {
         return;
       }
       
+      if (res.ok && data.requiresTwoFactor) {
+        setTwoFactor({ challengeId: data.challengeId, message: data.message || 'Enter the 6-digit code we sent you.' });
+        showToast('Check your phone or email for your sign-in code.', 'info');
+        return;
+      }
+
       if (res.ok && data.token) {
         setToken(data.token);
         setUser(data.user);
@@ -4482,6 +5426,7 @@ export default function PremiumRiceStore() {
                     flashActive={flashSale.active}
                     onAddToCart={() => addToCart(product)}
                     onQuickView={() => setQuickViewProduct(product)}
+                    onReviews={() => setReviewProduct(product)}
                   />
                 ))}
               </div>
@@ -4616,6 +5561,7 @@ export default function PremiumRiceStore() {
                     flashActive={flashSale.active}
                     onAddToCart={() => addToCart(product)}
                     onQuickView={() => setQuickViewProduct(product)}
+                    onReviews={() => setReviewProduct(product)}
                   />
                 ))}
               </div>
@@ -4662,7 +5608,9 @@ export default function PremiumRiceStore() {
                     <div className="divide-y divide-slate-100">
                       {cart.map(item => {
                         const p = item.product || {};
-                        const effectivePrice = flashSale.active && p.flashSalePrice ? p.flashSalePrice : (p.basePrice || p.price || 0);
+                        const unit = getUnitPrice(p, item.quantity, flashSale.active);
+                        const effectivePrice = unit.price;
+                        const nextTier = (Array.isArray(p.wholesaleTiers) ? p.wholesaleTiers : []).filter((t: any) => t.minQty > item.quantity).sort((a: any, b: any) => a.minQty - b.minQty)[0];
 
                         return (
                           <div key={item.productId} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -4675,7 +5623,8 @@ export default function PremiumRiceStore() {
                               <div>
                                 <h4 className="font-extrabold text-slate-900 text-xs sm:text-sm">{p.brandName}</h4>
                                 <p className="text-[11px] text-slate-500">{p.variety} • {p.weightKg}kg Sack</p>
-                                <p className="text-emerald-700 font-black text-xs sm:text-sm mt-0.5">{formatKES(effectivePrice)}</p>
+                                <p className="text-emerald-700 font-black text-xs sm:text-sm mt-0.5">{formatKES(effectivePrice)} {unit.bulk && <span className="ml-1 px-1.5 py-0.5 rounded-md bg-sky-100 text-sky-800 text-[9px] font-black uppercase">Bulk price</span>}</p>
+                                {nextTier && <p className="text-[10px] font-bold text-sky-700">Add {nextTier.minQty - item.quantity} more to pay {formatKES(nextTier.price)} each</p>}
                               </div>
                             </div>
 
@@ -4912,6 +5861,25 @@ export default function PremiumRiceStore() {
                 <p className="text-2xl sm:text-3xl font-black text-white">{user.rewardPoints || 0} <span className="text-xs font-normal">pts</span></p>
                 <p className="text-[9px] text-emerald-200 mt-0.5">Earns 0.2 points per kg purchased</p>
               </div>
+            </div>
+
+            {/* Promotional SMS preference */}
+            <div className="bg-white rounded-3xl p-5 border border-slate-100 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-extrabold text-slate-900 flex items-center gap-2"><MessageSquare className="w-4 h-4 text-emerald-600" /> Offers by SMS</p>
+                <p className="text-[11px] text-slate-500">Occasional discounts and bulk deals. You always get order, payment and security messages.</p>
+              </div>
+              <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                <input type="checkbox" disabled={marketingOptOut === null} checked={marketingOptOut === false} onChange={async (e) => {
+                  const optedOut = !e.target.checked;
+                  try {
+                    const res = await fetch(`${API_BASE_URL}/user/marketing-preference`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ optedOut }) });
+                    const d = await res.json();
+                    if (res.ok) { setMarketingOptOut(!!d.optedOut); showToast(d.message, 'success'); } else showToast(d.error || 'Could not save', 'error');
+                  } catch (err: any) { showToast(err.message, 'error'); }
+                }} className="w-4 h-4 accent-emerald-600" />
+                Send me offers
+              </label>
             </div>
 
             {/* My Orders History */}
@@ -5284,6 +6252,12 @@ export default function PremiumRiceStore() {
                         { id: 'users', label: 'User Clearance', icon: Users, desc: 'Edit, suspend, delete' },
                         { id: 'config', label: 'Regional Freight', icon: MapPin, desc: '47 county shipping rates' },
                         { id: 'carousel', label: 'Hero Backdrop', icon: Sliders, desc: 'UI/UX & advert control' },
+                        { id: 'reports', label: 'Profit & Exports', icon: TrendingUp, desc: 'Profit reports, Excel' },
+                        { id: 'stock', label: 'Stock & Suppliers', icon: Package, desc: 'Alerts, purchases, bulk prices' },
+                        { id: 'expenses', label: 'Expenses', icon: Wallet, desc: 'Running costs, net profit' },
+                        { id: 'campaigns', label: 'SMS Campaigns', icon: MessageSquare, desc: 'Segments & promotions' },
+                        { id: 'reviews', label: 'Reviews', icon: Star, desc: 'Moderate customer reviews' },
+                        { id: 'system', label: 'System & Security', icon: Shield, desc: 'Health, 2-step, permissions' },
                         { id: 'agents', label: 'Agents', icon: Briefcase, desc: 'Referrals, commission, payouts' },
                         { id: 'activity', label: 'Live Activity', icon: Activity, desc: 'Everything that happens' },
                         { id: 'logs', label: 'Audit Logs', icon: FileText, desc: 'User account logs' }
@@ -5710,6 +6684,13 @@ export default function PremiumRiceStore() {
                   )}
 
                   {/* SUB-PANEL: USER CLEARANCE (DISPLAY ALL USERS, EDIT, SUSPEND, DELETE) */}
+                  {adminTab === 'reports' && <AdminReportsPanel token={token} showToast={showToast} />}
+                  {adminTab === 'stock' && <AdminStockPanel token={token} showToast={showToast} />}
+                  {adminTab === 'expenses' && <AdminExpensesPanel token={token} showToast={showToast} />}
+                  {adminTab === 'campaigns' && <AdminCampaignsPanel token={token} showToast={showToast} />}
+                  {adminTab === 'reviews' && <AdminReviewsPanel token={token} showToast={showToast} />}
+                  {adminTab === 'system' && <AdminSystemPanel token={token} showToast={showToast} />}
+
                   {adminTab === 'agents' && (
                     <AdminAgentsPanel token={token} showToast={showToast} adminUsers={adminUsers} onUsersChanged={fetchAdminUsers} />
                   )}
@@ -6591,6 +7572,16 @@ export default function PremiumRiceStore() {
                 <p className="text-2xl font-black text-emerald-700">
                   {formatKES(flashSale.active && quickViewProduct.flashSalePrice ? quickViewProduct.flashSalePrice : quickViewProduct.basePrice)}
                 </p>
+                {Array.isArray(quickViewProduct.wholesaleTiers) && quickViewProduct.wholesaleTiers.length > 0 && (
+                  <div className="p-2.5 rounded-xl bg-sky-50 border border-sky-100 text-[11px] text-sky-900 space-y-0.5">
+                    <p className="font-black uppercase text-[10px]">Buying in bulk? Pay less per bag</p>
+                    {quickViewProduct.wholesaleTiers.map((t, i) => <p key={i}>{t.minQty}+ bags: <b>{formatKES(t.price)}</b> each</p>)}
+                  </div>
+                )}
+                <button type="button" onClick={() => { setReviewProduct(quickViewProduct); setQuickViewProduct(null); }} className="flex items-center gap-1.5 text-[11px] cursor-pointer hover:underline">
+                  <StarRating value={quickViewProduct.ratingAvg || 0} size={13} />
+                  <span className="font-bold text-slate-700">{(quickViewProduct.ratingCount || 0) > 0 ? `${(quickViewProduct.ratingAvg || 0).toFixed(1)} (${quickViewProduct.ratingCount} reviews)` : 'No reviews yet'}</span>
+                </button>
 
                 <p className="text-xs text-slate-600 leading-relaxed">
                   {quickViewProduct.description || '100% Pure aromatic Mwea long-grain rice harvested directly from Kirinyaga paddy fields.'}
@@ -6640,6 +7631,9 @@ export default function PremiumRiceStore() {
       </div>
 
       {/* FOOTER */}
+      {twoFactor && <TwoFactorModal challenge={twoFactor} onSuccess={finishTwoFactorSignIn} onClose={() => setTwoFactor(null)} showToast={showToast} />}
+      {reviewProduct && <ReviewsModal product={reviewProduct} token={token} user={user} onClose={() => setReviewProduct(null)} showToast={showToast} onChanged={fetchProducts} />}
+
       {showTerms && <TermsModal onClose={() => setShowTerms(false)} onAccept={!user && !isLogin && !signupOtpStep ? () => { setAcceptedTerms(true); setShowTerms(false); } : undefined} />}
 
       <footer className="bg-slate-950 text-slate-400 text-xs py-12 border-t border-slate-900 mt-auto">
