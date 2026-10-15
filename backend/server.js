@@ -1543,7 +1543,46 @@ async function lookupPayHeroStatus(orderId) {
   }
 }
 
+/** True when ANOTHER verified account already owns the phone/email being typed. */
+async function contactOwnedByAnotherAccount(targetId, phone, email) {
+  const conds = [...(phone ? identityConditions(phone) : []), ...(email ? identityConditions(email) : [])];
+  if (!conds.length) return false;
+  const others = await User.findAll({ where: { [Op.and]: [{ id: { [Op.ne]: targetId } }, { [Op.or]: conds }] } });
+  return others.some(o => o.isVerified !== false);
+}
+
 /** Looks the payment up on PayHero itself, so a forged callback cannot mark an order paid. */
+/** Compares every model with the real database: missing tables and missing columns. */
+async function inspectSchema() {
+  const qi = sequelize.getQueryInterface();
+  const tables = (await qi.showAllTables()).map(t => String(typeof t === 'string' ? t : (t.tableName || t.name || Object.values(t)[0])).toLowerCase());
+  const report = [];
+  for (const model of Object.values(sequelize.models)) {
+    const t = model.getTableName();
+    const tableName = typeof t === 'string' ? t : t.tableName;
+    if (!tables.includes(String(tableName).toLowerCase())) { report.push({ model: model.name, table: tableName, missingTable: true, missingColumns: [] }); continue; }
+    const cols = await qi.describeTable(t);
+    const have = new Set(Object.keys(cols).map(c => c.toLowerCase()));
+    const missingColumns = Object.entries(model.rawAttributes).filter(([name, attr]) => !have.has(String(attr.field || name).toLowerCase())).map(([name]) => name);
+    report.push({ model: model.name, table: tableName, missingTable: false, missingColumns });
+  }
+  return report;
+}
+async function repairSchema() {
+  const qi = sequelize.getQueryInterface();
+  await sequelize.sync(); // creates any table that does not exist yet
+  const fixed = [], errors = [];
+  for (const item of await inspectSchema()) {
+    const model = sequelize.models[item.model];
+    for (const name of item.missingColumns) {
+      const attr = model.rawAttributes[name];
+      try { await qi.addColumn(model.getTableName(), attr.field || name, { type: attr.type, allowNull: true, defaultValue: attr.defaultValue }); fixed.push(`${item.table}.${name}`); }
+      catch (e) { errors.push(`${item.table}.${name}: ${e.message}`); }
+    }
+  }
+  return { fixed, errors, after: (await inspectSchema()).filter(r => r.missingTable || r.missingColumns.length) };
+}
+
 async function verifyPayHeroPayment(orderId) {
   const r = await lookupPayHeroStatus(orderId);
   return r.reachable && (r.status === 'SUCCESS' || r.status === 'PAID');
@@ -1834,11 +1873,11 @@ async function sendSmsRaw(phone, message) {
     let data = response.data;
     if (typeof data === 'string') { try { data = JSON.parse(data); } catch (_) { /* text */ } }
     noteSmsBalance(data);
-    if (data && typeof data === 'object' && (data.success === false || data.error)) return { ok: false, error: String(data.message || data.error).slice(0, 120) };
-    return { ok: true };
+    if (data && typeof data === 'object' && (data.success === false || data.error)) return { ok: false, error: String(data.message || data.error).slice(0, 160), raw: data };
+    return { ok: true, raw: data };
   } catch (e) {
     const d = e.response && e.response.data;
-    return { ok: false, error: String((d && (d.message || d.error)) || e.message).slice(0, 120) };
+    return { ok: false, error: String((d && (d.message || (typeof d.error === 'string' ? d.error : JSON.stringify(d.error || d)))) || e.message).slice(0, 160), raw: d || null };
   }
 }
 const smsPartsFor = (text) => { const len = String(text).length; return len <= 160 ? 1 : Math.ceil(len / 153); };
@@ -2604,6 +2643,11 @@ async function startServer() {
     }
 
     await sequelize.sync();
+    try {
+      const problems = (await inspectSchema()).filter(r => r.missingTable || r.missingColumns.length);
+      if (problems.length) console.warn('⚠️ Database is missing: ' + problems.map(p => p.missingTable ? `table ${p.table}` : `${p.table}.[${p.missingColumns.join(', ')}]`).join('; ') + '. Open Admin → System & Security → "Repair database".');
+      else console.log('✅ Database check passed: every table and column the server needs exists.');
+    } catch (e) { console.warn('⚠️ Database check skipped:', e.message); }
     
     const currentMode = process.env.DB_MODE === 'cloud' ? '☁️ AIVEN / CLOUD POSTGRES' : '🏠 RENDER / LOCAL DB';
     console.log(`🍃 Database Connected Successfully! Running Mode: [ ${currentMode} ]`);
@@ -2942,6 +2986,12 @@ async function startServer() {
               verificationOtpExpires: tokenExpiration
             });
           } else {
+            // A retry can carry a corrected phone/email: the code must go to the NEW details, not the old typo.
+            if (await contactOwnedByAnotherAccount(targetUser.id, phoneNumber, email)) {
+              return res.status(409).json({ error: 'That phone number or email already belongs to another account.' });
+            }
+            if (phoneNumber) targetUser.phoneNumber = phoneNumber;
+            if (email) targetUser.email = email;
             targetUser.fullName = fullName;
             targetUser.password = hashedPassword;
             targetUser.verificationOtp = otpCode;
@@ -3048,6 +3098,11 @@ async function startServer() {
             verificationOtpExpires: tokenExpiration
           });
         } else {
+          if (await contactOwnedByAnotherAccount(userRecord.id, phoneNumber, email)) {
+            return res.status(409).json({ error: 'That phone number or email already belongs to another account.' });
+          }
+          if (phoneNumber) userRecord.phoneNumber = phoneNumber;
+          if (email) userRecord.email = email;
           userRecord.fullName = fullName;
           if (hashedPassword) userRecord.password = hashedPassword;
           userRecord.verificationOtp = otpCode;
@@ -5403,6 +5458,21 @@ async function startServer() {
       } catch (err) { res.status(500).json({ error: err.message }); }
     });
 
+    expressApp.get('/api/admin/system/schema', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const report = await inspectSchema();
+        const problems = report.filter(r => r.missingTable || r.missingColumns.length);
+        res.json({ total: report.length, ok: report.length - problems.length, problems, healthy: problems.length === 0 });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+    expressApp.post('/api/admin/system/schema/repair', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const r = await repairSchema();
+        await logEvent({ req, action: 'DATABASE_REPAIRED', category: 'system', severity: 'warn', summary: `${req.adminUser.fullName} ran the database repair: ${r.fixed.length} column(s) added, ${r.errors.length} error(s)`, details: r });
+        res.json({ message: r.errors.length ? 'Repair finished with some problems.' : (r.fixed.length ? `Repaired: ${r.fixed.join(', ')}` : 'Everything was already in place.'), ...r });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
     expressApp.post('/api/admin/system/reconcile-now', authenticateToken, requireAdmin, async (req, res) => {
       runPaymentReconcile();
       res.json({ message: 'Payment re-check started. Results appear under System in a few seconds.' });
@@ -5882,7 +5952,7 @@ async function startServer() {
     };
     const normPlace = (v) => String(v || '').toLowerCase().replace(/\bcounty\b/g, '').replace(/[^a-z0-9]/g, '');
     const MAX_CAMPAIGN = 1500;
-    const campaignMessageFor = (message, userId) => `${message}\nOpt out: ${optOutLink(userId)}`;
+    const campaignMessageFor = (message, userId, footerLink = true) => (footerLink ? `${message}\nOpt out: ${optOutLink(userId)}` : message);
     let campaignRunning = false;
 
     expressApp.post('/api/admin/campaigns/preview', authenticateToken, requireAdmin, async (req, res) => {
@@ -5917,26 +5987,34 @@ async function startServer() {
         const cost = round2(aud.recipients.length * parts * Number(ops.smsCostPerPart));
         if (smsState.balance !== null && smsState.balance < cost) return res.status(400).json({ error: `Not enough SMS credit: this needs about ${cost} but you have ${smsState.balance}. Top up Ping Africa first.` });
 
-        const campaign = await Campaign.create({ name, message, filters: aud.filters, status: 'sending', totalRecipients: aud.recipients.length, smsParts: parts, optedOutSkipped: aud.optedOutCount, createdBy: req.adminUser.id, startedAt: new Date() });
+        const footerLink = b.footerLink !== false;
+        const campaign = await Campaign.create({ name, message, filters: { ...aud.filters, footerLink }, status: 'sending', totalRecipients: aud.recipients.length, smsParts: parts, optedOutSkipped: aud.optedOutCount, createdBy: req.adminUser.id, startedAt: new Date() });
         await logEvent({ req, action: 'CAMPAIGN_STARTED', category: 'admin', severity: 'warn', targetType: 'campaign', targetId: campaign.id, summary: `${req.adminUser.fullName} started SMS campaign "${name}" to ${aud.recipients.length} customers (about ${cost} credit)`, details: { filters: aud.filters, parts } });
         campaignRunning = true;
         (async () => {
-          let sent = 0, failed = 0, i = 0;
+          let sent = 0, failed = 0, i = 0, consecutiveFails = 0, abortedWhy = null;
+          const errorCounts = {};
           try {
             for (const r of aud.recipients) {
               i += 1;
               if (i % 10 === 1) { const fresh = await Campaign.findByPk(campaign.id); if (fresh && fresh.status === 'stopped') break; }
               const pref = await MarketingPref.findOne({ where: { userId: r.id } });
               if (pref && pref.optedOut) continue;
-              const result = await sendSmsRaw(r.phone, campaignMessageFor(message, r.id));
-              if (result.ok) sent += 1; else failed += 1;
+              const result = await sendSmsRaw(r.phone, campaignMessageFor(message, r.id, footerLink));
+              if (result.ok) { sent += 1; consecutiveFails = 0; }
+              else {
+                failed += 1; consecutiveFails += 1;
+                const why = String(result.error || 'unknown error'); errorCounts[why] = (errorCounts[why] || 0) + 1;
+                if (sent === 0 && consecutiveFails >= 5) { abortedWhy = `Stopped after 5 failures in a row: ${why}`; failed += aud.recipients.length - i; break; }
+              }
               if (i % 10 === 0) await Campaign.update({ sentCount: sent, failedCount: failed }, { where: { id: campaign.id } });
               if (!result.ok && /credit|balance|insufficient|unauthor/i.test(String(result.error))) { failed += aud.recipients.length - i; break; }
               await new Promise(rs => setTimeout(rs, 150));
             }
             const done = await Campaign.findByPk(campaign.id);
             await Campaign.update({ sentCount: sent, failedCount: failed, status: done && done.status === 'stopped' ? 'stopped' : (sent === 0 ? 'failed' : 'sent'), finishedAt: new Date() }, { where: { id: campaign.id } });
-            await logEvent({ actor: { id: req.adminUser.id, role: 'admin', name: req.adminUser.fullName }, action: 'CAMPAIGN_FINISHED', category: 'admin', targetType: 'campaign', targetId: campaign.id, summary: `Campaign "${name}" finished: ${sent} sent, ${failed} failed` });
+            await logEvent({ actor: { id: req.adminUser.id, role: 'admin', name: req.adminUser.fullName }, action: 'CAMPAIGN_FINISHED', category: 'admin', severity: failed ? 'warn' : 'info', targetType: 'campaign', targetId: campaign.id,
+              summary: `Campaign "${name}" finished: ${sent} sent, ${failed} failed${abortedWhy ? '. ' + abortedWhy : ''}`, details: { sent, failed, errors: errorCounts, abortedWhy } });
           } catch (e) {
             console.error('❌ Campaign run error:', e);
             await Campaign.update({ sentCount: sent, failedCount: failed, status: 'failed', finishedAt: new Date() }, { where: { id: campaign.id } });
@@ -5945,11 +6023,27 @@ async function startServer() {
         res.status(202).json({ message: `Sending to ${aud.recipients.length} customers. You can watch progress below.`, campaign });
       } catch (err) { console.error('❌ Campaign error:', err); res.status(500).json({ error: err.message }); }
     });
+    expressApp.post('/api/admin/sms/test', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const b = req.body || {};
+        const phone = normalizeKenyanPhone(b.phone) || normalizeKenyanPhone(req.adminUser.phoneNumber);
+        if (!phone) return res.status(400).json({ error: 'Enter a valid Kenyan phone number to send the test to (your own account has no phone saved).' });
+        const base = String(b.message || '').replace(/\s+/g, ' ').trim() || 'Test message from Mwea Rice Hub.';
+        const text = b.promo ? campaignMessageFor(base.slice(0, 320), req.adminUser.id, b.footerLink !== false) : base.slice(0, 320);
+        const result = await sendSmsRaw(phone, text);
+        await logEvent({ req, action: 'SMS_TEST_SENT', category: 'system', severity: result.ok ? 'info' : 'warn', summary: `${req.adminUser.fullName} sent a test ${b.promo ? 'promotional ' : ''}SMS to ${maskPhone(phone)}: ${result.ok ? 'accepted by the gateway' : 'REJECTED: ' + result.error}` });
+        res.json({ ok: result.ok, sentTo: maskPhone(phone), text, parts: smsPartsFor(text), error: result.error || null, gatewayResponse: result.raw || null, balance: smsState.balance,
+          advice: result.ok ? 'The gateway accepted this message. If it still does not arrive on the handset, the block is on the network side: unregistered sender ID, a link that is not whitelisted, or the number being on a Do-Not-Disturb list. Ask Ping Africa to check the delivery report for the message id shown.' : 'The gateway refused the message. The reason is shown above.' });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
     expressApp.get('/api/admin/campaigns', authenticateToken, requireAdmin, async (req, res) => {
       try {
         const rows = await Campaign.findAll({ order: [['createdAt', 'DESC']], limit: 50 });
         const optOuts = await MarketingPref.count({ where: { optedOut: true } });
-        res.json({ campaigns: rows, optOuts, balance: smsState.balance, running: campaignRunning });
+        const finished = rows.length ? await ActivityEvent.findAll({ where: { action: 'CAMPAIGN_FINISHED', targetId: { [Op.in]: rows.map(r => String(r.id)) } } }) : [];
+        const errMap = {}; finished.forEach((e) => { errMap[e.targetId] = (e.details && (e.details.abortedWhy || Object.keys(e.details.errors || {}).slice(0, 3).join(' | '))) || ''; });
+        res.json({ campaigns: rows.map(r => ({ ...r.toJSON(), problem: errMap[String(r.id)] || '' })), optOuts, balance: smsState.balance, running: campaignRunning });
       } catch (err) { res.status(500).json({ error: err.message }); }
     });
     expressApp.post('/api/admin/campaigns/:id/stop', authenticateToken, requireAdmin, async (req, res) => {
