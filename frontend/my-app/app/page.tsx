@@ -2281,6 +2281,9 @@ function AdminCampaignsPanel({ token, showToast }: { token: string | null; showT
   const [preview, setPreview] = useState<any>(null);
   const [confirmText, setConfirmText] = useState('');
   const [allowQuiet, setAllowQuiet] = useState(false);
+  const [footerLink, setFooterLink] = useState(true);
+  const [testPhone, setTestPhone] = useState('');
+  const [testResult, setTestResult] = useState<any>(null);
   const [history, setHistory] = useState<any>({ campaigns: [], optOuts: 0, balance: null, running: false });
   const [products, setProducts] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
@@ -2298,9 +2301,14 @@ function AdminCampaignsPanel({ token, showToast }: { token: string | null; showT
   const send = async () => {
     setBusy(true);
     try {
-      const r = await staffApi('/admin/campaigns', token, { method: 'POST', body: { name, message, filters: filterBody(), confirm: confirmText, allowQuietHours: allowQuiet } });
+      const r = await staffApi('/admin/campaigns', token, { method: 'POST', body: { name, message, filters: filterBody(), confirm: confirmText, allowQuietHours: allowQuiet, footerLink } });
       showToast(r.message, 'success'); setConfirmText(''); setPreview(null); setMessage(''); setName(''); loadHistory();
     } catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(false); }
+  };
+  const sendTest = async () => {
+    setBusy(true); setTestResult(null);
+    try { setTestResult(await staffApi('/admin/sms/test', token, { method: 'POST', body: { message, promo: true, footerLink, phone: testPhone || undefined } })); }
+    catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(false); }
   };
   const stop = async (id: number) => { try { await staffApi(`/admin/campaigns/${id}/stop`, token, { method: 'POST' }); showToast('Stopping…', 'info'); loadHistory(); } catch (err: any) { showToast(err.message, 'error'); } };
   const toggleCounty = (c: string) => setF((x: any) => ({ ...x, counties: x.counties.includes(c) ? x.counties.filter((y: string) => y !== c) : [...x.counties, c] }));
@@ -2356,6 +2364,19 @@ function AdminCampaignsPanel({ token, showToast }: { token: string | null; showT
             <textarea rows={4} maxLength={320} value={message} onChange={(e) => { setMessage(e.target.value); setPreview(null); }} className={inputCls} placeholder="Mwea Rice Hub: Buy 10+ bags of Pishori and pay only KES 1,100 each. Order now at ..." />
             <p className="text-[10px] text-slate-500 mt-1">{message.length}/320 characters · about {parts} SMS per customer including the opt-out link</p>
           </div>
+          <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+            <p className="text-[11px] font-black text-white">Test first: send this exact message to one phone</p>
+            <div className="flex gap-2"><input value={testPhone} onChange={(e) => setTestPhone(e.target.value)} placeholder="Your phone (leave empty for the one on your account)" className={inputCls} />
+              <button onClick={sendTest} disabled={busy || message.trim().length < 10} className="px-4 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white text-xs font-extrabold cursor-pointer whitespace-nowrap">Send test</button></div>
+            <label className="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer"><input type="checkbox" checked={footerLink} onChange={(e) => setFooterLink(e.target.checked)} className="accent-emerald-500" /> Add the opt-out link (some networks block messages that contain links; test with and without)</label>
+            {testResult && (
+              <div className={`p-3 rounded-xl border text-[11px] space-y-1 ${testResult.ok ? 'bg-emerald-950/40 border-emerald-800 text-emerald-100' : 'bg-rose-950/40 border-rose-800 text-rose-100'}`}>
+                <p className="font-black">{testResult.ok ? `Gateway accepted it for ${testResult.sentTo} (${testResult.parts} SMS)` : `Gateway refused it: ${testResult.error}`}</p>
+                <p>{testResult.advice}</p>
+                {testResult.gatewayResponse && <pre className="text-[10px] whitespace-pre-wrap break-all opacity-80">{JSON.stringify(testResult.gatewayResponse, null, 2)}</pre>}
+              </div>
+            )}
+          </div>
           <button onClick={runPreview} disabled={busy || message.trim().length < 10} className="w-full py-2.5 rounded-xl bg-sky-700 hover:bg-sky-600 disabled:opacity-40 text-white text-xs font-extrabold cursor-pointer">Check who this reaches and what it costs</button>
           {preview && (
             <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3 text-xs">
@@ -2384,7 +2405,7 @@ function AdminCampaignsPanel({ token, showToast }: { token: string | null; showT
           <tbody className="divide-y divide-slate-800/60">
             {history.campaigns.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-slate-500 font-bold">No campaigns yet.</td></tr>}
             {history.campaigns.map((c: any) => (
-              <tr key={c.id}><td className="p-3"><p className="font-bold text-white">{c.name}</p><p className="text-[10px] text-slate-500 max-w-xs truncate">{c.message}</p></td><td className="p-3 text-slate-400 whitespace-nowrap">{formatWhen(c.startedAt)}</td>
+              <tr key={c.id}><td className="p-3"><p className="font-bold text-white">{c.name}</p><p className="text-[10px] text-slate-500 max-w-xs truncate">{c.message}</p>{c.problem && <p className="text-[10px] text-rose-400 max-w-xs">Problem: {c.problem}</p>}</td><td className="p-3 text-slate-400 whitespace-nowrap">{formatWhen(c.startedAt)}</td>
                 <td className="p-3"><span className={`px-2 py-0.5 rounded-full border text-[9px] font-black uppercase ${statusPill[c.status] || ''}`}>{c.status}</span></td><td className="p-3 text-right">{c.totalRecipients}</td><td className="p-3 text-right text-emerald-400 font-bold">{c.sentCount}</td><td className="p-3 text-right text-rose-400">{c.failedCount}</td><td className="p-3 text-right text-slate-400">{c.optedOutSkipped}</td>
                 <td className="p-3 text-right">{c.status === 'sending' && <button onClick={() => stop(c.id)} className="px-2.5 py-1.5 rounded-lg bg-rose-800 hover:bg-rose-700 text-white text-[10px] font-extrabold cursor-pointer">Stop</button>}</td></tr>
             ))}
@@ -2546,9 +2567,13 @@ function AdminSystemPanel({ token, showToast }: { token: string | null; showToas
   const [perms, setPerms] = useState<any>(null);
   const [extra, setExtra] = useState({ phones: '', emails: '' });
   const [busy, setBusy] = useState(false);
+  const [schema, setSchema] = useState<any>(null);
+  const [smsTest, setSmsTest] = useState<any>(null);
+  const [smsTestPhone, setSmsTestPhone] = useState('');
 
   const load = useCallback(async () => {
     try {
+      staffApi('/admin/system/schema', token).then(setSchema).catch(() => {});
       const [s, o, p] = await Promise.all([staffApi('/admin/system/status', token), staffApi('/admin/ops-settings', token), staffApi('/admin/permissions', token)]);
       setStatus(s); setOps(o); setPerms(p);
       setExtra({ phones: (o.dailySummary.extraPhones || []).join(', '), emails: (o.dailySummary.extraEmails || []).join(', ') });
@@ -2568,6 +2593,17 @@ function AdminSystemPanel({ token, showToast }: { token: string | null; showToas
   const sendTest = async () => {
     setBusy(true);
     try { const r = await staffApi('/admin/daily-summary/send-test', token, { method: 'POST' }); showToast(r.message, r.errors && r.errors.length ? 'warning' : 'success'); }
+    catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(false); }
+  };
+  const repairDb = async () => {
+    if (!confirm('Create any missing tables and add any missing columns? Existing data is not touched.')) return;
+    setBusy(true);
+    try { const r = await staffApi('/admin/system/schema/repair', token, { method: 'POST' }); showToast(r.message, r.errors && r.errors.length ? 'warning' : 'success'); setSchema(await staffApi('/admin/system/schema', token)); }
+    catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(false); }
+  };
+  const runSmsTest = async () => {
+    setBusy(true); setSmsTest(null);
+    try { setSmsTest(await staffApi('/admin/sms/test', token, { method: 'POST', body: { phone: smsTestPhone || undefined, message: 'Mwea Rice Hub test message. If you can read this, SMS is working.' } })); }
     catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(false); }
   };
   const reconcile = async () => { try { const r = await staffApi('/admin/system/reconcile-now', token, { method: 'POST' }); showToast(r.message, 'info'); setTimeout(load, 6000); } catch (err: any) { showToast(err.message, 'error'); } };
@@ -2590,6 +2626,30 @@ function AdminSystemPanel({ token, showToast }: { token: string | null; showToas
         <StaffStat label="Database" value={status.database ? 'Connected' : 'DOWN'} tone={status.database ? 'emerald' : 'rose'} hint={`Server up ${status.uptimeMinutes} min · Node ${status.nodeVersion}`} />
         <StaffStat label="Unpaid orders now" value={status.unpaidOrders} tone={status.unpaidOrders > 10 ? 'amber' : 'slate'} hint="Checked every 3 minutes" />
         <StaffStat label="Error monitoring" value={status.sentry ? 'Sentry on' : 'Built-in log'} tone={status.sentry ? 'emerald' : 'sky'} hint={status.sentryConfigured && !status.sentry ? 'DSN set but package missing' : 'Errors appear in Live Activity'} />
+      </div>
+
+      {/* DATABASE & SMS CHECKS */}
+      <div className={`${cardCls} p-5 space-y-3`}>
+        <p className="text-xs font-black text-white flex items-center gap-2"><Shield className="w-4 h-4 text-sky-400" /> Database and SMS checks</p>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+            <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Database tables</p>
+            {!schema && <p className="text-xs text-slate-500">Checking…</p>}
+            {schema && schema.healthy && <p className="text-xs font-bold text-emerald-400">All {schema.total} tables and every column the server needs are present.</p>}
+            {schema && !schema.healthy && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-bold text-rose-400">{schema.problems.length} problem(s) found:</p>
+                {schema.problems.map((p: any) => <p key={p.model} className="text-[11px] text-slate-300">{p.missingTable ? `Missing table: ${p.table}` : `${p.table} is missing columns: ${p.missingColumns.join(', ')}`}</p>)}
+                <button onClick={repairDb} disabled={busy} className="px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-[11px] font-extrabold cursor-pointer">Repair database</button>
+              </div>
+            )}
+          </div>
+          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+            <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Send a test SMS</p>
+            <div className="flex gap-2"><input value={smsTestPhone} onChange={(e) => setSmsTestPhone(e.target.value)} placeholder="Phone (empty = your account's phone)" className={inputCls} /><button onClick={runSmsTest} disabled={busy} className="px-4 rounded-xl bg-sky-700 hover:bg-sky-600 disabled:opacity-50 text-white text-xs font-extrabold cursor-pointer whitespace-nowrap">Send</button></div>
+            {smsTest && (<div className={`p-3 rounded-xl border text-[11px] space-y-1 ${smsTest.ok ? 'bg-emerald-950/40 border-emerald-800 text-emerald-100' : 'bg-rose-950/40 border-rose-800 text-rose-100'}`}><p className="font-black">{smsTest.ok ? `Gateway accepted it for ${smsTest.sentTo}` : `Gateway refused it: ${smsTest.error}`}</p><p>{smsTest.advice}</p>{smsTest.gatewayResponse && <pre className="text-[10px] whitespace-pre-wrap break-all opacity-80">{JSON.stringify(smsTest.gatewayResponse, null, 2)}</pre>}</div>)}
+          </div>
+        </div>
       </div>
 
       {/* PAYMENT SAFETY NET */}
@@ -3750,6 +3810,7 @@ export default function PremiumRiceStore() {
   const [referralInput, setReferralInput] = useState('');
   const [referralCheck, setReferralCheck] = useState<{ state: 'idle' | 'checking' | 'valid' | 'invalid'; agentName?: string }>({ state: 'idle' });
   const [signupOtp, setSignupOtp] = useState('');
+  const [otpSentTo, setOtpSentTo] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [twoFactor, setTwoFactor] = useState<{ challengeId: string; message: string } | null>(null);
   const [reviewProduct, setReviewProduct] = useState<Product | null>(null);
@@ -4499,6 +4560,8 @@ export default function PremiumRiceStore() {
       const data = await res.json();
 
       if (res.ok && data.requiresOtp) {
+        const shownPhone = String(data.phoneNumber || identifier || '').replace(/\D/g, '');
+        setOtpSentTo(data.smsSent === false && data.emailSent ? (data.email || 'your email') : (shownPhone.length >= 9 ? `0${shownPhone.slice(-9, -6)}***${shownPhone.slice(-3)}`.replace(/^0(\d{3})/, '0$1') : (data.email || 'your phone')));
         setSignupOtpStep(true);
         showToast(data.message || 'Verification code sent. Check your phone or email.', 'success');
         return;
@@ -6143,6 +6206,7 @@ export default function PremiumRiceStore() {
 
                   {!isLogin && signupOtpStep && (
                     <div className="space-y-2">
+                      {otpSentTo && <p className="text-[11px] text-slate-500 leading-snug p-2.5 rounded-xl bg-emerald-50 border border-emerald-100">We sent a code to <b className="text-slate-800">{otpSentTo}</b>. If that is the wrong number, change it above and request a new code.</p>}
                       <label className="block font-bold text-slate-700 mb-1">6-Digit Verification Code</label>
                       <input 
                         type="text"
