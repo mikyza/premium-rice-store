@@ -3,7 +3,7 @@
  * PREMIUM RICE & GRAIN STORE - UNIFIED BACKEND ENTERPRISE ARCHITECTURE
  * ====================================================================================
  * System: Mwea Rice Hub Enterprise API Engine
- * Version: 3.6.0-ENTERPRISE-RENDER-VERCEL
+ * Version: 4.1.0-ENTERPRISE-HARDENED-USSD
  * Platform: Node.js / Express / Socket.IO / Sequelize ORM / PayHero API / Nodemailer
  * Deployment: Render Cloud Infrastructure OR Vercel Serverless (auto-detected via process.env.VERCEL)
  * 
@@ -41,6 +41,11 @@ import nodemailer from 'nodemailer';
 import { handlePayHeroWebhook } from './controllers/webhookController.js';
 import { initiatePayHeroPayment } from './controllers/paymentController.js';
 
+// Premium add-on module (coupons, wishlist, invoices, tracking, insights, backup, security audit)
+import { definePremiumModels, registerPremiumRoutes, evaluateCoupon, reserveCoupon, recordRedemption } from './premiumModule.js';
+// USSD ordering (Ping Africa): shop, create account, PIN login, checkout with M-Pesa STK, orders
+import { defineUssdModels, registerUssdRoutes } from './ussdModule.js';
+
 // Initialize environment variables from .env file
 dotenv.config();
 
@@ -65,7 +70,29 @@ const isProduction = NODE_ENV === 'production';
 // Always bind all interfaces: Render auto-sets HOSTNAME to the container name, which makes the proxy return 502.
 const hostname = '0.0.0.0';
 const port = parseInt(process.env.PORT || '5000', 10);
-const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
+// SECURITY: there is no built-in fallback secret any more (the old one was public in the source code,
+// which would let anyone forge an admin login). Production refuses to start without a strong secret;
+// development gets a random per-process secret.
+const JWT_SECRET = (() => {
+  const fromEnv = process.env.JWT_SECRET;
+  if (fromEnv && fromEnv.length >= 32) return fromEnv;
+  if (fromEnv) console.warn('⚠️ SECURITY: JWT_SECRET is shorter than 32 characters. Use a random 48+ character value.');
+  if (isProduction && !fromEnv) {
+    console.error('❌ FATAL: JWT_SECRET is not set. Generate one with: node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"');
+    process.exit(1);
+  }
+  if (fromEnv) return fromEnv;
+  console.warn('⚠️ JWT_SECRET not set: using a random temporary secret (everyone is signed out on each restart).');
+  return crypto.randomBytes(48).toString('hex');
+})();
+const pwVersion = (u) => crypto.createHash('sha256').update(String((u && u.password) || '')).digest('hex').slice(0, 16);
+// Admins and support staff get shorter sessions (12h); customers keep 7 days.
+const signSessionToken = (payload) => jwt.sign(payload, JWT_SECRET, {
+  algorithm: 'HS256',
+  expiresIn: (payload.role === 'admin' || payload.role === 'support') ? '12h' : '7d'
+});
+const PAYHERO_CALLBACK_SECRET = process.env.PAYHERO_CALLBACK_SECRET || '';
+const PAYHERO_CALLBACK_QS = PAYHERO_CALLBACK_SECRET ? `?s=${encodeURIComponent(PAYHERO_CALLBACK_SECRET)}` : '';
 // Vercel serverless detection (Vercel sets VERCEL=1 automatically)
 const IS_VERCEL = !!process.env.VERCEL;
 const RENDER_BASE_URL = process.env.BASE_URL
@@ -79,8 +106,11 @@ console.log(`⚡ Execution Directory: ${__dirname}`);
 console.log(`📡 Base Deployment Target URL: ${RENDER_BASE_URL}`);
 console.log(`☁️ Runtime: ${IS_VERCEL ? 'VERCEL SERVERLESS' : 'PERSISTENT NODE SERVER'}`);
 
-if (isProduction && !process.env.JWT_SECRET) {
-  console.warn('⚠️ WARNING: JWT_SECRET env var is not set. Using the built-in default secret is unsafe in production.');
+if (isProduction && !process.env.ALLOWED_ORIGINS) {
+  console.warn('⚠️ SECURITY: ALLOWED_ORIGINS is not set. Only localhost, *.onrender.com and *.vercel.app can call this API. Set ALLOWED_ORIGINS=https://yourdomain.com for custom domains.');
+}
+if (isProduction && !PAYHERO_CALLBACK_SECRET) {
+  console.warn('⚠️ SECURITY: PAYHERO_CALLBACK_SECRET is not set. Payments are still verified with PayHero, but set a secret for defence in depth.');
 }
 console.log('====================================================================');
 
@@ -697,7 +727,7 @@ const issueSignupOtp = (user) => {
     return { otpCode: String(user.verificationOtp), tokenExpiration: new Date(user.verificationOtpExpires) };
   }
   return {
-    otpCode: Math.floor(100000 + Math.random() * 900000).toString(),
+    otpCode: crypto.randomInt(100000, 1000000).toString(),
     tokenExpiration: new Date(Date.now() + 10 * 60 * 1000)
   };
 };
@@ -860,17 +890,41 @@ const storage = IS_VERCEL
   : multer.diskStorage({
       destination: (req, file, cb) => cb(null, uploadDir),
       filename: (req, file, cb) => {
-        const cleanFileName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-        cb(null, `${Date.now()}-${cleanFileName}`);
+        // Random name + extension chosen by us from the verified type: user-supplied names never touch the disk.
+        cb(null, `${Date.now()}-${crypto.randomBytes(8).toString('hex')}${ALLOWED_IMAGE_TYPES[file.mimetype] || '.bin'}`);
       }
     });
+
+// Only real raster images. SVG is deliberately excluded (it can carry scripts).
+const ALLOWED_IMAGE_TYPES = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
+function looksLikeImage(b) {
+  if (!b || b.length < 12) return false;
+  if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return true;                                  // JPEG
+  if (b[0] === 0x89 && b.slice(1, 4).toString() === 'PNG') return true;                              // PNG
+  if (b.slice(0, 4).toString() === 'GIF8') return true;                                              // GIF
+  if (b.slice(0, 4).toString() === 'RIFF' && b.slice(8, 12).toString() === 'WEBP') return true;      // WEBP
+  return false;
+}
+/** The browser-declared type can be faked, so check the real file header. Deletes the file when it is not an image. */
+function verifyUploadedImage(file) {
+  try {
+    if (file.buffer) return looksLikeImage(file.buffer);
+    const fd = fs.openSync(file.path, 'r');
+    const head = Buffer.alloc(12);
+    fs.readSync(fd, head, 0, 12, 0);
+    fs.closeSync(fd);
+    const ok = looksLikeImage(head);
+    if (!ok) fs.unlink(file.path, () => {});
+    return ok;
+  } catch (_) { return false; }
+}
 
 const upload = multer({ 
   storage,
   // Vercel functions reject request bodies larger than ~4.5MB, so cap slightly below that there.
   limits: { fileSize: (IS_VERCEL ? 4 : 15) * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    if (ALLOWED_IMAGE_TYPES[file.mimetype]) {
       cb(null, true);
     } else {
       cb(new Error('Only valid image files are permitted for upload.'), false);
@@ -981,6 +1035,11 @@ const LIKE_OP = sequelize.getDialect() === 'postgres' ? Op.iLike : Op.like;
  * Effective role = admin (Users.role) | support | agent (StaffRole) | customer.
  */
 const defineModel = (name, attrs, opts = {}) => sequelize.models[name] || sequelize.define(name, attrs, { timestamps: true, ...opts });
+
+// Tables for coupons, redemptions and wishlists (created by the sequelize.sync() in startServer).
+definePremiumModels({ sequelize, DataTypes });
+// Tables for USSD PINs and USSD conversation state (created by the sequelize.sync() in startServer).
+const ussdModels = defineUssdModels({ sequelize, DataTypes });
 
 const StaffRole = defineModel('StaffRole', {
   userId: { type: DataTypes.INTEGER, allowNull: false, unique: true },
@@ -2354,7 +2413,8 @@ const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'] || req.headers['Authorization'];
   let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : authHeader;
   
-  if (!token && req.query && req.query.token) {
+  // Query-string tokens leak into logs and browser history, so they are only accepted for GET downloads.
+  if (!token && req.method === 'GET' && req.query && req.query.token) {
     token = req.query.token;
   }
   
@@ -2366,19 +2426,23 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ error: 'Authentication token is required to access this resource.' });
   }
 
-  jwt.verify(token, JWT_SECRET, async (err, decodedUser) => {
+  jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }, async (err, decodedUser) => {
     if (err) {
       console.log(`DEBUG: Auth Token Verification Failed - ${err.message}`);
       return res.status(403).json({ error: 'Token is invalid or expired. Please sign in again.' });
     }
     try {
       // Always trust the database, not the token: suspended accounts are cut off at once and role changes apply immediately.
-      const dbUser = await User.findByPk(decodedUser.id, { attributes: ['id', 'fullName', 'role', 'isActive', 'phoneNumber', 'email'] });
+      const dbUser = await User.findByPk(decodedUser.id, { attributes: ['id', 'fullName', 'role', 'isActive', 'phoneNumber', 'email', 'password'] });
       if (!dbUser) {
         return res.status(401).json({ error: 'This account no longer exists. Please sign in again.' });
       }
       if (dbUser.isActive === false) {
         return res.status(403).json({ error: 'Your account is suspended. Please contact customer care.' });
+      }
+      // A password change or reset signs out every older session (stolen tokens die with the old password).
+      if (decodedUser.pv && decodedUser.pv !== pwVersion(dbUser)) {
+        return res.status(401).json({ error: 'Your password was changed. Please sign in again.' });
       }
       req.user = {
         ...decodedUser,
@@ -2425,23 +2489,36 @@ const requireAdmin = async (req, res, next) => {
 
 // Express app is created at module level so Vercel can import and export it as the request handler.
 const expressApp = express();
-expressApp.set('trust proxy', true);
+// TRUST_PROXY_HOPS: number of proxies in front of the app (Render/Vercel = usually 1). With the default `true`
+// a client can fake X-Forwarded-For to dodge IP rate limits, so set this once you know your hop count.
+const TRUST_PROXY_HOPS = process.env.TRUST_PROXY_HOPS;
+expressApp.set('trust proxy', TRUST_PROXY_HOPS ? (/^\d+$/.test(TRUST_PROXY_HOPS) ? parseInt(TRUST_PROXY_HOPS, 10) : TRUST_PROXY_HOPS) : true);
+expressApp.disable('x-powered-by');
 
 // HTTP server + WebSockets only exist on persistent hosts. Vercel serverless cannot hold WebSocket connections.
 const server = IS_VERCEL ? null : createServer(expressApp);
 
-// Dynamic CORS configuration optimized for Render/Vercel production and mobile wrappers
+// CORS allow-list. Set ALLOWED_ORIGINS=https://store.com,https://www.store.com (comma separated).
+// Requests with no Origin header (mobile apps, curl, PayHero server-to-server) are not browser requests and pass.
+const ALLOWED_ORIGINS = [
+  ...(process.env.ALLOWED_ORIGINS || '').split(','),
+  process.env.FRONTEND_URL || '',
+  process.env.BASE_URL || ''
+].map((o) => o.trim().replace(/\/$/, '')).filter(Boolean);
+const STRICT_CORS = !!(process.env.ALLOWED_ORIGINS && process.env.ALLOWED_ORIGINS.trim());
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  const o = String(origin).replace(/\/$/, '');
+  if (ALLOWED_ORIGINS.includes(o)) return true;
+  if (STRICT_CORS) return false;
+  try {
+    const host = new URL(o).hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host.endsWith('.onrender.com') || host.endsWith('.vercel.app');
+  } catch (_) { return false; }
+}
+
 const corsOptions = {
-  origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, Postman, curl, server-to-server webhooks)
-    // OR any origin ending with .onrender.com / .vercel.app or custom production domains
-    if (!origin || origin.endsWith('.onrender.com') || origin.includes('onrender.com') || origin.endsWith('.vercel.app')) {
-      callback(null, true);
-    } else {
-      // Dynamically allow all other valid web/mobile origins or restrict as needed
-      callback(null, true);
-    }
-  },
+  origin: (origin, callback) => callback(null, isOriginAllowed(origin)),
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Cache-Control'],
   exposedHeaders: ['Content-Disposition'],
@@ -2450,14 +2527,38 @@ const corsOptions = {
   maxAge: 86400
 };
 
+// Security headers (same protections as the helmet package, with no extra dependency).
+expressApp.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); // the storefront lives on another origin and loads product images
+  res.setHeader('X-DNS-Prefetch-Control', 'off');
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+  if (isProduction) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  if (req.path.startsWith('/api/')) {
+    res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+    if (req.headers.authorization) res.setHeader('Cache-Control', 'no-store');
+  } else if (req.path.startsWith('/uploads') || req.path.startsWith('/images')) {
+    // Even if a malicious file slipped in, the browser will not run anything from it.
+    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox");
+  }
+  next();
+});
+
 expressApp.use(cors(corsOptions));
-expressApp.use(express.json({ limit: '50mb' }));
-expressApp.use(express.urlencoded({ limit: '50mb', extended: true }));
+// Body limits: admin routes may carry larger payloads (hero settings, bulk edits); everything else is capped small.
+expressApp.use('/api/admin', express.json({ limit: process.env.ADMIN_JSON_LIMIT || '8mb' }));
+expressApp.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '256kb' }));
+expressApp.use(express.urlencoded({ limit: '256kb', extended: true }));
 
 // Serve static files from public, uploads, and images directories
-expressApp.use(express.static(path.join(__dirname, 'public')));
-expressApp.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
-expressApp.use('/images', express.static(path.join(__dirname, 'public', 'images')));
+const staticOpts = { dotfiles: 'ignore', index: false, setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff') };
+expressApp.use(express.static(path.join(__dirname, 'public'), { dotfiles: 'ignore' }));
+expressApp.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads'), staticOpts));
+expressApp.use('/images', express.static(path.join(__dirname, 'public', 'images'), staticOpts));
 
 // Socket.IO placeholder: replaced by a real SocketIOServer on persistent hosts.
 // On Vercel every io.emit / io.to().emit call becomes a safe no-op instead of crashing.
@@ -2469,7 +2570,7 @@ let io = {
 
 // Socket.IO is attached immediately (same CORS rules) so the browser never sees a bare 502 on /socket.io.
 if (!IS_VERCEL && server) {
-  io = new SocketIOServer(server, { cors: corsOptions });
+  io = new SocketIOServer(server, { cors: corsOptions, maxHttpBufferSize: 1e5 });
 }
 
 // Health endpoints answer instantly (before the DB gate) so Render marks the service live.
@@ -2525,6 +2626,12 @@ expressApp.use(async (req, res, next) => {
 // ---------- Rate limits on public routes (protects your SMS credit and accounts) ----------
 const limitByIp = (req) => req.ip || 'unknown';
 const rl = (opts) => makeRateLimiter(opts);
+// Blanket flood protection for the whole API (PayHero server callbacks are exempt). Generous because many
+// customers share one mobile-carrier IP; the per-route limits below are the strict ones.
+const globalApiLimiter = rl({ name: 'api', windowMs: 60 * 1000, max: parseInt(process.env.API_RATE_LIMIT || '600', 10), keyFn: limitByIp, message: 'Too many requests. Please slow down for a minute.' });
+expressApp.use('/api/', (req, res, next) => ((req.path.startsWith('/payments/payhero/') || req.path.startsWith('/ussd')) ? next() : globalApiLimiter(req, res, next)));
+// Admin area: tighter ceiling, since staff never need this many calls.
+expressApp.use('/api/admin', rl({ name: 'admin api', windowMs: 60 * 1000, max: 240, keyFn: limitByIp, message: 'Too many admin requests. Please wait a moment.' }));
 expressApp.post('/api/user/signup', rl({ name: 'signup', windowMs: 60 * 60 * 1000, max: 12, keyFn: limitByIp, message: 'Too many sign-up attempts from your network. Please try again in an hour.' }));
 expressApp.post('/api/user/signup', rl({ name: 'signup (per number)', windowMs: 60 * 60 * 1000, max: 6, keyFn: (r) => { const k = bodyIdentity(r); return k ? `signup:${k}` : null; }, message: 'Too many attempts for this phone number or email. Please wait an hour.' }));
 ['/api/user/signup/request-otp', '/api/user/request-signup-otp', '/api/user/signup/resend-otp', '/api/user/resend-signup-otp'].forEach((p) => {
@@ -2551,6 +2658,11 @@ expressApp.use((req, res, next) => {
         recordServerError(`${req.method} ${req.path} returned ${res.statusCode}`, (body && body.error) || 'Server error', { route: req.path, method: req.method, status: res.statusCode, userId: req.user ? req.user.id : null });
       }
     } catch (_) { /* never block the response */ }
+    // Never show customers raw database / stack-trace text (it was already recorded in the activity log above).
+    if (isProduction && res.statusCode === 500 && body && typeof body.error === 'string'
+        && /sequelize|sql|relation |column|constraint|violat|econn|enotfound|etimedout|cannot read|undefined|is not a function|unexpected token|\bat .+:\d+:\d+/i.test(body.error)) {
+      body = { ...body, error: 'Something went wrong on our side. Please try again in a moment.' };
+    }
     return originalJson(body);
   };
   next();
@@ -2873,8 +2985,15 @@ async function startServer() {
         }
         
         socket.on('joinAdminChannel', (token) => {
-          jwt.verify(token, JWT_SECRET, async (err, decoded) => {
-            if (!err && decoded && decoded.role === 'admin') {
+          if (typeof token !== 'string' || token.length > 2000) return;
+          jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }, async (err, decoded) => {
+            // Re-check the database: a demoted or suspended admin must not keep receiving live data.
+            let stillAdmin = false;
+            try {
+              const u = !err && decoded ? await User.findByPk(decoded.id, { attributes: ['id', 'role', 'isActive'] }) : null;
+              stillAdmin = !!(u && u.role === 'admin' && u.isActive !== false);
+            } catch (_) { stillAdmin = false; }
+            if (stillAdmin) {
               socket.join('admin-dashboard-room');
               console.log(`DEBUG: Admin connected to real-time broadcast room. User ID: ${decoded.id}`);
             }
@@ -2944,7 +3063,7 @@ async function startServer() {
           existingUser.verificationOtpExpires = null;
           await existingUser.save();
 
-          const token = jwt.sign({ id: existingUser.id, role: await effectiveRoleFor(existingUser) }, JWT_SECRET, { expiresIn: '7d' });
+          const token = signSessionToken({ id: existingUser.id, role: await effectiveRoleFor(existingUser), pv: pwVersion(existingUser) });
           return res.status(200).json({
             message: 'Account verified and created successfully.',
             token,
@@ -3039,7 +3158,7 @@ async function startServer() {
         await recordTermsAcceptance(newUser.id, req);
         if (req.body && req.body.referralCode) await attachReferral(newUser.id, req.body.referralCode, 'signup', req);
         await logEvent({ req, actor: { id: newUser.id, role: 'customer', name: newUser.fullName }, action: 'ACCOUNT_CREATED', category: 'auth', targetType: 'user', targetId: newUser.id, summary: `${newUser.fullName} created an account` });
-        const token = jwt.sign({ id: newUser.id, role: await effectiveRoleFor(newUser) }, JWT_SECRET, { expiresIn: '7d' });
+        const token = signSessionToken({ id: newUser.id, role: await effectiveRoleFor(newUser), pv: pwVersion(newUser) });
         res.status(201).json({ 
           token, 
           user: { 
@@ -3196,7 +3315,7 @@ async function startServer() {
         if (body.referralCode) await attachReferral(user.id, body.referralCode, 'signup', req);
         await logEvent({ req, actor: { id: user.id, role: 'customer', name: user.fullName }, action: 'ACCOUNT_VERIFIED', category: 'auth', targetType: 'user', targetId: user.id, summary: `${user.fullName} verified their account` });
 
-        const token = jwt.sign({ id: user.id, role: await effectiveRoleFor(user) }, JWT_SECRET, { expiresIn: '7d' });
+        const token = signSessionToken({ id: user.id, role: await effectiveRoleFor(user), pv: pwVersion(user) });
 
         res.status(200).json({
           success: true,
@@ -3355,7 +3474,7 @@ async function startServer() {
           }
         }
 
-        const token = jwt.sign({ id: user.id, role: await effectiveRoleFor(user) }, JWT_SECRET, { expiresIn: '7d' });
+        const token = signSessionToken({ id: user.id, role: await effectiveRoleFor(user), pv: pwVersion(user) });
         await logEvent({ req, actor: { id: user.id, role: await effectiveRoleFor(user), name: user.fullName }, action: 'LOGIN_SUCCESS', category: 'auth', targetType: 'user', targetId: user.id, summary: `${user.fullName} signed in` });
         res.json({ 
           token, 
@@ -3392,9 +3511,36 @@ async function startServer() {
         const user = await User.findByPk(req.user.id);
         if (!user) return res.status(404).json({ error: 'User account not found.' });
 
-        if (fullName !== undefined) user.fullName = fullName;
-        if (email !== undefined) user.email = email;
-        if (phoneNumber !== undefined) user.phoneNumber = phoneNumber;
+        let passwordChanged = false;
+        const nextEmail = email !== undefined ? String(email).trim().toLowerCase() : undefined;
+        const emailChanging = nextEmail !== undefined && nextEmail !== String(user.email || '').toLowerCase();
+        const phoneChanging = phoneNumber !== undefined && normalizeKenyanPhone(phoneNumber) !== normalizeKenyanPhone(user.phoneNumber);
+        // Changing the sign-in identity needs the current password, so a stolen session cannot take over the account.
+        if ((emailChanging || phoneChanging) && user.password) {
+          if (!currentPassword || !(await bcrypt.compare(currentPassword, user.password))) {
+            return res.status(400).json({ error: 'Enter your current password to change your email or phone number.' });
+          }
+        }
+        if (fullName !== undefined) {
+          const cleanName = String(fullName).replace(/\s+/g, ' ').trim();
+          if (cleanName.length < 2 || cleanName.length > 80) return res.status(400).json({ error: 'Please enter your full name (2-80 characters).' });
+          user.fullName = cleanName;
+        }
+        if (emailChanging) {
+          if (nextEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(nextEmail)) return res.status(400).json({ error: 'Please enter a valid email address.' });
+          if (nextEmail) {
+            const dupe = await User.findOne({ where: { email: nextEmail } });
+            if (dupe && dupe.id !== user.id) return res.status(409).json({ error: 'That email is already used by another account.' });
+            user.email = nextEmail;
+          }
+        }
+        if (phoneChanging) {
+          if (!normalizeKenyanPhone(phoneNumber)) return res.status(400).json({ error: 'Please enter a valid Kenyan mobile number.' });
+          const conds = identityConditions(phoneNumber);
+          const dupe = conds.length ? await User.findOne({ where: { [Op.or]: conds } }) : null;
+          if (dupe && dupe.id !== user.id) return res.status(409).json({ error: 'That phone number is already used by another account.' });
+          user.phoneNumber = phoneNumber;
+        }
 
         if (newPassword && newPassword.trim() !== '') {
           if (user.password) {
@@ -3411,11 +3557,14 @@ async function startServer() {
             return res.status(400).json({ error: newPwProblem });
           }
           user.password = await bcrypt.hash(newPassword, 12);
+          passwordChanged = true;
         }
 
         await user.save();
         res.json({ 
           message: 'Profile details updated successfully.', 
+          // After a password change every old session is revoked, so hand this device a fresh token.
+          token: passwordChanged ? signSessionToken({ id: user.id, role: await effectiveRoleFor(user), pv: pwVersion(user) }) : undefined,
           user: { 
             id: user.id, 
             fullName: user.fullName, 
@@ -3467,7 +3616,7 @@ async function startServer() {
           });
         }
 
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpCode = crypto.randomInt(100000, 1000000).toString();
         const tokenExpiration = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes validity
 
         user.resetToken = otpCode;
@@ -3845,25 +3994,36 @@ async function startServer() {
     });
 
     // --- DIRECT M-PESA STK PUSH ROUTE ---
+    // SECURITY: this endpoint used to be open to the internet and trusted the caller's phone number and amount,
+    // so anyone could send M-Pesa prompts to strangers through your PayHero account. Now it needs a login, only
+    // works for the caller's own unpaid order, and always charges the order's real total.
     const handleStkPushRequest = async (req, res) => {
       try {
-        const { phoneNumber, phone, amount, orderId, external_reference } = req.body || {};
-        const targetPhone = phoneNumber || phone;
-        const targetAmount = amount || 10;
-        const ref = external_reference || (orderId ? `ORD-${orderId}` : `STK-${Date.now()}`);
-
+        const { phoneNumber, phone, orderId } = req.body || {};
+        const targetPhone = normalizeKenyanPhone(phoneNumber || phone || req.user.phoneNumber);
         if (!targetPhone) {
-          return res.status(400).json({ error: 'Phone number parameter is required for M-Pesa STK push.' });
+          return res.status(400).json({ error: 'A valid M-Pesa phone number is required for the STK push.' });
         }
+        const order = await Order.findByPk(Number(orderId) || -1);
+        const isStaffCaller = req.user && (req.user.role === 'admin' || req.user.role === 'support');
+        if (!order || (order.userId !== req.user.id && !isStaffCaller)) {
+          return res.status(404).json({ error: 'Order not found.' });
+        }
+        const pd = order.paymentDetails || {};
+        if (pd.isPaid === true) return res.status(409).json({ error: 'This order has already been paid.' });
+        if (/cancel/i.test(String(order.status || ''))) return res.status(409).json({ error: 'This order was cancelled.' });
+        const targetAmount = Number(order.grandTotal);
+        if (!Number.isFinite(targetAmount) || targetAmount < 1) return res.status(422).json({ error: 'This order has no payable amount.' });
+        const ref = `ORD-${order.id}`;
 
-        const callbackEndpoint = `${RENDER_BASE_URL}/api/payments/payhero/callback`;
+        const callbackEndpoint = `${RENDER_BASE_URL}/api/payments/payhero/callback${PAYHERO_CALLBACK_QS}`;
 
-        console.log(`📱 Dispatching Direct PayHero STK Push to ${targetPhone}, Amount: KES ${targetAmount}, Ref: ${ref}`);
+        console.log(`📱 Dispatching PayHero STK Push for Order #${order.id}, Amount: KES ${targetAmount}`);
 
         const payheroResponse = await axios.post(
           'https://backend.payhero.co.ke/api/v2/payments',
           {
-            amount: Number(targetAmount),
+            amount: targetAmount,
             phone_number: targetPhone,
             channel_id: PAYHERO_CHANNEL_ID,
             provider: 'm-pesa',
@@ -3887,14 +4047,16 @@ async function startServer() {
         console.error('❌ Direct STK Push Processing Failure:', stkError.response ? stkError.response.data : stkError.message);
         res.status(500).json({
           success: false,
-          error: stkError.response?.data?.message || stkError.message || 'Failed to dispatch M-Pesa STK Push.'
+          error: 'Failed to dispatch the M-Pesa prompt. Please try again shortly.'
         });
       }
     };
 
-    expressApp.post('/api/payments/stkpush', handleStkPushRequest);
-    expressApp.post('/api/payments/stk-push', handleStkPushRequest);
-    expressApp.post('/api/payment/stkpush', handleStkPushRequest);
+    // 6 prompts per order per 30 minutes.
+    const stkLimiter = rl({ name: 'stk push', windowMs: 30 * 60 * 1000, max: 6, keyFn: (r) => `stk:${r.user ? r.user.id : r.ip}:${Number(r.body && r.body.orderId) || 0}`, message: 'Too many payment prompts for this order. Please wait a while and try again.' });
+    expressApp.post('/api/payments/stkpush', authenticateToken, stkLimiter, handleStkPushRequest);
+    expressApp.post('/api/payments/stk-push', authenticateToken, stkLimiter, handleStkPushRequest);
+    expressApp.post('/api/payment/stkpush', authenticateToken, stkLimiter, handleStkPushRequest);
 
     // --- CREATE ORDER, CALCULATE WEIGHT/POINTS & TRIGGER PAYHERO STK PUSH ---
     expressApp.post('/api/orders/create', authenticateToken, async (req, res) => {
@@ -3917,13 +4079,18 @@ async function startServer() {
           return res.status(400).json({ error: 'Shopping cart items cannot be empty.' });
         }
 
+        if (cartItems.length > 60) {
+          return res.status(400).json({ error: 'Too many different items in one order.' });
+        }
         // Pre-validate every line BEFORE any stock is deducted, so a failing line cannot leave earlier lines half-processed.
         for (const preItem of cartItems) {
           const preId = preItem.productId || preItem.laptopId || preItem.id;
           const preQty = Number(preItem.quantity);
-          if (!Number.isFinite(preQty) || preQty <= 0) {
+          // Whole bags only (a fraction such as 0.001 used to buy goods for almost nothing).
+          if (!Number.isInteger(preQty) || preQty <= 0 || preQty > 1000) {
             return res.status(400).json({ error: `Invalid quantity supplied for product ID: ${preId}.` });
           }
+          preItem.quantity = preQty;
           const preProduct = await RiceProduct.findByPk(preId);
           if (!preProduct || preProduct.stockQuantity < preQty) {
             return res.status(422).json({ error: `Insufficient stock for product ID: ${preId} (${preProduct ? preProduct.brandName : 'Unknown Item'}).` });
@@ -3952,6 +4119,14 @@ async function startServer() {
         let totalWeightKg = 0;
         const builtOrderLineItems = [];
         const wholesaleTiers = await getWholesaleTiers();
+        // Stock is reserved with an atomic conditional UPDATE, so two simultaneous buyers can never oversell a bag.
+        const reservedLines = [];
+        const stockCol = sequelize.getQueryInterface().queryGenerator.quoteIdentifier('stockQuantity');
+        const releaseReservedStock = async () => {
+          for (const done of reservedLines) {
+            await RiceProduct.update({ stockQuantity: sequelize.literal(`${stockCol} + ${done.qty}`) }, { where: { id: done.id } });
+          }
+        };
 
         for (const item of cartItems) {
           const targetId = item.productId || item.laptopId || item.id;
@@ -3975,8 +4150,16 @@ async function startServer() {
           totalWeightKg += itemKg;
 
           calculatedSubtotal += (purchasePrice * item.quantity);
-          product.stockQuantity -= item.quantity; 
-          await product.save();
+          const [reservedRows] = await RiceProduct.update(
+            { stockQuantity: sequelize.literal(`${stockCol} - ${Number(item.quantity)}`) },
+            { where: { id: product.id, stockQuantity: { [Op.gte]: item.quantity } } }
+          );
+          if (!reservedRows) {
+            await releaseReservedStock();
+            return res.status(422).json({ error: `Insufficient stock for product ID: ${targetId} (${product.brandName}).` });
+          }
+          reservedLines.push({ id: product.id, qty: Number(item.quantity) });
+          product.stockQuantity -= item.quantity; // in-memory only: used by the notifications below
 
           builtOrderLineItems.push({ 
             productId: product.id, 
@@ -3998,10 +4181,15 @@ async function startServer() {
           }
         }
 
-        let activeTransportCharge = shippingFee !== undefined ? Number(shippingFee) : 250;
+        // SECURITY: the delivery fee is decided by the server only. It used to fall back to a client-sent
+        // shippingFee, so a customer could send 0 or a negative number and shrink their own bill.
+        let activeTransportCharge = 250;
+        const cfgFee = await SystemConfig.findOne({ where: { key: 'transport_fee' } });
+        if (cfgFee && Number.isFinite(Number(cfgFee.value))) activeTransportCharge = Number(cfgFee.value);
         if (county && activeCountyMap && activeCountyMap[county] !== undefined) {
           activeTransportCharge = Number(activeCountyMap[county]);
         }
+        if (!Number.isFinite(activeTransportCharge) || activeTransportCharge < 0) activeTransportCharge = 250;
 
         const fullDeliveryAddress = {
           county: county || 'Not Specified',
@@ -4012,14 +4200,27 @@ async function startServer() {
           details: shippingAddress || `${streetAddress || ''}, ${sublocation || ''}, ${location || ''}, ${town || ''}, ${county || ''}`
         };
 
-        const finalOrderTotal = Number((calculatedSubtotal + activeTransportCharge).toFixed(2)); // always computed server-side
+        // Optional coupon (validated and reserved on the server; the client only sends the code).
+        let couponDiscount = 0;
+        let appliedCoupon = null;
+        if (req.body && req.body.couponCode) {
+          const couponResult = await evaluateCoupon(req.body.couponCode, calculatedSubtotal, req.user.id);
+          if (!couponResult.ok || !(await reserveCoupon(couponResult.coupon))) {
+            await releaseReservedStock();
+            return res.status(422).json({ error: couponResult.ok ? 'This coupon has just been fully redeemed.' : couponResult.error });
+          }
+          appliedCoupon = couponResult.coupon;
+          couponDiscount = couponResult.discount;
+        }
+        const discountedSubtotal = calculatedSubtotal - couponDiscount;
+        const finalOrderTotal = Number((discountedSubtotal + activeTransportCharge).toFixed(2)); // always computed server-side
         const earnedPoints = Number((totalWeightKg * 0.2).toFixed(2));
 
         const generatedOrder = await Order.create({
           userId: req.user.id,
           items: builtOrderLineItems,
           transportFee: activeTransportCharge,
-          subTotal: calculatedSubtotal,
+          subTotal: discountedSubtotal,
           grandTotal: finalOrderTotal,
           totalWeightKg: totalWeightKg,
           pointsEarned: earnedPoints,
@@ -4028,6 +4229,8 @@ async function startServer() {
             isPaid: false,
             paidTag: 'PENDING',
             mpesaNumber: mpesaPhoneNumber || null,
+            couponCode: appliedCoupon ? appliedCoupon.code : null,
+            discount: couponDiscount,
             amount: finalOrderTotal,
             paidAt: null,
             mpesaReceipt: null,
@@ -4043,6 +4246,7 @@ async function startServer() {
 
         // Clear user shopping cart after successful order creation
         await Cart.destroy({ where: { userId: req.user.id } });
+        if (appliedCoupon) await recordRedemption({ coupon: appliedCoupon, userId: req.user.id, orderId: generatedOrder.id, amount: couponDiscount });
 
         // Referral code typed at checkout (only links customers that do not already belong to an agent)
         let referralResult = { attached: false };
@@ -4056,7 +4260,7 @@ async function startServer() {
 
         if (paymentMethod === 'mpesa_stk') {
           const targetPhone = mpesaPhoneNumber || req.user.phoneNumber;
-          const callbackEndpoint = `${RENDER_BASE_URL}/api/payments/payhero/callback`;
+          const callbackEndpoint = `${RENDER_BASE_URL}/api/payments/payhero/callback${PAYHERO_CALLBACK_QS}`;
 
           try {
             console.log(`📱 Triggering PayHero STK Push for Order #${generatedOrder.id} to ${targetPhone}...`);
@@ -4171,7 +4375,15 @@ async function startServer() {
     // --- PAYHERO PAYMENT WEBHOOK CALLBACK RECEIVER ---
     expressApp.post('/api/payments/payhero/callback', async (req, res) => {
       try {
-        console.log('🔔 PayHero Callback Notification Received:', JSON.stringify(req.body, null, 2));
+        if (PAYHERO_CALLBACK_SECRET) {
+          const given = Buffer.from(String(req.query.s || ''));
+          const want = Buffer.from(PAYHERO_CALLBACK_SECRET);
+          if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) {
+            logEvent({ req, actor: { id: null, role: 'anonymous', name: null }, action: 'PAYMENT_CALLBACK_REJECTED', category: 'orders', severity: 'alert', summary: 'A payment callback without the correct secret was rejected' });
+            return res.status(401).json({ error: 'Unauthorized.' });
+          }
+        }
+        console.log('🔔 PayHero Callback received for', String((req.body && (req.body.external_reference || (req.body.response && req.body.response.external_reference))) || 'unknown'));
 
         const body = req.body || {};
         const responseObj = body.response || body;
@@ -4469,6 +4681,7 @@ async function startServer() {
     expressApp.post('/api/admin/upload', authenticateToken, requireAdmin, upload.single('image'), async (req, res) => {
       try {
         if (!req.file) return res.status(400).json({ error: 'No file buffered to stream.' });
+        if (!verifyUploadedImage(req.file)) return res.status(400).json({ error: 'That file is not a valid JPEG, PNG, WEBP or GIF image.' });
         const fileUrl = await persistUploadedFile(req.file);
         res.json({ url: fileUrl, imageUrl: fileUrl });
       } catch (err) { 
@@ -5331,7 +5544,7 @@ async function startServer() {
     // ==========================================================================
     const issueLoginResponse = async (user) => {
       const role = await effectiveRoleFor(user);
-      const token = jwt.sign({ id: user.id, role }, JWT_SECRET, { expiresIn: '7d' });
+      const token = signSessionToken({ id: user.id, role, pv: pwVersion(user) });
       return { token, user: { id: user.id, fullName: user.fullName, role, phoneNumber: user.phoneNumber, email: user.email, rewardPoints: user.rewardPoints || 0 } };
     };
 
@@ -5796,7 +6009,7 @@ async function startServer() {
         const header = req.headers['authorization'] || '';
         const token = header.startsWith('Bearer ') ? header.slice(7) : null;
         if (!token) return null;
-        return jwt.verify(token, JWT_SECRET).id || null;
+        return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }).id || null;
       } catch (_) { return null; }
     };
     const userBoughtProduct = async (userId, productId) => {
@@ -6329,6 +6542,37 @@ async function startServer() {
          * 8. SYSTEM BOOTSTRAP & PORT LISTENER
          * ==========================================
          */
+        registerPremiumRoutes({
+          expressApp, Op, authenticateToken, requireAdmin, makeRateLimiter, logEvent,
+          normalizeKenyanPhone, Order, User, RiceProduct, isProduction
+        });
+
+        // USSD webhook: POST /api/ussd/<USSD_WEBHOOK_SECRET>
+        registerUssdRoutes({
+          expressApp, models: ussdModels, axios, jwt, JWT_SECRET, pwVersion, bcrypt, logEvent,
+          normalizeKenyanPhone, Order, sendSmsRaw, isProduction,
+          sendOtpEmail: (toEmail, toName, code) => transporter.sendMail({
+            from: `"${SENDER_NAME}" <${EMAIL_FROM}>`,
+            to: toEmail,
+            subject: '🔐 Your USSD PIN reset code - Mwea Rice Hub',
+            html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:24px"><h2 style="color:#064e3b">USSD PIN reset</h2><p>Hello ${String(toName || '').replace(/[<>&"']/g, '')},</p><p>Use this 6-digit code on your phone to set a new USSD PIN. It expires in 10 minutes.</p><p style="font-size:32px;letter-spacing:6px;font-weight:bold;color:#047857">${code}</p><p style="color:#64748b;font-size:12px">If you did not ask for this, ignore this email. Nobody can change your PIN without this code.</p></div>`
+          }),
+          findUserByPhone: async (phone) => {
+            const u = await User.findOne({ where: { [Op.or]: identityConditions(phone) } });
+            if (u) u.staffRole = await effectiveRoleFor(u); // admin / support accounts are refused on USSD
+            return u;
+          },
+          createUser: async ({ phone, fullName }) => User.create({
+            phoneNumber: phone,
+            email: null,
+            // Random password: the USSD PIN is NOT a web password. The customer can set a web password with "Forgot password".
+            password: await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 10),
+            fullName,
+            isVerified: true, // the phone number was verified by the mobile network
+            isActive: true
+          })
+        });
+
         // JSON error handler (also catches multer upload errors such as wrong file type / file too large)
         expressApp.use((err, req, res, next) => {
           if (res.headersSent) return next(err);
