@@ -90,7 +90,11 @@ export interface Order {
     method?: string;
     paidAt?: string | null;
     rawCallback?: any;
+    promo?: { code: string; discount: number; gross?: number } | null;
+    tillNumber?: string;
+    tillName?: string;
   };
+  delivery?: { riderName?: string; riderPhone?: string | null; vehicle?: string | null; status: string } | null;
   createdAt: string;
   updatedAt?: string;
 }
@@ -1544,25 +1548,27 @@ const ProductCard: React.FC<ProductCardProps> = ({
           alt={product.brandName} 
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           loading="lazy"
+          onError={(e) => { const t = e.currentTarget; if (!t.dataset.fallback) { t.dataset.fallback = '1'; t.src = 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=600&q=80'; } }}
         />
 
-        {/* Dynamic Badges */}
-        <div className="absolute top-2 left-2 flex flex-col gap-1 items-start z-10">
-          <span className="bg-emerald-900/90 text-emerald-200 font-black text-[10px] px-2 py-0.5 rounded-full backdrop-blur-md uppercase tracking-wider shadow-sm">
-            {product.weightKg}kg Sack
-          </span>
-          {product.isOrganic && (
-            <span className="bg-teal-700/90 text-white font-bold text-[9px] px-2 py-0.5 rounded-full backdrop-blur-md flex items-center gap-1">
-              <Leaf className="w-2.5 h-2.5" /> Organic
+        {/* Dynamic Badges: wrap instead of overlapping on narrow phone cards */}
+        <div className="absolute top-2 inset-x-2 z-10 flex flex-wrap items-start justify-between gap-1 pointer-events-none">
+          <div className="flex flex-col gap-1 items-start min-w-0 max-w-full">
+            <span className="bg-emerald-900/90 text-emerald-200 font-black text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-0.5 rounded-full backdrop-blur-md uppercase tracking-wide sm:tracking-wider shadow-sm whitespace-nowrap">
+              {Number(product.weightKg) || product.weightKg}kg Sack
+            </span>
+            {product.isOrganic && (
+              <span className="bg-teal-700/90 text-white font-bold text-[9px] px-1.5 sm:px-2 py-0.5 rounded-full backdrop-blur-md flex items-center gap-1 whitespace-nowrap">
+                <Leaf className="w-2.5 h-2.5" /> Organic
+              </span>
+            )}
+          </div>
+          {hasDiscount && (
+            <span className="bg-rose-600 text-white font-black text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-0.5 rounded-full shadow-md animate-pulse whitespace-nowrap">
+              SALE
             </span>
           )}
         </div>
-
-        {hasDiscount && (
-          <div className="absolute top-2 right-2 bg-rose-600 text-white font-black text-[10px] px-2 py-0.5 rounded-full shadow-md animate-pulse">
-            SALE
-          </div>
-        )}
 
         {/* Quick View Button Overlay */}
         <button 
@@ -2405,7 +2411,7 @@ function AdminCampaignsPanel({ token, showToast }: { token: string | null; showT
           <tbody className="divide-y divide-slate-800/60">
             {history.campaigns.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-slate-500 font-bold">No campaigns yet.</td></tr>}
             {history.campaigns.map((c: any) => (
-              <tr key={c.id}><td className="p-3"><p className="font-bold text-white">{c.name}</p><p className="text-[10px] text-slate-500 max-w-xs truncate">{c.message}</p>{c.problem && <p className="text-[10px] text-rose-400 max-w-xs">Problem: {c.problem}</p>}</td><td className="p-3 text-slate-400 whitespace-nowrap">{formatWhen(c.startedAt)}</td>
+              <tr key={c.id}><td className="p-3"><p className="font-bold text-white">{c.name}</p><p className="text-[10px] text-slate-500 max-w-xs truncate">{c.message}</p><CampaignProblem c={c} token={token} /></td><td className="p-3 text-slate-400 whitespace-nowrap">{formatWhen(c.startedAt)}</td>
                 <td className="p-3"><span className={`px-2 py-0.5 rounded-full border text-[9px] font-black uppercase ${statusPill[c.status] || ''}`}>{c.status}</span></td><td className="p-3 text-right">{c.totalRecipients}</td><td className="p-3 text-right text-emerald-400 font-bold">{c.sentCount}</td><td className="p-3 text-right text-rose-400">{c.failedCount}</td><td className="p-3 text-right text-slate-400">{c.optedOutSkipped}</td>
                 <td className="p-3 text-right">{c.status === 'sending' && <button onClick={() => stop(c.id)} className="px-2.5 py-1.5 rounded-lg bg-rose-800 hover:bg-rose-700 text-white text-[10px] font-extrabold cursor-pointer">Stop</button>}</td></tr>
             ))}
@@ -3717,6 +3723,442 @@ function AdminActivityPanel({ token, showToast, socket }: { token: string | null
 }
 
 
+// ============================================================================
+// v3.7 ADDITIONS: mobile admin navigation, Payments Center (Till + STK checks),
+// Promo Codes and Delivery Dispatch board
+// ============================================================================
+
+type AdminTabDef = { id: string; label: string; icon: any; desc: string; group: string };
+
+/** Phone-first admin navigation: a sticky strip of big pills plus an "All sections" sheet. Hidden on large screens (the sidebar is used there). */
+function AdminMobileNav({ tabs, active, onChange, badges = {} }: { tabs: AdminTabDef[]; active: string; onChange: (id: string) => void; badges?: Record<string, number> }) {
+  const [open, setOpen] = useState(false);
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const current = tabs.find(t => t.id === active) || tabs[0];
+  const CurrentIcon = current.icon;
+  const groups = Array.from(new Set(tabs.map(t => t.group)));
+
+  useEffect(() => {
+    const el = stripRef.current?.querySelector(`[data-tab="${active}"]`) as HTMLElement | null;
+    if (el && stripRef.current) stripRef.current.scrollTo({ left: el.offsetLeft - 16, behavior: 'smooth' });
+  }, [active]);
+
+  const pick = (id: string) => { onChange(id); setOpen(false); if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' }); };
+
+  return (
+    <div className="lg:hidden sticky top-20 z-30 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2 bg-slate-950/95 backdrop-blur-md border-b border-slate-800">
+      <div className="flex items-center gap-2">
+        <button onClick={() => setOpen(true)} className="shrink-0 flex items-center gap-2 pl-3 pr-3.5 py-2.5 rounded-2xl bg-emerald-700 text-white text-xs font-black shadow-lg active:scale-95" aria-label="Open all admin sections">
+          <Menu className="w-4 h-4" /> <span>Menu</span>
+        </button>
+        <div ref={stripRef} className="flex-1 flex gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden snap-x scroll-smooth" style={{ scrollbarWidth: 'none' }}>
+          {tabs.map(t => {
+            const Icon = t.icon; const on = t.id === active;
+            return (
+              <button key={t.id} data-tab={t.id} onClick={() => pick(t.id)}
+                className={`snap-start shrink-0 relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl text-xs font-bold whitespace-nowrap border transition-all active:scale-95 ${on ? 'bg-emerald-800 border-emerald-500/50 text-white' : 'bg-slate-900 border-slate-800 text-slate-400'}`}>
+                <Icon className="w-4 h-4" /> {t.label}
+                {badges[t.id] > 0 && <span className="ml-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] font-black flex items-center justify-center">{badges[t.id]}</span>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <p className="mt-1.5 text-[10px] text-slate-500 flex items-center gap-1.5"><CurrentIcon className="w-3 h-3" /> {current.label} · {current.desc}</p>
+
+      {open && (
+        <div className="fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-sm flex items-end" onClick={() => setOpen(false)}>
+          <div className="w-full max-h-[85vh] overflow-y-auto bg-slate-900 rounded-t-3xl border-t border-slate-700 p-4 pb-8 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-black text-white">Admin sections</p>
+              <button onClick={() => setOpen(false)} className="p-2 rounded-full bg-slate-800 text-slate-300" aria-label="Close"><X className="w-4 h-4" /></button>
+            </div>
+            {groups.map(g => (
+              <div key={g} className="space-y-2">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">{g}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {tabs.filter(t => t.group === g).map(t => {
+                    const Icon = t.icon; const on = t.id === active;
+                    return (
+                      <button key={t.id} onClick={() => pick(t.id)} className={`relative p-3 rounded-2xl text-left border flex flex-col gap-1.5 active:scale-95 ${on ? 'bg-emerald-900/70 border-emerald-500/50' : 'bg-slate-950 border-slate-800'}`}>
+                        <Icon className={`w-5 h-5 ${on ? 'text-emerald-300' : 'text-slate-400'}`} />
+                        <span className="text-xs font-extrabold text-white leading-tight">{t.label}</span>
+                        <span className="text-[10px] text-slate-500 leading-tight">{t.desc}</span>
+                        {badges[t.id] > 0 && <span className="absolute top-2 right-2 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] font-black flex items-center justify-center">{badges[t.id]}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PAYMENTS CENTER: payment methods, Till confirmations, pasted M-Pesa messages, unpaid orders
+// ---------------------------------------------------------------------------
+function AdminPaymentsPanel({ token, showToast }: { token: string | null; showToast: ToastFn }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ tillNumber: '', tillName: '', tillEnabled: false, stkEnabled: true });
+  const [formLoaded, setFormLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const d = await staffApi('/admin/payments/overview', token);
+      setData(d);
+      if (!formLoaded && d.config) {
+        setForm({ tillNumber: d.config.tillNumber || '', tillName: d.config.tillName || '', tillEnabled: !!d.config.tillEnabled, stkEnabled: d.config.stkEnabled !== false });
+        setFormLoaded(true);
+      }
+    } catch (err: any) { showToast(err.message, 'error'); } finally { setLoading(false); }
+  }, [token, formLoaded]);
+  useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, [load]);
+
+  const saveSettings = async () => {
+    setSaving(true);
+    try { await staffApi('/admin/config/payment-methods', token, { method: 'PUT', body: form }); showToast('Payment settings saved.', 'success'); load(); }
+    catch (err: any) { showToast(err.message, 'error'); } finally { setSaving(false); }
+  };
+  const approve = async (r: any) => {
+    setBusyId(`a${r.id}`);
+    try { await staffApi(`/admin/payments/till/${r.id}/approve`, token, { method: 'POST', body: { amount: amounts[r.id] ? Number(amounts[r.id]) : undefined } }); showToast(`Order #${r.orderId} marked paid.`, 'success'); load(); }
+    catch (err: any) { showToast(err.message, 'error'); } finally { setBusyId(null); }
+  };
+  const reject = async (r: any) => {
+    const reason = window.prompt('Why are you rejecting this code? (the customer will see that it could not be verified)', 'Not found on the Till statement');
+    if (reason === null) return;
+    setBusyId(`r${r.id}`);
+    try { await staffApi(`/admin/payments/till/${r.id}/reject`, token, { method: 'POST', body: { reason } }); showToast('Code rejected.', 'info'); load(); }
+    catch (err: any) { showToast(err.message, 'error'); } finally { setBusyId(null); }
+  };
+  const doImport = async () => {
+    setImporting(true);
+    try {
+      const r = await staffApi('/admin/payments/till/import', token, { method: 'POST', body: { text: importText } });
+      showToast(`${r.found} message(s) read · ${r.matched} order(s) confirmed · ${r.duplicates} already known.`, 'success');
+      setImportText(''); load();
+    } catch (err: any) { showToast(err.message, 'error'); } finally { setImporting(false); }
+  };
+  const recheck = async (o: any) => {
+    setBusyId(`c${o.id}`);
+    try { const r = await staffApi(`/admin/payments/orders/${o.id}/recheck`, token, { method: 'POST' }); showToast(r.message, r.verdict === 'PAID' ? 'success' : 'info'); load(); }
+    catch (err: any) { showToast(err.message, 'error'); } finally { setBusyId(null); }
+  };
+
+  if (loading) return <div className={`${cardCls} p-8 text-center text-xs text-slate-400`}>Loading payments…</div>;
+  const waiting = data?.waiting || [];
+  const unpaid = data?.unpaidOrders || [];
+
+  return (
+    <div className="space-y-5">
+      {/* Methods */}
+      <div className={`${cardCls} p-4 sm:p-6 space-y-4`}>
+        <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2"><Wallet className="w-5 h-5 text-emerald-400" /> Payment methods</h3>
+        <label className="flex items-start gap-3 p-3 rounded-2xl bg-slate-950 border border-slate-800 cursor-pointer">
+          <input type="checkbox" checked={form.stkEnabled} onChange={(e) => setForm({ ...form, stkEnabled: e.target.checked })} className="mt-1 w-5 h-5 accent-emerald-500" />
+          <span><span className="block text-xs font-extrabold text-white">M-Pesa STK push (PayHero)</span><span className="block text-[11px] text-slate-500">A prompt appears on the customer&apos;s phone. Confirmed by asking PayHero, so no one can fake it.</span></span>
+        </label>
+        <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input type="checkbox" checked={form.tillEnabled} onChange={(e) => setForm({ ...form, tillEnabled: e.target.checked })} className="mt-1 w-5 h-5 accent-emerald-500" />
+            <span><span className="block text-xs font-extrabold text-white">Pay to Till number (Buy Goods)</span><span className="block text-[11px] text-slate-500">Customer pays to your Till, then enters the M-Pesa code. The code is checked against real payments before the order is marked paid.</span></span>
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div><label className={labelCls}>Till number</label><input inputMode="numeric" value={form.tillNumber} onChange={(e) => setForm({ ...form, tillNumber: e.target.value.replace(/\D/g, '').slice(0, 8) })} placeholder="e.g. 5123456" className={inputCls} /></div>
+            <div><label className={labelCls}>Name shown on M-Pesa</label><input value={form.tillName} onChange={(e) => setForm({ ...form, tillName: e.target.value })} placeholder="e.g. MWEA RICE HUB" className={inputCls} /></div>
+          </div>
+        </div>
+        <button onClick={saveSettings} disabled={saving} className="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-extrabold cursor-pointer">{saving ? 'Saving…' : 'Save payment settings'}</button>
+        <div className={`p-3 rounded-2xl border text-[11px] leading-relaxed ${data?.c2bConfigured ? 'bg-emerald-950/40 border-emerald-800/50 text-emerald-300' : 'bg-amber-950/30 border-amber-800/40 text-amber-200'}`}>
+          {data?.c2bConfigured
+            ? 'Automatic Till checking is ON: every payment to your Till reaches the system from Safaricom, so customer codes are confirmed instantly.'
+            : 'Automatic Till checking is OFF. Customer codes wait below until you confirm them, or until you paste your M-Pesa messages in the box further down. To make it fully automatic, register the Confirmation URL with Safaricom Daraja (C2B) and set MPESA_C2B_SECRET on the server.'}
+        </div>
+      </div>
+
+      {/* Waiting */}
+      <div className={`${cardCls} p-4 sm:p-6 space-y-3`}>
+        <h3 className="text-sm sm:text-base font-black text-white flex items-center gap-2"><Clock className="w-4 h-4 text-amber-400" /> Till codes waiting for confirmation <span className="px-2 py-0.5 rounded-full bg-amber-900/50 text-amber-300 text-[10px]">{waiting.length}</span></h3>
+        {waiting.length === 0 && <p className="text-xs text-slate-500">Nothing waiting. New customer codes appear here.</p>}
+        {waiting.map((r: any) => (
+          <div key={r.id} className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-black text-white">Order #{r.orderId} · {r.order ? formatKES(r.order.total) : '—'}</p>
+                <p className="text-[11px] text-slate-400">{r.order?.customer || 'Customer'} {r.order?.phone ? `· ${r.order.phone}` : ''}</p>
+              </div>
+              <button onClick={() => copyText(r.mpesaCode, showToast, 'Code copied.')} className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 font-mono font-black text-emerald-300 text-xs flex items-center gap-1.5"><Copy className="w-3 h-3" /> {r.mpesaCode}</button>
+            </div>
+            <p className="text-[11px] text-slate-500">{r.amount ? `Amount on record: ${formatKES(Number(r.amount))}` : 'Not yet seen in your M-Pesa feed. Check your Till statement for this code, then enter the amount you see.'}</p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              {!r.amount && <input inputMode="decimal" placeholder="Amount on statement (KES)" value={amounts[r.id] || ''} onChange={(e) => setAmounts({ ...amounts, [r.id]: e.target.value })} className={inputCls} />}
+              <button onClick={() => approve(r)} disabled={busyId === `a${r.id}`} className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-extrabold cursor-pointer whitespace-nowrap">{busyId === `a${r.id}` ? 'Confirming…' : 'Confirm payment'}</button>
+              <button onClick={() => reject(r)} disabled={busyId === `r${r.id}`} className="px-4 py-2.5 rounded-xl bg-rose-900/70 hover:bg-rose-800 text-rose-200 text-xs font-extrabold cursor-pointer">Reject</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Import */}
+      <div className={`${cardCls} p-4 sm:p-6 space-y-3`}>
+        <h3 className="text-sm sm:text-base font-black text-white flex items-center gap-2"><FileText className="w-4 h-4 text-sky-400" /> Paste M-Pesa messages</h3>
+        <p className="text-[11px] text-slate-500">Copy the &quot;Confirmed. Ksh… received from…&quot; SMS messages from your Till phone (or the statement lines) and paste them here. Each code is saved and matched to any waiting order automatically.</p>
+        <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={5} placeholder="SJK4L9XQ2P Confirmed. You have received Ksh1,500.00 from JOHN DOE 2547… on 20/10/26…" className={`${inputCls} font-mono`} />
+        <button onClick={doImport} disabled={importing || importText.trim().length < 20} className="px-5 py-2.5 rounded-xl bg-sky-700 hover:bg-sky-600 disabled:opacity-40 text-white text-xs font-extrabold cursor-pointer">{importing ? 'Reading…' : 'Read and match'}</button>
+      </div>
+
+      {/* Unpaid orders */}
+      <div className={`${cardCls} p-4 sm:p-6 space-y-3`}>
+        <h3 className="text-sm sm:text-base font-black text-white flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-rose-400" /> Unpaid orders (last 3 days) <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[10px]">{unpaid.length}</span></h3>
+        {unpaid.length === 0 && <p className="text-xs text-slate-500">No unpaid orders.</p>}
+        {unpaid.map((o: any) => (
+          <div key={o.id} className="p-3 rounded-2xl bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-xs font-black text-white">Order #{o.id} · {formatKES(o.total)} <span className="ml-1 px-1.5 py-0.5 rounded bg-slate-800 text-[9px] uppercase text-slate-300">{o.method === 'mpesa_till' ? 'Till' : 'STK'}</span> <span className={`ml-1 px-1.5 py-0.5 rounded text-[9px] uppercase ${o.paidTag === 'FAILED' ? 'bg-rose-900/60 text-rose-300' : 'bg-amber-900/50 text-amber-300'}`}>{o.paidTag}</span></p>
+              <p className="text-[11px] text-slate-400 truncate">{o.customer} · {o.phone} · {formatWhen(o.createdAt)}</p>
+              {o.reason && <p className="text-[11px] text-rose-400">{o.reason}</p>}
+            </div>
+            {o.method !== 'mpesa_till' && <button onClick={() => recheck(o)} disabled={busyId === `c${o.id}`} className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-extrabold cursor-pointer flex items-center gap-1.5 disabled:opacity-50"><RefreshCw className={`w-3 h-3 ${busyId === `c${o.id}` ? 'animate-spin' : ''}`} /> Check with PayHero</button>}
+          </div>
+        ))}
+      </div>
+
+      {(data?.unmatched?.length > 0 || data?.recentMatched?.length > 0) && (
+        <div className={`${cardCls} p-4 sm:p-6 space-y-3`}>
+          {data.unmatched.length > 0 && (<>
+            <h3 className="text-sm font-black text-white">Payments received, no order yet <span className="text-slate-500 font-medium">({data.unmatched.length})</span></h3>
+            <div className="space-y-1.5">{data.unmatched.slice(0, 15).map((u: any) => (<p key={u.id} className="text-[11px] text-slate-400 font-mono">{u.mpesaCode} · {formatKES(Number(u.amount))} · {u.payerName || u.phoneNumber || '—'} · {formatWhen(u.receivedAt || u.createdAt)}</p>))}</div>
+          </>)}
+          {data.recentMatched.length > 0 && (<>
+            <h3 className="text-sm font-black text-white pt-2">Recently confirmed Till payments</h3>
+            <div className="space-y-1.5">{data.recentMatched.map((u: any) => (<p key={u.id} className="text-[11px] text-emerald-400/90 font-mono">{u.mpesaCode} · {formatKES(Number(u.amount))} → order #{u.orderId}</p>))}</div>
+          </>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PROMO CODES
+// ---------------------------------------------------------------------------
+function AdminPromosPanel({ token, showToast }: { token: string | null; showToast: ToastFn }) {
+  const blank = { code: '', description: '', type: 'percent', value: '', minOrder: '', maxDiscount: '', maxUses: '', expiresAt: '', perUserOnce: true };
+  const [rows, setRows] = useState<any[]>([]);
+  const [f, setF] = useState<any>(blank);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => { try { setRows(await staffApi('/admin/promos', token)); } catch (err: any) { showToast(err.message, 'error'); } }, [token]);
+  useEffect(() => { load(); }, [load]);
+
+  const create = async (e: React.FormEvent) => {
+    e.preventDefault(); setBusy(true);
+    try { await staffApi('/admin/promos', token, { method: 'POST', body: { ...f, value: Number(f.value) } }); showToast(`Promo code ${String(f.code).toUpperCase()} created.`, 'success'); setF(blank); load(); }
+    catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(false); }
+  };
+  const toggle = async (r: any) => {
+    try { await staffApi(`/admin/promos/${r.id}`, token, { method: 'PUT', body: { ...r, expiresAt: r.expiresAt ? String(r.expiresAt).slice(0, 10) : '', isActive: !r.isActive } }); load(); }
+    catch (err: any) { showToast(err.message, 'error'); }
+  };
+  const remove = async (r: any) => {
+    if (!window.confirm(`Delete promo code ${r.code}?`)) return;
+    try { await staffApi(`/admin/promos/${r.id}`, token, { method: 'DELETE' }); load(); } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  return (
+    <div className="space-y-5">
+      <form onSubmit={create} className={`${cardCls} p-4 sm:p-6 space-y-4`}>
+        <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2"><Percent className="w-5 h-5 text-emerald-400" /> Create a promo code</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div><label className={labelCls}>Code</label><input required value={f.code} onChange={(e) => setF({ ...f, code: e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 24) })} placeholder="MASHUJAA10" className={`${inputCls} font-mono`} /></div>
+          <div><label className={labelCls}>Discount type</label><select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })} className={inputCls}><option value="percent">Percent off (%)</option><option value="fixed">Fixed amount off (KES)</option></select></div>
+          <div><label className={labelCls}>{f.type === 'percent' ? 'Percent' : 'Amount (KES)'}</label><input required inputMode="decimal" value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} className={inputCls} /></div>
+          <div><label className={labelCls}>Minimum order (KES)</label><input inputMode="numeric" value={f.minOrder} onChange={(e) => setF({ ...f, minOrder: e.target.value })} placeholder="0" className={inputCls} /></div>
+          {f.type === 'percent' && <div><label className={labelCls}>Max discount (KES)</label><input inputMode="numeric" value={f.maxDiscount} onChange={(e) => setF({ ...f, maxDiscount: e.target.value })} placeholder="no limit" className={inputCls} /></div>}
+          <div><label className={labelCls}>Total uses allowed</label><input inputMode="numeric" value={f.maxUses} onChange={(e) => setF({ ...f, maxUses: e.target.value })} placeholder="unlimited" className={inputCls} /></div>
+          <div><label className={labelCls}>Last valid day</label><input type="date" value={f.expiresAt} onChange={(e) => setF({ ...f, expiresAt: e.target.value })} className={inputCls} /></div>
+          <div><label className={labelCls}>Note (for you)</label><input value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="Mashujaa Day offer" className={inputCls} /></div>
+        </div>
+        <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer"><input type="checkbox" checked={f.perUserOnce} onChange={(e) => setF({ ...f, perUserOnce: e.target.checked })} className="w-4 h-4 accent-emerald-500" /> Each customer can use it only once</label>
+        <button disabled={busy} className="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-extrabold cursor-pointer">{busy ? 'Saving…' : 'Create code'}</button>
+      </form>
+
+      <div className="space-y-2">
+        {rows.length === 0 && <div className={`${cardCls} p-6 text-center text-xs text-slate-500`}>No promo codes yet.</div>}
+        {rows.map((r) => {
+          const expired = r.expiresAt && new Date(r.expiresAt).getTime() < Date.now();
+          return (
+            <div key={r.id} className={`${cardCls} p-4 flex flex-wrap items-center justify-between gap-3`}>
+              <div className="min-w-0">
+                <p className="text-sm font-black font-mono text-white">{r.code} <span className={`ml-2 px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${!r.isActive ? 'bg-slate-800 text-slate-400' : expired ? 'bg-rose-900/50 text-rose-300' : 'bg-emerald-900/60 text-emerald-300'}`}>{!r.isActive ? 'Off' : expired ? 'Expired' : 'Active'}</span></p>
+                <p className="text-[11px] text-slate-400">{r.type === 'percent' ? `${Number(r.value)}% off` : `${formatKES(Number(r.value))} off`}{Number(r.minOrder) > 0 ? ` · min ${formatKES(Number(r.minOrder))}` : ''} · used {r.usedCount}{r.maxUses ? `/${r.maxUses}` : ''}{r.expiresAt ? ` · until ${new Date(r.expiresAt).toLocaleDateString('en-KE')}` : ''}{r.perUserOnce ? ' · once per customer' : ''}</p>
+                {r.description && <p className="text-[11px] text-slate-500">{r.description}</p>}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => toggle(r)} className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-extrabold cursor-pointer">{r.isActive ? 'Switch off' : 'Switch on'}</button>
+                <button onClick={() => remove(r)} className="px-3 py-2 rounded-xl bg-rose-900/60 hover:bg-rose-800 text-rose-200 text-[11px] font-extrabold cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DELIVERY DISPATCH BOARD
+// ---------------------------------------------------------------------------
+function AdminDispatchPanel({ token, showToast }: { token: string | null; showToast: ToastFn }) {
+  const [data, setData] = useState<{ active: any[]; delivered: any[] } | null>(null);
+  const [forms, setForms] = useState<Record<number, any>>({});
+  const [busy, setBusy] = useState<number | null>(null);
+  const [filter, setFilter] = useState<'all' | 'unassigned' | 'out'>('all');
+  const [showDone, setShowDone] = useState(false);
+
+  const load = useCallback(async () => { try { setData(await staffApi('/admin/dispatch', token)); } catch (err: any) { showToast(err.message, 'error'); } }, [token]);
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
+
+  const formFor = (o: any) => forms[o.id] || { riderName: o.delivery?.riderName || '', riderPhone: o.delivery?.riderPhone || '', vehicle: o.delivery?.vehicle || '', status: o.delivery?.status || 'assigned', note: o.delivery?.note || '', notifyCustomer: true };
+  const setField = (o: any, patch: any) => setForms(prev => ({ ...prev, [o.id]: { ...formFor(o), ...patch } }));
+  const save = async (o: any, statusOverride?: string) => {
+    const body = { ...formFor(o), ...(statusOverride ? { status: statusOverride } : {}) };
+    setBusy(o.id);
+    try {
+      const r = await staffApi(`/admin/dispatch/${o.id}`, token, { method: 'PUT', body });
+      showToast(`Order #${o.id} updated.${r.smsNote ? ' ' + r.smsNote : ''}`, 'success');
+      setForms(prev => { const n = { ...prev }; delete n[o.id]; return n; });
+      load();
+    } catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(null); }
+  };
+
+  if (!data) return <div className={`${cardCls} p-8 text-center text-xs text-slate-400`}>Loading deliveries…</div>;
+  const list = data.active.filter(o => filter === 'all' ? true : filter === 'unassigned' ? !o.delivery : o.delivery?.status === 'out_for_delivery');
+  const statusTone: Record<string, string> = { assigned: 'bg-sky-900/50 text-sky-300', out_for_delivery: 'bg-amber-900/50 text-amber-300', delivered: 'bg-emerald-900/60 text-emerald-300', failed: 'bg-rose-900/50 text-rose-300' };
+
+  return (
+    <div className="space-y-4">
+      <div className={`${cardCls} p-4 flex flex-wrap items-center justify-between gap-3`}>
+        <div><h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2"><Truck className="w-5 h-5 text-emerald-400" /> Delivery board</h3><p className="text-[11px] text-slate-500">Paid orders waiting to be delivered. Give each one a rider and move it along.</p></div>
+        <div className="flex gap-1.5 flex-wrap">
+          {([['all', `All (${data.active.length})`], ['unassigned', `No rider (${data.active.filter(o => !o.delivery).length})`], ['out', `On the road (${data.active.filter(o => o.delivery?.status === 'out_for_delivery').length})`]] as const).map(([id, label]) => (
+            <button key={id} onClick={() => setFilter(id as any)} className={`px-3 py-2 rounded-xl text-[11px] font-bold cursor-pointer ${filter === id ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-slate-300'}`}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      {list.length === 0 && <div className={`${cardCls} p-8 text-center text-xs text-slate-500`}>Nothing to deliver here.</div>}
+      {list.map(o => {
+        const f = formFor(o);
+        return (
+          <div key={o.id} className={`${cardCls} p-4 space-y-3`}>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-sm font-black text-white">Order #{o.id} · {formatKES(o.total)} · {o.kg} kg {o.delivery && <span className={`ml-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${statusTone[o.delivery.status] || ''}`}>{String(o.delivery.status).replace(/_/g, ' ')}</span>}</p>
+                <p className="text-[11px] text-slate-300 flex items-start gap-1"><MapPin className="w-3 h-3 mt-0.5 text-emerald-400 shrink-0" /> {[o.address, o.sublocation, o.location, o.town, o.county].filter(Boolean).join(', ')}</p>
+                <p className="text-[11px] text-slate-500 break-words">{o.items}</p>
+              </div>
+              <a href={`tel:${o.phone}`} className="px-3 py-2 rounded-xl bg-slate-800 text-white text-[11px] font-bold flex items-center gap-1.5"><PhoneCall className="w-3 h-3" /> {o.customer || 'Customer'}</a>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <input value={f.riderName} onChange={(e) => setField(o, { riderName: e.target.value })} placeholder="Rider / driver name" className={inputCls} />
+              <input inputMode="tel" value={f.riderPhone} onChange={(e) => setField(o, { riderPhone: e.target.value })} placeholder="Rider phone" className={inputCls} />
+              <input value={f.vehicle} onChange={(e) => setField(o, { vehicle: e.target.value })} placeholder="Vehicle / plate (optional)" className={inputCls} />
+            </div>
+            <label className="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer"><input type="checkbox" checked={f.notifyCustomer} onChange={(e) => setField(o, { notifyCustomer: e.target.checked })} className="w-4 h-4 accent-emerald-500" /> Tell the customer by SMS when it is dispatched or delivered</label>
+            <div className="flex flex-wrap gap-2">
+              <button disabled={busy === o.id} onClick={() => save(o, 'assigned')} className="px-4 py-2.5 rounded-xl bg-sky-800 hover:bg-sky-700 text-white text-xs font-extrabold cursor-pointer disabled:opacity-50">Save rider</button>
+              <button disabled={busy === o.id} onClick={() => save(o, 'out_for_delivery')} className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-extrabold cursor-pointer disabled:opacity-50">Out for delivery</button>
+              <button disabled={busy === o.id} onClick={() => save(o, 'delivered')} className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold cursor-pointer disabled:opacity-50">Mark delivered</button>
+            </div>
+          </div>
+        );
+      })}
+
+      {data.delivered.length > 0 && (
+        <div className={`${cardCls} p-4`}>
+          <button onClick={() => setShowDone(!showDone)} className="w-full flex items-center justify-between text-xs font-black text-white cursor-pointer">Recently delivered ({data.delivered.length}) <ChevronDown className={`w-4 h-4 transition-transform ${showDone ? 'rotate-180' : ''}`} /></button>
+          {showDone && <div className="mt-3 space-y-1.5">{data.delivered.map(o => <p key={o.id} className="text-[11px] text-slate-400">#{o.id} · {o.customer} · {o.town || o.county} · rider {o.delivery?.riderName || '—'} · {o.delivery?.deliveredAt ? formatWhen(o.delivery.deliveredAt) : ''}</p>)}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Address helpers (an order's address is saved as an object; the old screen tried to print that object)
+// ---------------------------------------------------------------------------
+const resolveAddress = (order: any) => {
+  let sa: any = order?.shippingAddress;
+  if (typeof sa === 'string') { try { const p = JSON.parse(sa); if (p && typeof p === 'object') sa = p; } catch (_) { /* plain text address */ } }
+  const obj = sa && typeof sa === 'object' ? sa : {};
+  const clean = (v: any) => { const s = typeof v === 'string' ? v.trim() : ''; return s && s !== 'Not Specified' ? s : ''; };
+  const text = typeof sa === 'string' ? sa : '';
+  return {
+    county: clean(order?.county) || clean(obj.county),
+    town: clean(order?.town) || clean(obj.town),
+    location: clean(order?.location) || clean(obj.location),
+    sublocation: clean(order?.sublocation) || clean(obj.sublocation),
+    street: clean(obj.streetAddress) || clean(order?.streetAddress) || clean(text) || clean(obj.details)
+  };
+};
+
+/** Explains a campaign's failures in plain words and lets the admin see exactly which numbers failed. */
+function CampaignProblem({ c, token }: { c: any; token: string | null }) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<any[] | null>(null);
+  if (!c.problem && !c.failedCount) return null;
+  const noRoute = /no route/i.test(c.problem || '');
+  const toggle = async () => {
+    setOpen(!open);
+    if (!rows) { try { const d = await staffApi(`/admin/campaigns/${c.id}/failures`, token); setRows(d.failed || []); } catch (_) { setRows([]); } }
+  };
+  return (
+    <div className="mt-1 space-y-1">
+      <p className="text-[10px] text-rose-400 max-w-xs">
+        {noRoute
+          ? `${c.failedCount} number${c.failedCount === 1 ? '' : 's'} could not be reached by the SMS gateway ("No route found"). This is usually a wrong, disconnected or unsupported phone number, not a fault with the campaign.`
+          : (c.problem ? `Problem: ${c.problem}` : `${c.failedCount} message(s) failed.`)}
+      </p>
+      {c.failedCount > 0 && <button onClick={toggle} className="text-[10px] text-sky-400 underline cursor-pointer">{open ? 'Hide' : 'See who it failed for'}</button>}
+      {open && rows && (rows.length
+        ? <ul className="space-y-0.5">{rows.map((r, i) => <li key={i} className="text-[10px] text-slate-400">{r.name} · <span className="font-mono">{r.phone}</span> · {r.reason}</li>)}</ul>
+        : <p className="text-[10px] text-slate-500">Details were not saved for this campaign. New campaigns list every failed number.</p>)}
+    </div>
+  );
+}
+
+const ADMIN_TABS: AdminTabDef[] = [
+  { id: 'inventory', label: 'Grain Catalog', icon: Package, desc: 'Edit all products', group: 'Shop' },
+  { id: 'orders', label: 'Order Dispatch', icon: ShoppingBag, desc: 'Real-time pipeline', group: 'Shop' },
+  { id: 'dispatch', label: 'Delivery Board', icon: Truck, desc: 'Riders & deliveries', group: 'Shop' },
+  { id: 'payments', label: 'Payments', icon: Wallet, desc: 'Till, STK & checks', group: 'Money' },
+  { id: 'promos', label: 'Promo Codes', icon: Percent, desc: 'Discount codes', group: 'Money' },
+  { id: 'finances', label: 'Financial Engine', icon: DollarSign, desc: 'Real DB growth graph', group: 'Money' },
+  { id: 'reports', label: 'Profit & Exports', icon: TrendingUp, desc: 'Profit reports, Excel', group: 'Money' },
+  { id: 'expenses', label: 'Expenses', icon: Wallet, desc: 'Running costs, net profit', group: 'Money' },
+  { id: 'stock', label: 'Stock & Suppliers', icon: Package, desc: 'Alerts, purchases, bulk prices', group: 'Money' },
+  { id: 'users', label: 'User Clearance', icon: Users, desc: 'Edit, suspend, delete', group: 'People' },
+  { id: 'agents', label: 'Agents', icon: Briefcase, desc: 'Referrals, commission, payouts', group: 'People' },
+  { id: 'campaigns', label: 'SMS Campaigns', icon: MessageSquare, desc: 'Segments & promotions', group: 'People' },
+  { id: 'reviews', label: 'Reviews', icon: Star, desc: 'Moderate customer reviews', group: 'People' },
+  { id: 'config', label: 'Regional Freight', icon: MapPin, desc: '47 county shipping rates', group: 'Settings' },
+  { id: 'carousel', label: 'Hero Backdrop', icon: Sliders, desc: 'UI/UX & advert control', group: 'Settings' },
+  { id: 'system', label: 'System & Security', icon: Shield, desc: 'Health, 2-step, permissions', group: 'Settings' },
+  { id: 'activity', label: 'Live Activity', icon: Activity, desc: 'Everything that happens', group: 'Settings' },
+  { id: 'logs', label: 'Audit Logs', icon: FileText, desc: 'User account logs', group: 'Settings' }
+];
+
+
 export default function PremiumRiceStore() {
   // ROUTING & VIEW STATES
   const [view, setView] = useState<'home' | 'shop' | 'cart' | 'login' | 'admin' | 'profile' | 'agent' | 'support'>('home');
@@ -3774,6 +4216,9 @@ export default function PremiumRiceStore() {
     phoneNumber: string;
     amount: number;
     isPolling: boolean;
+    method?: 'mpesa_stk' | 'mpesa_till';
+    tillNumber?: string | null;
+    tillName?: string | null;
   }>({
     isOpen: false,
     orderId: null,
@@ -3788,6 +4233,17 @@ export default function PremiumRiceStore() {
   // CLICKABLE ADDRESS & PAYMENT DETAILS MODAL STATES
   const [viewAddressModal, setViewAddressModal] = useState<Order | null>(null);
   const [viewPaymentDetailsModal, setViewPaymentDetailsModal] = useState<Order | null>(null);
+
+  // PAYMENT METHODS, TILL CODE ENTRY, PROMO CODE, IDLE WARNING
+  const [paymentMethods, setPaymentMethods] = useState<{ stkEnabled: boolean; tillEnabled: boolean; tillNumber: string | null; tillName: string | null; tillAutoVerify: boolean }>({ stkEnabled: true, tillEnabled: false, tillNumber: null, tillName: null, tillAutoVerify: false });
+  const [tillCodeInput, setTillCodeInput] = useState('');
+  const [tillSubmitting, setTillSubmitting] = useState(false);
+  const [tillMessage, setTillMessage] = useState<{ text: string; tone: 'info' | 'error' | 'success' } | null>(null);
+  const [promoInput, setPromoInput] = useState('');
+  const [promoState, setPromoState] = useState<{ code: string; discount: number; message: string } | null>(null);
+  const [promoChecking, setPromoChecking] = useState(false);
+  const [idleWarning, setIdleWarning] = useState<number | null>(null);
+  const idleWarningRef = useRef<number | null>(null);
 
   // REGIONAL CHECKOUT DATA STATE
   const [checkoutData, setCheckoutData] = useState({
@@ -3818,7 +4274,7 @@ export default function PremiumRiceStore() {
   const [showTerms, setShowTerms] = useState(false);
   
   // ADMIN PANEL NAVIGATION & DATA STATES
-  const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'finances' | 'users' | 'config' | 'carousel' | 'logs' | 'agents' | 'activity' | 'reports' | 'stock' | 'expenses' | 'campaigns' | 'reviews' | 'system'>('inventory');
+  const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'finances' | 'users' | 'config' | 'carousel' | 'logs' | 'agents' | 'activity' | 'reports' | 'stock' | 'expenses' | 'campaigns' | 'reviews' | 'system' | 'payments' | 'promos' | 'dispatch'>('inventory');
   const [newProduct, setNewProduct] = useState({ 
     brandName: '', variety: '', weightKg: '', basePrice: '', buyingPrice: '', flashSalePrice: '', stockQuantity: '', imageUrl: '', description: '', isOrganic: false 
   });
@@ -3959,6 +4415,7 @@ export default function PremiumRiceStore() {
     fetchCountiesConfig();
     fetchLocations();
     fetchFlashSale();
+    fetchPaymentMethods();
 
     let newSocket: Socket | null = null;
     try {
@@ -4041,6 +4498,81 @@ export default function PremiumRiceStore() {
       if (newSocket) newSocket.disconnect();
     };
   }, []);
+
+  // SLIDING SESSION: the server sends back a fresh token while the person is active, and every API call uses the newest one.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      const isApi = url.startsWith(API_BASE_URL);
+      let nextInit = init;
+      try {
+        const latest = localStorage.getItem('token');
+        if (isApi && latest) {
+          const hdrs = new Headers((init && init.headers) || (typeof input !== 'string' && input && input.headers) || undefined);
+          if (hdrs.has('Authorization')) { hdrs.set('Authorization', `Bearer ${latest}`); nextInit = { ...(init || {}), headers: hdrs }; }
+        }
+      } catch (_) { /* keep original request */ }
+      const res = await originalFetch(input, nextInit);
+      try {
+        const fresh = res.headers.get('x-refresh-token');
+        if (isApi && fresh && localStorage.getItem('token')) localStorage.setItem('token', fresh);
+      } catch (_) { /* ignore */ }
+      return res;
+    };
+    return () => { window.fetch = originalFetch; };
+  }, []);
+
+  // IDLE LOGOUT: after a stretch with no activity (admin 15 min, everyone else 30 min) the person must log in again.
+  useEffect(() => {
+    if (!token || !user) return;
+    const minutes = ({ admin: 15, support: 30, agent: 30 } as Record<string, number>)[user.role] || 30;
+    const idleMs = minutes * 60 * 1000;
+    const WARN_MS = 60 * 1000;
+    const KEY = 'mwea_last_activity';
+    let lastMark = 0;
+    const mark = () => { lastMark = Date.now(); try { localStorage.setItem(KEY, String(lastMark)); } catch (_) { /* ignore */ } };
+    try { if (!localStorage.getItem(KEY)) mark(); } catch (_) { /* ignore */ }
+    const onActivity = () => { if (idleWarningRef.current !== null) return; if (Date.now() - lastMark > 4000) mark(); };
+    const check = () => {
+      let last = Date.now();
+      try { last = Number(localStorage.getItem(KEY)) || Date.now(); } catch (_) { /* ignore */ }
+      const idle = Date.now() - last;
+      if (idle >= idleMs) {
+        idleWarningRef.current = null; setIdleWarning(null);
+        handleSessionExpired('You were away for a while, so you were signed out for your security. Please log in again.');
+      } else if (idleMs - idle <= WARN_MS) {
+        const secs = Math.ceil((idleMs - idle) / 1000);
+        idleWarningRef.current = secs; setIdleWarning(secs);
+      } else if (idleWarningRef.current !== null) { idleWarningRef.current = null; setIdleWarning(null); }
+    };
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+    events.forEach(e => window.addEventListener(e, onActivity, { passive: true }));
+    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', check);
+    const timer = setInterval(check, 5000);
+    check();
+    return () => {
+      events.forEach(e => window.removeEventListener(e, onActivity));
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', check);
+      clearInterval(timer);
+    };
+  }, [token, user?.id, user?.role]);
+
+  // Only offer payment methods the shop has switched on
+  useEffect(() => {
+    setCheckoutData(prev => {
+      if (prev.paymentMethod === 'mpesa_till' && !paymentMethods.tillEnabled) return { ...prev, paymentMethod: 'mpesa_stk' };
+      if (prev.paymentMethod === 'mpesa_stk' && !paymentMethods.stkEnabled && paymentMethods.tillEnabled) return { ...prev, paymentMethod: 'mpesa_till' };
+      return prev;
+    });
+  }, [paymentMethods.tillEnabled, paymentMethods.stkEnabled]);
+
+  // If the cart changes, the promo discount is checked again against the new subtotal
+  useEffect(() => { if (promoState) applyPromo(promoState.code, true); }, [cartSubtotal]);
 
   // If the phone number or email changes after a code was sent, the old code no longer applies
   const otpIdentityRef = useRef('');
@@ -4140,7 +4672,7 @@ export default function PremiumRiceStore() {
   // ADMINS JOIN THE LIVE ORDER CHANNEL SO NEW ORDERS APPEAR INSTANTLY
   useEffect(() => {
     if (!socket || !token || user?.role !== 'admin') return;
-    const join = () => socket.emit('joinAdminChannel', token);
+    const join = () => socket.emit('joinAdminChannel', localStorage.getItem('token') || token);
     const onNewOrder = (order: any) => {
       showToast(`New order #${order?.id ?? ''} received!`, 'info');
       fetchAdminOrders();
@@ -4280,6 +4812,13 @@ export default function PremiumRiceStore() {
     } catch (err) {
       console.error("Failed to load regional transport config:", err);
     }
+  };
+
+  const fetchPaymentMethods = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/config/payment-methods`);
+      if (res.ok) setPaymentMethods(await res.json());
+    } catch (err) { console.error('Failed to load payment methods:', err); }
   };
 
   const fetchLocations = async () => {
@@ -4486,9 +5025,10 @@ export default function PremiumRiceStore() {
     return baseTransportFee;
   }, [checkoutData.county, countyOverrides, baseTransportFee]);
 
+  const promoDiscount = promoState ? Math.min(promoState.discount, cartSubtotal) : 0;
   const cartGrandTotal = useMemo(() => {
-    return cartSubtotal + (cart.length > 0 ? activeShippingFee : 0);
-  }, [cartSubtotal, cart.length, activeShippingFee]);
+    return Math.max(0, cartSubtotal - promoDiscount) + (cart.length > 0 ? activeShippingFee : 0);
+  }, [cartSubtotal, promoDiscount, cart.length, activeShippingFee]);
 
   const expectedRewardPoints = useMemo(() => {
     return Number((totalCartWeightKg * 0.2).toFixed(2));
@@ -4508,6 +5048,7 @@ export default function PremiumRiceStore() {
     setUser(data.user);
     localStorage.setItem('token', data.token);
     localStorage.setItem('user', JSON.stringify(data.user));
+    localStorage.setItem('mwea_last_activity', String(Date.now()));
     showToast(`Welcome back, ${data.user.fullName}!`, 'success');
     setView('admin');
   };
@@ -4578,6 +5119,7 @@ export default function PremiumRiceStore() {
         setUser(data.user);
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user));
+        localStorage.setItem('mwea_last_activity', String(Date.now()));
         showToast(isLogin ? `Welcome back, ${data.user.fullName}!` : 'Account created successfully!', 'success');
         setSignupOtpStep(false);
         setSignupOtp('');
@@ -4670,6 +5212,7 @@ export default function PremiumRiceStore() {
     setUser(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('mwea_last_activity');
     setView('home');
     showToast('Logged out successfully.', 'info');
   };
@@ -4680,6 +5223,7 @@ export default function PremiumRiceStore() {
     setUser(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('mwea_last_activity');
     setView('login');
     showToast(message, 'warning');
   };
@@ -4700,6 +5244,10 @@ export default function PremiumRiceStore() {
     if (isCheckingOut) return;
 
     const stkPhone = normalizeKenyanPhone(checkoutData.stkPhoneNumber);
+    if (checkoutData.paymentMethod === 'mpesa_till' && !paymentMethods.tillEnabled) {
+      showToast('Till payments are not available right now. Please use STK push.', 'error');
+      return;
+    }
     if (checkoutData.paymentMethod === 'mpesa_stk' && !stkPhone) {
       showToast('Enter a valid M-Pesa number, e.g. 0712345678, for the STK Push prompt.', 'error');
       return;
@@ -4721,6 +5269,7 @@ export default function PremiumRiceStore() {
         paymentMethod: checkoutData.paymentMethod,
         mpesaPhoneNumber: stkPhone || checkoutData.stkPhoneNumber,
         referralCode: referralInput || undefined,
+        promoCode: promoState ? promoState.code : undefined,
         county: checkoutData.county,
         town: checkoutData.town,
         location: checkoutData.location,
@@ -4747,6 +5296,11 @@ export default function PremiumRiceStore() {
         fetchMyOrders();
         
         const initialPaymentInfo = extractPaymentInfo(data);
+        const isTill = checkoutData.paymentMethod === 'mpesa_till';
+        setTillCodeInput('');
+        setTillMessage(null);
+        setPromoState(null);
+        setPromoInput('');
         setActivePaymentModal({
           isOpen: true,
           orderId: data.id,
@@ -4755,15 +5309,18 @@ export default function PremiumRiceStore() {
           reason: initialPaymentInfo.reason,
           phoneNumber: stkPhone || checkoutData.stkPhoneNumber || user?.phoneNumber || 'N/A',
           amount: Number(data.grandTotal ?? cartGrandTotal),
-          isPolling: true
+          isPolling: true,
+          method: isTill ? 'mpesa_till' : 'mpesa_stk',
+          tillNumber: data.till?.number || paymentMethods.tillNumber,
+          tillName: data.till?.name || paymentMethods.tillName
         });
 
-        if (data.stkPromptSent) {
+        if (isTill) {
+          showToast(`Order #${data.id} placed. Pay to Till ${data.till?.number || paymentMethods.tillNumber}, then enter your M-Pesa code.`, 'success');
+        } else if (data.stkPromptSent) {
           showToast('STK Push dispatched to handset! Enter M-Pesa PIN to complete.', 'success');
-        } else if (checkoutData.paymentMethod === 'mpesa_stk') {
-          showToast(data.stkStatusMessage || 'Order placed, but the M-Pesa prompt could not be sent. Use Retry to resend it.', 'warning');
         } else {
-          showToast(`Order #${data.id} placed successfully. Verifying status...`, 'success');
+          showToast(data.stkStatusMessage || 'Order placed, but the M-Pesa prompt could not be sent. Use Retry to resend it.', 'warning');
         }
       } else {
         if (res.status === 401) { handleSessionExpired(); return; }
@@ -4784,38 +5341,85 @@ export default function PremiumRiceStore() {
         showToast('Enter a valid M-Pesa number, e.g. 0712345678.', 'error');
         return;
       }
-      const res = await fetch(`${API_BASE_URL}/payments/stkpush`, {
+      const res = await fetch(`${API_BASE_URL}/orders/${orderId}/retry-stk`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({
-          orderId,
-          phoneNumber: retryPhone,
-          amount
-        })
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ phoneNumber: retryPhone })
       });
-
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
         showToast('STK push prompt resent to handset.', 'success');
-        setActivePaymentModal({
-          isOpen: true,
-          orderId,
-          status: 'PENDING',
-          receipt: null,
-          reason: null,
-          phoneNumber: phone,
-          amount,
-          isPolling: true
-        });
+        setActivePaymentModal({ isOpen: true, orderId, status: 'PENDING', receipt: null, reason: null, phoneNumber: phone, amount, isPolling: true, method: 'mpesa_stk' });
       } else {
+        if (res.status === 401) { handleSessionExpired(); return; }
         showToast(data.error || 'Failed to dispatch STK Push', 'error');
       }
     } catch (err: any) {
       showToast(err.message || 'STK Push dispatch error', 'error');
     }
+  };
+
+  // Opens the Till payment screen for an unpaid order
+  const openTillModal = (order: any) => {
+    setTillCodeInput('');
+    setTillMessage(null);
+    setActivePaymentModal({
+      isOpen: true, orderId: order.id, status: 'PENDING', receipt: null, reason: null, phoneNumber: user?.phoneNumber || '',
+      amount: Number(order.grandTotal) || 0, isPolling: true, method: 'mpesa_till',
+      tillNumber: order.paymentDetails?.tillNumber || paymentMethods.tillNumber, tillName: order.paymentDetails?.tillName || paymentMethods.tillName
+    });
+  };
+
+  const handleSubmitTillCode = async () => {
+    if (!activePaymentModal.orderId || tillSubmitting) return;
+    const code = tillCodeInput.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (code.length !== 10) { setTillMessage({ text: 'The M-Pesa code is 10 letters and numbers, e.g. SJK4L9XQ2P. Copy it from your M-Pesa SMS.', tone: 'error' }); return; }
+    setTillSubmitting(true);
+    setTillMessage(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/orders/${activePaymentModal.orderId}/till-payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ mpesaCode: code, phoneNumber: user?.phoneNumber })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) { handleSessionExpired(); return; }
+      if (!res.ok) { setTillMessage({ text: data.error || 'Could not submit the code.', tone: 'error' }); return; }
+      if (data.status === 'PAID') {
+        setActivePaymentModal(prev => ({ ...prev, status: 'PAID', receipt: code, reason: null }));
+        showToast('Till payment confirmed. Thank you!', 'success');
+        fetchMyOrders();
+      } else {
+        setTillMessage({ text: data.message, tone: data.status === 'SUBMITTED' ? 'info' : 'error' });
+        fetchMyOrders();
+      }
+    } catch (err: any) {
+      setTillMessage({ text: err.message || 'Network error. Please try again.', tone: 'error' });
+    } finally { setTillSubmitting(false); }
+  };
+
+  const applyPromo = async (codeArg?: string, silent = false) => {
+    const code = (codeArg ?? promoInput).trim().toUpperCase();
+    if (!code) return;
+    if (!token) { if (!silent) showToast('Log in to use a promo code.', 'error'); return; }
+    setPromoChecking(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/promo/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ code, subtotal: cartSubtotal })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.valid) { setPromoState({ code: data.code || code, discount: Number(data.discount) || 0, message: data.message }); if (!silent) showToast(data.message, 'success'); }
+      else { setPromoState(null); if (!silent || data.message) showToast(data.message || 'Promo code not valid.', 'error'); }
+    } catch (_) { if (!silent) showToast('Could not check the promo code.', 'error'); }
+    finally { setPromoChecking(false); }
+  };
+
+  const staySignedIn = () => {
+    try { localStorage.setItem('mwea_last_activity', String(Date.now())); } catch (_) { /* ignore */ }
+    idleWarningRef.current = null; setIdleWarning(null);
+    fetch(`${API_BASE_URL}/user/profile`, { headers: { 'Authorization': `Bearer ${token}` } }).catch(() => {});
   };
 
   // ADMIN OPERATIONS
@@ -5810,30 +6414,49 @@ export default function PremiumRiceStore() {
 
                   {/* Payment Method & Checkout Trigger */}
                   <div className="bg-white rounded-3xl p-6 shadow-sm border border-emerald-100 space-y-4">
-                    <h3 className="font-extrabold text-slate-900 text-sm sm:text-base">M-Pesa STK Push Payment</h3>
+                    <h3 className="font-extrabold text-slate-900 text-sm sm:text-base">Payment Method</h3>
 
                     <div className="space-y-3">
-                      <div className="p-4 rounded-2xl border-2 border-emerald-600 bg-emerald-50/50 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <Smartphone className="w-6 h-6 text-emerald-600" />
-                          <div>
-                            <p className="font-extrabold text-xs text-slate-900">M-Pesa Express (PayHero STK)</p>
-                            <p className="text-[10px] text-slate-500">Automated payment prompt sent to your handset</p>
-                          </div>
-                        </div>
-                        <CheckCircle className="w-5 h-5 text-emerald-600" />
+                      <div className={`grid gap-2 ${paymentMethods.stkEnabled && paymentMethods.tillEnabled ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+                        {paymentMethods.stkEnabled && (
+                          <button type="button" onClick={() => setCheckoutData(prev => ({ ...prev, paymentMethod: 'mpesa_stk' }))}
+                            className={`p-3.5 rounded-2xl border-2 text-left flex items-center gap-3 cursor-pointer transition-all ${checkoutData.paymentMethod === 'mpesa_stk' ? 'border-emerald-600 bg-emerald-50/60' : 'border-slate-200 bg-white hover:border-emerald-300'}`}>
+                            <Smartphone className="w-6 h-6 text-emerald-600 shrink-0" />
+                            <div className="min-w-0"><p className="font-extrabold text-xs text-slate-900">M-Pesa Express (STK Push)</p><p className="text-[10px] text-slate-500">A prompt appears on your phone</p></div>
+                            {checkoutData.paymentMethod === 'mpesa_stk' && <CheckCircle className="w-5 h-5 text-emerald-600 ml-auto shrink-0" />}
+                          </button>
+                        )}
+                        {paymentMethods.tillEnabled && (
+                          <button type="button" onClick={() => setCheckoutData(prev => ({ ...prev, paymentMethod: 'mpesa_till' }))}
+                            className={`p-3.5 rounded-2xl border-2 text-left flex items-center gap-3 cursor-pointer transition-all ${checkoutData.paymentMethod === 'mpesa_till' ? 'border-emerald-600 bg-emerald-50/60' : 'border-slate-200 bg-white hover:border-emerald-300'}`}>
+                            <CreditCard className="w-6 h-6 text-emerald-600 shrink-0" />
+                            <div className="min-w-0"><p className="font-extrabold text-xs text-slate-900">Pay to Till {paymentMethods.tillNumber}</p><p className="text-[10px] text-slate-500">Buy Goods, then enter your M-Pesa code</p></div>
+                            {checkoutData.paymentMethod === 'mpesa_till' && <CheckCircle className="w-5 h-5 text-emerald-600 ml-auto shrink-0" />}
+                          </button>
+                        )}
+                        {!paymentMethods.stkEnabled && !paymentMethods.tillEnabled && <p className="text-xs font-bold text-rose-600">Payments are temporarily unavailable. Please try again shortly.</p>}
                       </div>
 
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">M-Pesa Phone Number</label>
-                        <input 
-                          type="text"
-                          placeholder="e.g. 0712345678"
-                          value={checkoutData.stkPhoneNumber}
-                          onChange={(e) => setCheckoutData(prev => ({ ...prev, stkPhoneNumber: e.target.value }))}
-                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-extrabold focus:ring-2 focus:ring-emerald-500"
-                        />
-                      </div>
+                      {checkoutData.paymentMethod === 'mpesa_stk' && (
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">M-Pesa Phone Number</label>
+                          <input 
+                            type="tel"
+                            inputMode="tel"
+                            placeholder="e.g. 0722123456"
+                            value={checkoutData.stkPhoneNumber}
+                            onChange={(e) => setCheckoutData(prev => ({ ...prev, stkPhoneNumber: e.target.value }))}
+                            className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-extrabold focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                      )}
+
+                      {checkoutData.paymentMethod === 'mpesa_till' && (
+                        <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-900 space-y-1">
+                          <p className="font-black">How Till payment works</p>
+                          <p>1. Place your order here. 2. On M-Pesa choose <b>Lipa na M-Pesa → Buy Goods</b> and pay to Till <b className="font-mono">{paymentMethods.tillNumber}</b>{paymentMethods.tillName ? ` (${paymentMethods.tillName})` : ''}. 3. Enter the M-Pesa code from your SMS and we confirm it.</p>
+                        </div>
+                      )}
                     </div>
 
                     {user && user.role !== 'agent' && (
@@ -5851,6 +6474,26 @@ export default function PremiumRiceStore() {
                       </div>
                     )}
 
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Promo Code <span className="text-slate-400 font-medium">(optional)</span></label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={promoInput}
+                          disabled={!!promoState}
+                          onChange={(e) => setPromoInput(e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 24))}
+                          placeholder="Enter code"
+                          className="flex-1 min-w-0 px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-mono font-bold tracking-widest focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50"
+                        />
+                        {promoState ? (
+                          <button type="button" onClick={() => { setPromoState(null); setPromoInput(''); }} className="px-4 rounded-xl bg-slate-100 text-slate-700 text-xs font-extrabold cursor-pointer">Remove</button>
+                        ) : (
+                          <button type="button" onClick={() => applyPromo()} disabled={promoChecking || promoInput.length < 3} className="px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-extrabold cursor-pointer">{promoChecking ? '…' : 'Apply'}</button>
+                        )}
+                      </div>
+                      {promoState && <p className="text-[11px] font-bold text-emerald-600 mt-1">{promoState.message}</p>}
+                    </div>
+
                     {/* Price Breakdown */}
                     <div className="border-t border-slate-100 pt-4 space-y-2 text-xs">
                       <div className="flex justify-between text-slate-600 font-semibold">
@@ -5865,6 +6508,12 @@ export default function PremiumRiceStore() {
                         <span>Freight Delivery ({checkoutData.county}):</span>
                         <span className="font-extrabold text-slate-800">{checkoutData.county ? formatKES(activeShippingFee) : 'Choose county'}</span>
                       </div>
+                      {promoDiscount > 0 && (
+                        <div className="flex justify-between text-emerald-700 font-bold">
+                          <span>Promo ({promoState?.code}):</span>
+                          <span>-{formatKES(promoDiscount)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between text-emerald-700 font-bold">
                         <span>Expected Reward Points:</span>
                         <span>+{expectedRewardPoints} pts</span>
@@ -5884,11 +6533,11 @@ export default function PremiumRiceStore() {
                       {isCheckingOut ? (
                         <>
                           <RefreshCw className="w-4 h-4 animate-spin" />
-                          <span>Dispatching STK Push...</span>
+                          <span>{checkoutData.paymentMethod === 'mpesa_till' ? 'Placing order...' : 'Dispatching STK Push...'}</span>
                         </>
                       ) : (
                         <>
-                          <span>Pay {formatKES(cartGrandTotal)} via M-Pesa</span>
+                          <span>{checkoutData.paymentMethod === 'mpesa_till' ? `Place order · ${formatKES(cartGrandTotal)} to Till` : `Pay ${formatKES(cartGrandTotal)} via M-Pesa`}</span>
                           <ChevronRight className="w-4 h-4" />
                         </>
                       )}
@@ -5990,13 +6639,22 @@ export default function PremiumRiceStore() {
                             </button>
 
                             {/* Retry STK Push */}
-                            {payInfo.status !== 'PAID' && (
-                              <button 
-                                onClick={() => handleRetryStkPush(order.id, user.phoneNumber, order.grandTotal)}
-                                className="px-3 py-1 rounded-full bg-emerald-600 text-white font-bold text-[10px] hover:bg-emerald-700 shadow-sm cursor-pointer"
-                              >
-                                Retry STK Push
-                              </button>
+                            {payInfo.status !== 'PAID' && order.status !== 'cancelled' && (
+                              order.paymentDetails?.method === 'mpesa_till' ? (
+                                <button 
+                                  onClick={() => openTillModal(order)}
+                                  className="px-3 py-1 rounded-full bg-emerald-600 text-white font-bold text-[10px] hover:bg-emerald-700 shadow-sm cursor-pointer"
+                                >
+                                  Pay / enter M-Pesa code
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={() => handleRetryStkPush(order.id, user.phoneNumber, order.grandTotal)}
+                                  className="px-3 py-1 rounded-full bg-emerald-600 text-white font-bold text-[10px] hover:bg-emerald-700 shadow-sm cursor-pointer"
+                                >
+                                  Retry STK Push
+                                </button>
+                              )
                             )}
                           </div>
                         </div>
@@ -6024,7 +6682,7 @@ export default function PremiumRiceStore() {
                               <p className="font-bold text-slate-700 flex items-center gap-1">
                                 <MapPin className="w-3.5 h-3.5 text-emerald-600" /> Freight Delivery Address:
                               </p>
-                              <span className="text-[10px] font-bold text-emerald-600 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+                              <span className="text-[10px] font-bold text-emerald-600 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
                                 View Location <Eye className="w-3 h-3" />
                               </span>
                             </div>
@@ -6039,6 +6697,14 @@ export default function PremiumRiceStore() {
                               )}
                               {payInfo.reason && (
                                 <p className="text-rose-600 font-semibold">Note: {payInfo.reason}</p>
+                              )}
+                              {order.paymentDetails?.promo?.code && (
+                                <p className="text-emerald-700 font-bold">Promo {order.paymentDetails.promo.code}: -{formatKES(order.paymentDetails.promo.discount)}</p>
+                              )}
+                              {order.delivery && order.delivery.riderName && (
+                                <p className="text-sky-700 font-bold">
+                                  Rider: {order.delivery.riderName}{order.delivery.riderPhone ? ` · ${order.delivery.riderPhone}` : ''} ({String(order.delivery.status).replace(/_/g, ' ')})
+                                </p>
                               )}
                               <p className="font-black text-slate-900 text-sm mt-1">Total: {formatKES(order.grandTotal)}</p>
                             </div>
@@ -6301,31 +6967,22 @@ export default function PremiumRiceStore() {
                 </div>
               </div>
 
+              <AdminMobileNav
+                tabs={ADMIN_TABS}
+                active={adminTab}
+                onChange={(id) => setAdminTab(id as any)}
+                badges={{ orders: adminOrders.filter((o: any) => o.status === 'pending' && (o.paymentDetails?.isPaid === true)).length }}
+              />
+
               {/* TWO-PANEL ARCHITECTURE WITH STICKY SIDEBAR NAVIGATION */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 
                 {/* PANEL 1: STICKY DARK SIDEBAR NAVIGATION & QUICK CONTROL (3 Columns) */}
-                <div className="lg:col-span-3 bg-slate-900/90 rounded-3xl p-5 border border-slate-800 space-y-6 lg:sticky lg:top-24 lg:self-start z-30">
+                <div className="hidden lg:block lg:col-span-3 bg-slate-900/90 rounded-3xl p-5 border border-slate-800 space-y-6 lg:sticky lg:top-24 lg:self-start z-30">
                   <div className="space-y-1">
                     <p className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Navigation Panel</p>
                     <nav className="space-y-1.5">
-                      {[
-                        { id: 'inventory', label: 'Grain Catalog', icon: Package, desc: 'Edit all products' },
-                        { id: 'orders', label: 'Order Dispatch', icon: ShoppingBag, desc: 'Real-time pipeline' },
-                        { id: 'finances', label: 'Financial Engine', icon: DollarSign, desc: 'Real DB growth graph' },
-                        { id: 'users', label: 'User Clearance', icon: Users, desc: 'Edit, suspend, delete' },
-                        { id: 'config', label: 'Regional Freight', icon: MapPin, desc: '47 county shipping rates' },
-                        { id: 'carousel', label: 'Hero Backdrop', icon: Sliders, desc: 'UI/UX & advert control' },
-                        { id: 'reports', label: 'Profit & Exports', icon: TrendingUp, desc: 'Profit reports, Excel' },
-                        { id: 'stock', label: 'Stock & Suppliers', icon: Package, desc: 'Alerts, purchases, bulk prices' },
-                        { id: 'expenses', label: 'Expenses', icon: Wallet, desc: 'Running costs, net profit' },
-                        { id: 'campaigns', label: 'SMS Campaigns', icon: MessageSquare, desc: 'Segments & promotions' },
-                        { id: 'reviews', label: 'Reviews', icon: Star, desc: 'Moderate customer reviews' },
-                        { id: 'system', label: 'System & Security', icon: Shield, desc: 'Health, 2-step, permissions' },
-                        { id: 'agents', label: 'Agents', icon: Briefcase, desc: 'Referrals, commission, payouts' },
-                        { id: 'activity', label: 'Live Activity', icon: Activity, desc: 'Everything that happens' },
-                        { id: 'logs', label: 'Audit Logs', icon: FileText, desc: 'User account logs' }
-                      ].map(tab => {
+                      {ADMIN_TABS.map(tab => {
                         const Icon = tab.icon;
                         const isActive = adminTab === tab.id;
 
@@ -6373,7 +7030,7 @@ export default function PremiumRiceStore() {
                 </div>
 
                 {/* PANEL 2: MAIN WORKSPACE PANEL (9 Columns) */}
-                <div className="lg:col-span-9 space-y-6">
+                <div className="lg:col-span-9 min-w-0 space-y-6">
 
                   {/* SUB-PANEL: INVENTORY CATALOG & ALL PRODUCTS EDITING */}
                   {adminTab === 'inventory' && (
@@ -6753,6 +7410,9 @@ export default function PremiumRiceStore() {
                   {adminTab === 'expenses' && <AdminExpensesPanel token={token} showToast={showToast} />}
                   {adminTab === 'campaigns' && <AdminCampaignsPanel token={token} showToast={showToast} />}
                   {adminTab === 'reviews' && <AdminReviewsPanel token={token} showToast={showToast} />}
+                  {adminTab === 'payments' && <AdminPaymentsPanel token={token} showToast={showToast} />}
+                  {adminTab === 'promos' && <AdminPromosPanel token={token} showToast={showToast} />}
+                  {adminTab === 'dispatch' && <AdminDispatchPanel token={token} showToast={showToast} />}
                   {adminTab === 'system' && <AdminSystemPanel token={token} showToast={showToast} />}
 
                   {adminTab === 'agents' && (
@@ -7155,7 +7815,43 @@ export default function PremiumRiceStore() {
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-emerald-100 text-center space-y-6 animate-in zoom-in-95">
             
-            {activePaymentModal.status === 'PENDING' && (
+            {activePaymentModal.status === 'PENDING' && activePaymentModal.method === 'mpesa_till' && (
+              <div className="space-y-4 text-left">
+                <div className="text-center space-y-1">
+                  <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border-4 border-emerald-100"><CreditCard className="w-7 h-7" /></div>
+                  <h3 className="text-xl font-black text-slate-900">Pay to our Till</h3>
+                  <p className="text-[11px] text-slate-500">Order #{activePaymentModal.orderId}</p>
+                </div>
+                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-center space-y-1">
+                  <p className="text-[10px] font-black uppercase tracking-wider text-emerald-700">Till number</p>
+                  <button type="button" onClick={() => copyText(String(activePaymentModal.tillNumber || ''), showToast, 'Till number copied.')} className="text-3xl font-black font-mono tracking-widest text-emerald-900 cursor-pointer">{activePaymentModal.tillNumber}</button>
+                  {activePaymentModal.tillName && <p className="text-[11px] font-bold text-emerald-800">{activePaymentModal.tillName}</p>}
+                  <p className="text-sm font-black text-slate-900 pt-1">Amount: {formatKES(Math.ceil(activePaymentModal.amount))}</p>
+                </div>
+                <ol className="text-[11px] text-slate-600 list-decimal ml-4 space-y-0.5">
+                  <li>Open M-Pesa, choose <b>Lipa na M-Pesa → Buy Goods and Services</b>.</li>
+                  <li>Enter the Till number and the exact amount, then your PIN.</li>
+                  <li>Type the code from the M-Pesa SMS below (10 letters/numbers).</li>
+                </ol>
+                <input
+                  type="text"
+                  value={tillCodeInput}
+                  onChange={(e) => setTillCodeInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10))}
+                  placeholder="e.g. SJK4L9XQ2P"
+                  autoCapitalize="characters"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-300 text-center font-mono font-black tracking-widest text-base focus:ring-2 focus:ring-emerald-500"
+                />
+                {tillMessage && (
+                  <p className={`p-3 rounded-xl text-[11px] font-bold ${tillMessage.tone === 'error' ? 'bg-rose-50 text-rose-700 border border-rose-200' : tillMessage.tone === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>{tillMessage.text}</p>
+                )}
+                <button onClick={handleSubmitTillCode} disabled={tillSubmitting || tillCodeInput.length !== 10} className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-extrabold text-xs shadow-md cursor-pointer">
+                  {tillSubmitting ? 'Checking…' : 'Confirm my payment'}
+                </button>
+                <button onClick={() => { setActivePaymentModal(prev => ({ ...prev, isOpen: false })); setView('profile'); }} className="w-full text-[11px] font-bold text-slate-500 underline cursor-pointer">I will pay later (find this order in My Orders)</button>
+              </div>
+            )}
+
+            {activePaymentModal.status === 'PENDING' && activePaymentModal.method !== 'mpesa_till' && (
               <div className="space-y-4">
                 <div className="w-16 h-16 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto border-4 border-amber-100">
                   <RefreshCw className="w-8 h-8 animate-spin" />
@@ -7169,6 +7865,11 @@ export default function PremiumRiceStore() {
                 <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-900">
                   Amount: {formatKES(activePaymentModal.amount)}
                 </div>
+                <div className="flex gap-2">
+                  <button onClick={() => handleRetryStkPush(activePaymentModal.orderId!, activePaymentModal.phoneNumber, activePaymentModal.amount)} className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-[11px] cursor-pointer">Did not get it? Resend</button>
+                  <button onClick={() => setActivePaymentModal(prev => ({ ...prev, isOpen: false }))} className="py-2.5 px-4 rounded-xl bg-slate-100 text-slate-700 font-bold text-[11px] cursor-pointer">Close</button>
+                </div>
+                <p className="text-[10px] text-slate-400">We check with M-Pesa automatically. You can close this and see the result in My Orders.</p>
               </div>
             )}
 
@@ -7205,12 +7906,21 @@ export default function PremiumRiceStore() {
                   <p className="text-xs text-slate-500">{activePaymentModal.reason || 'Handset prompt timed out or declined'}</p>
                 </div>
                 <div className="flex gap-2">
-                  <button 
-                    onClick={() => handleRetryStkPush(activePaymentModal.orderId!, activePaymentModal.phoneNumber, activePaymentModal.amount)}
-                    className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer"
-                  >
-                    Resend STK Push
-                  </button>
+                  {activePaymentModal.method === 'mpesa_till' ? (
+                    <button 
+                      onClick={() => { setTillMessage(null); setActivePaymentModal(prev => ({ ...prev, status: 'PENDING', reason: null })); }}
+                      className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer"
+                    >
+                      Enter the code again
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => handleRetryStkPush(activePaymentModal.orderId!, activePaymentModal.phoneNumber, activePaymentModal.amount)}
+                      className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer"
+                    >
+                      Resend STK Push
+                    </button>
+                  )}
                   <button 
                     onClick={() => setActivePaymentModal(prev => ({ ...prev, isOpen: false }))}
                     className="py-3 px-4 rounded-xl bg-slate-100 text-slate-600 font-bold text-xs cursor-pointer"
@@ -7254,35 +7964,35 @@ export default function PremiumRiceStore() {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <span className="text-[10px] font-bold uppercase text-slate-400">County</span>
-                    <p className="font-extrabold text-slate-900 text-sm">{viewAddressModal.county || 'Not Specified'}</p>
+                    <p className="font-extrabold text-slate-900 text-sm">{resolveAddress(viewAddressModal).county || 'Not Specified'}</p>
                   </div>
                   <div>
                     <span className="text-[10px] font-bold uppercase text-slate-400">Town / District</span>
-                    <p className="font-extrabold text-slate-900 text-sm">{viewAddressModal.town || 'Not Specified'}</p>
+                    <p className="font-extrabold text-slate-900 text-sm">{resolveAddress(viewAddressModal).town || 'Not Specified'}</p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 pt-2 border-t border-emerald-100/80">
                   <div>
                     <span className="text-[10px] font-bold uppercase text-slate-400">Location</span>
-                    <p className="font-bold text-slate-800">{viewAddressModal.location || 'Not Specified'}</p>
+                    <p className="font-bold text-slate-800">{resolveAddress(viewAddressModal).location || 'Not Specified'}</p>
                   </div>
                   <div>
                     <span className="text-[10px] font-bold uppercase text-slate-400">Sublocation</span>
-                    <p className="font-bold text-slate-800">{viewAddressModal.sublocation || 'Not Specified'}</p>
+                    <p className="font-bold text-slate-800">{resolveAddress(viewAddressModal).sublocation || 'Not Specified'}</p>
                   </div>
                 </div>
 
                 <div className="pt-2 border-t border-emerald-100/80">
                   <span className="text-[10px] font-bold uppercase text-slate-400">Street / Landmark</span>
-                  <p className="font-bold text-slate-900">{viewAddressModal.streetAddress || viewAddressModal.shippingAddress || 'Not Specified'}</p>
+                  <p className="font-bold text-slate-900">{resolveAddress(viewAddressModal).street || 'Not Specified'}</p>
                 </div>
               </div>
 
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase">Customer Information</span>
-                <p className="font-black text-slate-900">{viewAddressModal.User?.fullName || 'Valued Customer'}</p>
-                <p className="text-slate-600 font-mono text-[11px]">{viewAddressModal.User?.phoneNumber || viewAddressModal.mpesaPhoneNumber || 'N/A'}</p>
+                <p className="font-black text-slate-900">{viewAddressModal.User?.fullName || (viewAddressModal.userId === user?.id ? user?.fullName : '') || 'Valued Customer'}</p>
+                <p className="text-slate-600 font-mono text-[11px]">{viewAddressModal.User?.phoneNumber || (viewAddressModal.userId === user?.id ? user?.phoneNumber : '') || 'N/A'}</p>
               </div>
             </div>
 
@@ -7661,6 +8371,20 @@ export default function PremiumRiceStore() {
                   <ShoppingCart className="w-4 h-4" /> Add To Cart
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {idleWarning !== null && token && (
+        <div className="fixed inset-0 z-[80] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl text-center space-y-4">
+            <div className="w-14 h-14 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto"><Clock className="w-7 h-7" /></div>
+            <h3 className="text-lg font-black text-slate-900">Are you still there?</h3>
+            <p className="text-xs text-slate-600">For your security you will be signed out in <b className="text-rose-600">{idleWarning}s</b> because there has been no activity.</p>
+            <div className="flex gap-2">
+              <button onClick={staySignedIn} className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs cursor-pointer">Stay signed in</button>
+              <button onClick={() => { setIdleWarning(null); idleWarningRef.current = null; handleLogout(); }} className="py-3 px-4 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs cursor-pointer">Sign out</button>
             </div>
           </div>
         </div>
