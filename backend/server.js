@@ -3,7 +3,7 @@
  * PREMIUM RICE & GRAIN STORE - UNIFIED BACKEND ENTERPRISE ARCHITECTURE
  * ====================================================================================
  * System: Mwea Rice Hub Enterprise API Engine
- * Version: 4.1.0-ENTERPRISE-HARDENED-USSD
+ * Version: 3.6.0-ENTERPRISE-RENDER-VERCEL
  * Platform: Node.js / Express / Socket.IO / Sequelize ORM / PayHero API / Nodemailer
  * Deployment: Render Cloud Infrastructure OR Vercel Serverless (auto-detected via process.env.VERCEL)
  * 
@@ -41,11 +41,6 @@ import nodemailer from 'nodemailer';
 import { handlePayHeroWebhook } from './controllers/webhookController.js';
 import { initiatePayHeroPayment } from './controllers/paymentController.js';
 
-// Premium add-on module (coupons, wishlist, invoices, tracking, insights, backup, security audit)
-import { definePremiumModels, registerPremiumRoutes, evaluateCoupon, reserveCoupon, recordRedemption } from './premiumModule.js';
-// USSD ordering (Ping Africa): shop, create account, PIN login, checkout with M-Pesa STK, orders
-import { defineUssdModels, registerUssdRoutes } from './ussdModule.js';
-
 // Initialize environment variables from .env file
 dotenv.config();
 
@@ -70,29 +65,7 @@ const isProduction = NODE_ENV === 'production';
 // Always bind all interfaces: Render auto-sets HOSTNAME to the container name, which makes the proxy return 502.
 const hostname = '0.0.0.0';
 const port = parseInt(process.env.PORT || '5000', 10);
-// SECURITY: there is no built-in fallback secret any more (the old one was public in the source code,
-// which would let anyone forge an admin login). Production refuses to start without a strong secret;
-// development gets a random per-process secret.
-const JWT_SECRET = (() => {
-  const fromEnv = process.env.JWT_SECRET;
-  if (fromEnv && fromEnv.length >= 32) return fromEnv;
-  if (fromEnv) console.warn('⚠️ SECURITY: JWT_SECRET is shorter than 32 characters. Use a random 48+ character value.');
-  if (isProduction && !fromEnv) {
-    console.error('❌ FATAL: JWT_SECRET is not set. Generate one with: node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"');
-    process.exit(1);
-  }
-  if (fromEnv) return fromEnv;
-  console.warn('⚠️ JWT_SECRET not set: using a random temporary secret (everyone is signed out on each restart).');
-  return crypto.randomBytes(48).toString('hex');
-})();
-const pwVersion = (u) => crypto.createHash('sha256').update(String((u && u.password) || '')).digest('hex').slice(0, 16);
-// Admins and support staff get shorter sessions (12h); customers keep 7 days.
-const signSessionToken = (payload) => jwt.sign(payload, JWT_SECRET, {
-  algorithm: 'HS256',
-  expiresIn: (payload.role === 'admin' || payload.role === 'support') ? '12h' : '7d'
-});
-const PAYHERO_CALLBACK_SECRET = process.env.PAYHERO_CALLBACK_SECRET || '';
-const PAYHERO_CALLBACK_QS = PAYHERO_CALLBACK_SECRET ? `?s=${encodeURIComponent(PAYHERO_CALLBACK_SECRET)}` : '';
+const JWT_SECRET = process.env.JWT_SECRET || 'SUPER_SECRET_RICE_GRAIN_STORE_KEY_2026';
 // Vercel serverless detection (Vercel sets VERCEL=1 automatically)
 const IS_VERCEL = !!process.env.VERCEL;
 const RENDER_BASE_URL = process.env.BASE_URL
@@ -106,11 +79,8 @@ console.log(`⚡ Execution Directory: ${__dirname}`);
 console.log(`📡 Base Deployment Target URL: ${RENDER_BASE_URL}`);
 console.log(`☁️ Runtime: ${IS_VERCEL ? 'VERCEL SERVERLESS' : 'PERSISTENT NODE SERVER'}`);
 
-if (isProduction && !process.env.ALLOWED_ORIGINS) {
-  console.warn('⚠️ SECURITY: ALLOWED_ORIGINS is not set. Only localhost, *.onrender.com and *.vercel.app can call this API. Set ALLOWED_ORIGINS=https://yourdomain.com for custom domains.');
-}
-if (isProduction && !PAYHERO_CALLBACK_SECRET) {
-  console.warn('⚠️ SECURITY: PAYHERO_CALLBACK_SECRET is not set. Payments are still verified with PayHero, but set a secret for defence in depth.');
+if (isProduction && !process.env.JWT_SECRET) {
+  console.warn('⚠️ WARNING: JWT_SECRET env var is not set. Using the built-in default secret is unsafe in production.');
 }
 console.log('====================================================================');
 
@@ -727,7 +697,7 @@ const issueSignupOtp = (user) => {
     return { otpCode: String(user.verificationOtp), tokenExpiration: new Date(user.verificationOtpExpires) };
   }
   return {
-    otpCode: crypto.randomInt(100000, 1000000).toString(),
+    otpCode: Math.floor(100000 + Math.random() * 900000).toString(),
     tokenExpiration: new Date(Date.now() + 10 * 60 * 1000)
   };
 };
@@ -890,41 +860,17 @@ const storage = IS_VERCEL
   : multer.diskStorage({
       destination: (req, file, cb) => cb(null, uploadDir),
       filename: (req, file, cb) => {
-        // Random name + extension chosen by us from the verified type: user-supplied names never touch the disk.
-        cb(null, `${Date.now()}-${crypto.randomBytes(8).toString('hex')}${ALLOWED_IMAGE_TYPES[file.mimetype] || '.bin'}`);
+        const cleanFileName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+        cb(null, `${Date.now()}-${cleanFileName}`);
       }
     });
-
-// Only real raster images. SVG is deliberately excluded (it can carry scripts).
-const ALLOWED_IMAGE_TYPES = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
-function looksLikeImage(b) {
-  if (!b || b.length < 12) return false;
-  if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return true;                                  // JPEG
-  if (b[0] === 0x89 && b.slice(1, 4).toString() === 'PNG') return true;                              // PNG
-  if (b.slice(0, 4).toString() === 'GIF8') return true;                                              // GIF
-  if (b.slice(0, 4).toString() === 'RIFF' && b.slice(8, 12).toString() === 'WEBP') return true;      // WEBP
-  return false;
-}
-/** The browser-declared type can be faked, so check the real file header. Deletes the file when it is not an image. */
-function verifyUploadedImage(file) {
-  try {
-    if (file.buffer) return looksLikeImage(file.buffer);
-    const fd = fs.openSync(file.path, 'r');
-    const head = Buffer.alloc(12);
-    fs.readSync(fd, head, 0, 12, 0);
-    fs.closeSync(fd);
-    const ok = looksLikeImage(head);
-    if (!ok) fs.unlink(file.path, () => {});
-    return ok;
-  } catch (_) { return false; }
-}
 
 const upload = multer({ 
   storage,
   // Vercel functions reject request bodies larger than ~4.5MB, so cap slightly below that there.
   limits: { fileSize: (IS_VERCEL ? 4 : 15) * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (ALLOWED_IMAGE_TYPES[file.mimetype]) {
+    if (file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
       cb(new Error('Only valid image files are permitted for upload.'), false);
@@ -1035,11 +981,6 @@ const LIKE_OP = sequelize.getDialect() === 'postgres' ? Op.iLike : Op.like;
  * Effective role = admin (Users.role) | support | agent (StaffRole) | customer.
  */
 const defineModel = (name, attrs, opts = {}) => sequelize.models[name] || sequelize.define(name, attrs, { timestamps: true, ...opts });
-
-// Tables for coupons, redemptions and wishlists (created by the sequelize.sync() in startServer).
-definePremiumModels({ sequelize, DataTypes });
-// Tables for USSD PINs and USSD conversation state (created by the sequelize.sync() in startServer).
-const ussdModels = defineUssdModels({ sequelize, DataTypes });
 
 const StaffRole = defineModel('StaffRole', {
   userId: { type: DataTypes.INTEGER, allowNull: false, unique: true },
@@ -1580,23 +1521,45 @@ const validateNewPassword = (pw) => {
 const OTP_MAX_WRONG = 5;
 const otpWrongGuesses = new Map();
 
-/** Looks a payment up on PayHero (read only). Never throws. */
+/** Looks a payment up on PayHero (read only). Never throws.
+ *  PayHero's status endpoint is GET /api/v2/transaction-status?reference=<reference returned when the STK push was sent>. */
 async function lookupPayHeroStatus(orderId) {
   try {
-    const response = await axios.get(
-      `https://backend.payhero.co.ke/api/v2/payments?external_reference=ORD-${orderId}`,
-      { headers: { 'Authorization': getPayHeroAuthHeader() }, timeout: 15000 }
-    );
-    const data = response.data;
-    const p = Array.isArray(data) ? data[0] : (data && (data.response || data));
-    if (!p) return { reachable: true, status: 'NOT_FOUND' };
-    return {
-      reachable: true,
+    const order = await Order.findByPk(orderId, { attributes: ['id', 'paymentDetails'] });
+    const pd = (order && order.paymentDetails) || {};
+    const refs = [pd.payheroReference, ...(Array.isArray(pd.payheroRefs) ? [...pd.payheroRefs].reverse() : []), pd.checkoutRequestId].filter(Boolean);
+    const ordered = [...new Set(refs)];
+    const read = (p) => ({
       status: String(p.status || p.Status || 'UNKNOWN').toUpperCase(),
-      amount: p.amount !== undefined ? Number(p.amount) : null,
-      receipt: p.provider_reference || p.mpesa_receipt_number || p.MpesaReceiptNumber || p.receipt_number || null,
+      amount: p.amount !== undefined && p.amount !== null ? Number(p.amount) : (p.Amount !== undefined ? Number(p.Amount) : null),
+      receipt: p.provider_reference || p.mpesa_receipt_number || p.MpesaReceiptNumber || p.receipt_number || p.mpesa_code || null,
       failureReason: p.failure_reason || p.message || p.ResultDesc || null
-    };
+    });
+    if (!ordered.length) {
+      // Order started before references were saved: try the older lookup once, then give up quietly.
+      try {
+        const response = await axios.get(`https://backend.payhero.co.ke/api/v2/payments?external_reference=ORD-${orderId}`, { headers: { 'Authorization': getPayHeroAuthHeader() }, timeout: 15000 });
+        const data = response.data;
+        const p = Array.isArray(data) ? data[0] : (data && (data.response || data));
+        if (p && (p.status || p.Status)) return { reachable: true, ...read(p) };
+      } catch (_) { /* not available */ }
+      return { reachable: true, status: 'NOT_FOUND' };
+    }
+    let first = null, anyReached = false;
+    for (const ref of ordered) {
+      try {
+        const response = await axios.get(`https://backend.payhero.co.ke/api/v2/transaction-status?reference=${encodeURIComponent(ref)}`, { headers: { 'Authorization': getPayHeroAuthHeader() }, timeout: 15000 });
+        anyReached = true;
+        const r = read(response.data || {});
+        if (r.status === 'SUCCESS' || r.status === 'PAID') return { reachable: true, ...r };
+        if (!first) first = r;
+      } catch (e) {
+        if (e.response && e.response.status === 404) { anyReached = true; continue; }
+        console.warn(`PayHero status lookup warning (order #${orderId}):`, e.message);
+      }
+    }
+    if (first) return { reachable: true, ...first };
+    return anyReached ? { reachable: true, status: 'NOT_FOUND' } : { reachable: false, status: null, error: 'PayHero did not answer' };
   } catch (e) {
     return { reachable: false, status: null, error: e.message };
   }
@@ -1723,6 +1686,7 @@ const MarketingPref = defineModel('MarketingPref', {
 // ---------- Operations settings (one JSON document, editable by the admin) ----------
 const OPS_DEFAULTS = {
   orderExpiryMinutes: 45,
+  tillExpiryMinutes: 240,
   lowStockDefault: 20,
   lowStockPerProduct: {},
   smsLowThreshold: 10,
@@ -1918,26 +1882,48 @@ async function loadSmsBalanceFromDb() {
   } catch (_) { /* ignore */ }
 }
 
-/** Sends one plain SMS through Ping Africa. Returns { ok, error }. */
+/** Sorts a gateway error into a kind the admin can act on. */
+function classifySmsError(text) {
+  const t = String(text || '').toLowerCase();
+  if (/no route|route not found|invalid (number|recipient|msisdn)|unsupported (network|country)|not a valid|blacklist|dnd|do not disturb/.test(t)) return 'bad_number';
+  if (/credit|balance|insufficient|fund/.test(t)) return 'credit';
+  if (/unauthori|invalid token|forbidden|api key|authentication/.test(t)) return 'auth';
+  if (/sender/.test(t)) return 'sender';
+  return 'other';
+}
+
+/** Sends one plain SMS through Ping Africa. Returns { ok, error, kind }. Retries network hiccups, never retries a refusal. */
 async function sendSmsRaw(phone, message) {
-  try {
-    const to = normalizeKenyanPhone(phone);
-    if (!to) return { ok: false, error: 'invalid number' };
-    if (!process.env.PING_AFRICA_API_TOKEN) return { ok: false, error: 'SMS token not configured' };
-    const payload = { recipient: to, message };
-    if (process.env.PING_AFRICA_SENDER_ID) payload.sender_id = process.env.PING_AFRICA_SENDER_ID;
-    const response = await axios.post(process.env.PING_AFRICA_API_URL || 'https://bulk.ping.africa/api/v1/sms/send', payload, {
-      headers: { Authorization: `Bearer ${process.env.PING_AFRICA_API_TOKEN}`, 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 15000
-    });
-    let data = response.data;
-    if (typeof data === 'string') { try { data = JSON.parse(data); } catch (_) { /* text */ } }
-    noteSmsBalance(data);
-    if (data && typeof data === 'object' && (data.success === false || data.error)) return { ok: false, error: String(data.message || data.error).slice(0, 160), raw: data };
-    return { ok: true, raw: data };
-  } catch (e) {
-    const d = e.response && e.response.data;
-    return { ok: false, error: String((d && (d.message || (typeof d.error === 'string' ? d.error : JSON.stringify(d.error || d)))) || e.message).slice(0, 160), raw: d || null };
+  const to = normalizeKenyanPhone(phone);
+  if (!to || !isRoutableKenyanMobile(to)) return { ok: false, error: 'not a valid Kenyan mobile number', kind: 'bad_number' };
+  if (!process.env.PING_AFRICA_API_TOKEN) return { ok: false, error: 'SMS token not configured', kind: 'auth' };
+  const payload = { recipient: to, message };
+  if (process.env.PING_AFRICA_SENDER_ID) payload.sender_id = process.env.PING_AFRICA_SENDER_ID;
+  let last = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await axios.post(process.env.PING_AFRICA_API_URL || 'https://bulk.ping.africa/api/v1/sms/send', payload, {
+        headers: { Authorization: `Bearer ${process.env.PING_AFRICA_API_TOKEN}`, 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 15000
+      });
+      let data = response.data;
+      if (typeof data === 'string') { try { data = JSON.parse(data); } catch (_) { /* text */ } }
+      noteSmsBalance(data);
+      if (data && typeof data === 'object' && (data.success === false || data.error)) {
+        const err = String(data.message || data.error).slice(0, 160);
+        return { ok: false, error: err, kind: classifySmsError(err), raw: data };
+      }
+      return { ok: true, raw: data };
+    } catch (e) {
+      const d = e.response && e.response.data;
+      const err = String((d && (d.message || (typeof d.error === 'string' ? d.error : JSON.stringify(d.error || d)))) || e.message).slice(0, 160);
+      last = { ok: false, error: err, kind: classifySmsError(err), raw: d || null };
+      const status = e.response && e.response.status;
+      const transient = !e.response || status >= 500 || status === 429;
+      if (!transient || attempt === 3) break;
+      await new Promise(rs => setTimeout(rs, 600 * attempt));
+    }
   }
+  return last;
 }
 const smsPartsFor = (text) => { const len = String(text).length; return len <= 160 ? 1 : Math.ceil(len / 153); };
 
@@ -2087,6 +2073,263 @@ function buildXlsx(sheets) {
   return zipBuffer(files);
 }
 
+// ====================================================================================
+// v3.7 ADDITIONS: verified STK push, Till number payments, promo codes, delivery board,
+// inactivity sessions and safer SMS routing.
+// ====================================================================================
+
+// ---------- Session policy: how long a person may stay idle before they must log in again ----------
+// Idle limit (minutes) per role, plus a hard cap on one continuous session (hours).
+const SESSION_POLICY = {
+  idleMinutes: { admin: 15, support: 30, agent: 30, user: 30 },
+  maxHours: { admin: 8, support: 12, agent: 12, user: 12 }
+};
+const sessionRoleKey = (role) => (SESSION_POLICY.idleMinutes[role] ? role : 'user');
+/** Signs a login token that expires after the idle limit. Every request quietly renews it (see authenticateToken). */
+const issueSessionToken = (userId, role, startedAtSec = null) => {
+  const key = sessionRoleKey(role);
+  return jwt.sign(
+    { id: userId, role, sa: startedAtSec || Math.floor(Date.now() / 1000) },
+    JWT_SECRET,
+    { expiresIn: `${SESSION_POLICY.idleMinutes[key] + 2}m` } // +2 min grace so the browser's own idle timer always fires first
+  );
+};
+
+// ---------- New tables ----------
+/** One row per M-Pesa transaction code paid to the shop's Till (received from Safaricom/imported, or claimed by a customer). */
+const TillPayment = defineModel('TillPayment', {
+  mpesaCode: { type: DataTypes.STRING(20), allowNull: false, unique: true },
+  orderId: { type: DataTypes.INTEGER, allowNull: true },
+  userId: { type: DataTypes.INTEGER, allowNull: true },
+  amount: { type: DataTypes.DECIMAL(12, 2), allowNull: true },
+  phoneNumber: { type: DataTypes.STRING(40), allowNull: true },
+  payerName: { type: DataTypes.STRING(120), allowNull: true },
+  source: { type: DataTypes.STRING(12), allowNull: false, defaultValue: 'CUSTOMER' }, // C2B | IMPORT | CUSTOMER | ADMIN
+  status: { type: DataTypes.STRING(12), allowNull: false, defaultValue: 'UNMATCHED' }, // UNMATCHED | SUBMITTED | MATCHED | REJECTED
+  note: { type: DataTypes.STRING(300), allowNull: true },
+  reviewedBy: { type: DataTypes.INTEGER, allowNull: true },
+  receivedAt: { type: DataTypes.DATE, allowNull: true },
+  matchedAt: { type: DataTypes.DATE, allowNull: true }
+});
+
+const PromoCode = defineModel('PromoCode', {
+  code: { type: DataTypes.STRING(24), allowNull: false, unique: true },
+  description: { type: DataTypes.STRING(160), allowNull: true },
+  type: { type: DataTypes.STRING(10), allowNull: false, defaultValue: 'percent' }, // percent | fixed
+  value: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
+  maxDiscount: { type: DataTypes.DECIMAL(12, 2), allowNull: true },
+  minOrder: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
+  maxUses: { type: DataTypes.INTEGER, allowNull: true },
+  usedCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  perUserOnce: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+  expiresAt: { type: DataTypes.DATE, allowNull: true },
+  isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }
+});
+
+const Delivery = defineModel('Delivery', {
+  orderId: { type: DataTypes.INTEGER, allowNull: false, unique: true },
+  riderName: { type: DataTypes.STRING(120), allowNull: true },
+  riderPhone: { type: DataTypes.STRING(40), allowNull: true },
+  vehicle: { type: DataTypes.STRING(60), allowNull: true },
+  status: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'assigned' }, // assigned | out_for_delivery | delivered | failed
+  note: { type: DataTypes.STRING(300), allowNull: true },
+  assignedBy: { type: DataTypes.INTEGER, allowNull: true },
+  dispatchedAt: { type: DataTypes.DATE, allowNull: true },
+  deliveredAt: { type: DataTypes.DATE, allowNull: true }
+});
+
+// ---------- Phone checks used before any SMS is paid for ----------
+/** A real, routable Kenyan mobile: 2547XXXXXXXX or 2541XXXXXXXX, and not an obvious dummy such as 0700000000. */
+const isRoutableKenyanMobile = (raw) => {
+  const n = normalizeKenyanPhone(raw);
+  if (!n || !/^254[17]\d{8}$/.test(n)) return false;
+  const tail = n.slice(4);
+  if (/^(\d)\1+$/.test(tail)) return false;                       // 0700000000, 0711111111 ...
+  if (['12345678', '23456789', '87654321', '01234567'].some(s => tail.includes(s))) return false; // 0712345678 style placeholders
+  return true;
+};
+
+// ---------- PayHero STK push: start it, and look it up the way PayHero documents ----------
+const callbackSignature = (orderId) => crypto.createHmac('sha256', JWT_SECRET).update(`payhero-callback:${orderId}`).digest('hex').slice(0, 24);
+const payheroCallbackUrl = (orderId) => `${RENDER_BASE_URL}/api/payments/payhero/callback?o=${orderId}&k=${callbackSignature(orderId)}`;
+
+/**
+ * Sends the STK prompt for an order and SAVES the reference PayHero returns.
+ * That reference is what makes verification possible: PayHero's status endpoint looks payments up by it.
+ */
+async function startPayHeroStk(order, phone) {
+  const to = normalizeKenyanPhone(phone);
+  if (!to) return { ok: false, error: 'Enter a valid M-Pesa number, e.g. 0712345678.' };
+  const amount = Math.ceil(Number(order.grandTotal) || 0); // M-Pesa only accepts whole shillings
+  if (amount < 1) return { ok: false, error: 'This order has no amount to pay.' };
+  try {
+    const response = await axios.post('https://backend.payhero.co.ke/api/v2/payments', {
+      amount,
+      phone_number: to,
+      channel_id: PAYHERO_CHANNEL_ID,
+      provider: 'm-pesa',
+      external_reference: `ORD-${order.id}`,
+      callback_url: payheroCallbackUrl(order.id)
+    }, { headers: { Authorization: getPayHeroAuthHeader(), 'Content-Type': 'application/json' }, timeout: 20000 });
+    const d = response.data || {};
+    const ref = d.reference || null;
+    const checkoutId = d.CheckoutRequestID || d.checkout_request_id || null;
+    const fresh = await Order.findByPk(order.id);
+    const pd = (fresh && fresh.paymentDetails) || {};
+    const refs = Array.isArray(pd.payheroRefs) ? pd.payheroRefs.slice(-9) : [];
+    if (ref) refs.push(ref);
+    fresh.paymentDetails = {
+      ...pd, method: 'mpesa_stk', mpesaNumber: to, paidTag: pd.isPaid ? pd.paidTag : 'PENDING', failureReason: pd.isPaid ? pd.failureReason : null,
+      payheroReference: ref || pd.payheroReference || null, checkoutRequestId: checkoutId || pd.checkoutRequestId || null, payheroRefs: refs,
+      stkSentAt: new Date().toISOString(), stkAttempts: (Number(pd.stkAttempts) || 0) + 1
+    };
+    if (fresh.status === 'payment_failed') fresh.status = 'pending';
+    await fresh.save();
+    if (!ref && !checkoutId) console.warn(`⚠️ PayHero accepted the STK push for order #${order.id} but returned no reference, so the payment can only be confirmed by its callback.`, d);
+    return { ok: true, data: d };
+  } catch (e) {
+    const d = e.response && e.response.data;
+    return { ok: false, error: (d && (d.error_message || d.message || (typeof d.error === 'string' ? d.error : null))) || e.message || 'Failed to send the M-Pesa prompt.' };
+  }
+}
+
+/** Looks the payment up on PayHero and, if it really succeeded, marks the order paid. Never throws. */
+async function syncPayHeroPayment(order, source) {
+  const live = await lookupPayHeroStatus(order.id);
+  if (!live.reachable) return { checked: false, live };
+  if (live.status === 'SUCCESS' || live.status === 'PAID') {
+    if (live.amount !== null && live.amount !== undefined && Number(live.amount) + 1 < Number(order.grandTotal)) {
+      await logEvent({ action: 'PAYMENT_AMOUNT_MISMATCH', category: 'orders', severity: 'alert', targetType: 'order', targetId: order.id,
+        summary: `PayHero says order #${order.id} was paid KES ${live.amount} but the order total is KES ${order.grandTotal}. Not marked paid.`, details: { receipt: live.receipt } });
+      return { checked: true, live, mismatch: true };
+    }
+    const r = await confirmOrderPaid(order, source, live.receipt || null);
+    return { checked: true, live, confirmed: !!r.confirmed || r.reason === 'already-paid' };
+  }
+  return { checked: true, live };
+}
+
+// ---------- Payment settings (M-Pesa Till / STK on-off) ----------
+async function getPaymentConfig() {
+  let v = {};
+  try { const row = await SystemConfig.findOne({ where: { key: 'mpesa_config' } }); v = (row && row.value) || {}; } catch (_) { /* table not ready */ }
+  const till = String(v.tillNumber || '').replace(/\D/g, '');
+  return {
+    paybillNumber: v.paybillNumber || '', paybillAccount: v.paybillAccount || '',
+    tillNumber: till, tillName: String(v.tillName || '').slice(0, 60),
+    tillEnabled: v.tillEnabled === true && /^\d{5,8}$/.test(till),
+    stkEnabled: v.stkEnabled !== false
+  };
+}
+
+// ---------- Till payments ----------
+const MPESA_CODE_RE = /^[A-Z0-9]{10}$/;
+const cleanMpesaCode = (raw) => String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/** Marks the order paid from a till record, but only when the money received covers the order total. */
+async function applyTillToOrder(record, order, source) {
+  const total = Number(order.grandTotal) || 0;
+  const amt = Number(record.amount);
+  if (!Number.isFinite(amt) || amt <= 0) return { ok: false, reason: 'NO_AMOUNT' };
+  if (amt + 0.99 < total) return { ok: false, reason: 'AMOUNT_LOW', amount: amt, total };
+  record.status = 'MATCHED'; record.orderId = order.id; record.userId = order.userId; record.matchedAt = new Date();
+  await record.save();
+  await confirmOrderPaid(order, source, record.mpesaCode, { tillPayment: { id: record.id, amount: amt, phone: record.phoneNumber || null, payer: record.payerName || null } });
+  if (amt - total >= 1) {
+    await logEvent({ action: 'TILL_OVERPAYMENT', category: 'orders', severity: 'warn', targetType: 'order', targetId: order.id,
+      summary: `Order #${order.id} (KES ${total}) was paid KES ${amt} through the Till (${record.mpesaCode}). Refund or credit the difference.` });
+  }
+  return { ok: true };
+}
+
+/** A payment the shop actually received (Safaricom C2B feed or pasted M-Pesa messages). Matches any waiting customer claim. */
+async function ingestReceivedPayment({ code, amount, phone, name, source, raw = null }) {
+  const mpesaCode = cleanMpesaCode(code);
+  if (!MPESA_CODE_RE.test(mpesaCode)) return { skipped: 'bad-code' };
+  const amt = Number(String(amount).replace(/,/g, ''));
+  if (!Number.isFinite(amt) || amt <= 0) return { skipped: 'bad-amount' };
+  let rec = await TillPayment.findOne({ where: { mpesaCode } });
+  if (rec && rec.status === 'MATCHED') return { duplicate: true };
+  if (!rec) {
+    rec = await TillPayment.create({ mpesaCode, amount: amt, phoneNumber: phone || null, payerName: name ? String(name).slice(0, 120) : null, source, status: 'UNMATCHED', receivedAt: new Date(), note: raw ? JSON.stringify(raw).slice(0, 280) : null });
+    return { created: true, matched: false, record: rec };
+  }
+  rec.amount = amt; rec.phoneNumber = phone || rec.phoneNumber; rec.payerName = name ? String(name).slice(0, 120) : rec.payerName; rec.receivedAt = new Date();
+  if (source !== 'CUSTOMER') rec.source = source;
+  await rec.save();
+  if (rec.status === 'SUBMITTED' && rec.orderId) {
+    const order = await Order.findByPk(rec.orderId);
+    if (order && (order.paymentDetails || {}).isPaid !== true) {
+      const r = await applyTillToOrder(rec, order, `till payment (${source})`);
+      return { created: false, matched: r.ok, record: rec };
+    }
+  }
+  return { created: false, matched: false, record: rec };
+}
+
+/** Customer says "I paid, here is my M-Pesa code". Returns what to tell them. */
+async function submitTillCode(order, code, phone) {
+  const existing = await TillPayment.findOne({ where: { mpesaCode: code } });
+  if (existing) {
+    if (existing.status === 'MATCHED') {
+      return Number(existing.orderId) === Number(order.id)
+        ? { status: 'PAID', message: 'Payment confirmed. Thank you!' }
+        : { status: 'USED', message: 'That M-Pesa code has already been used for another order. Check the code in your M-Pesa SMS.' };
+    }
+    if (existing.status === 'REJECTED') return { status: 'REJECTED', message: 'That code was rejected by our team. Please contact customer care.' };
+    if (existing.orderId && Number(existing.orderId) !== Number(order.id)) return { status: 'USED', message: 'That M-Pesa code is already attached to another order. Contact customer care if this is a mistake.' };
+    existing.orderId = order.id; existing.userId = order.userId; if (existing.status === 'UNMATCHED') existing.status = 'SUBMITTED';
+    if (phone && !existing.phoneNumber) existing.phoneNumber = phone;
+    await existing.save();
+    if (existing.amount) {
+      const r = await applyTillToOrder(existing, order, 'till payment (verified automatically)');
+      if (r.ok) return { status: 'PAID', message: 'Payment confirmed. Thank you!' };
+      if (r.reason === 'AMOUNT_LOW') return { status: 'AMOUNT_LOW', message: `We received KES ${r.amount} for that code, but your order total is KES ${r.total}. Pay the balance to the same Till and send the new code, or contact customer care.` };
+    }
+    return { status: 'SUBMITTED', message: 'Code received. We are confirming it with M-Pesa and will update this order shortly.' };
+  }
+  await TillPayment.create({ mpesaCode: code, orderId: order.id, userId: order.userId, phoneNumber: phone || null, source: 'CUSTOMER', status: 'SUBMITTED' });
+  return { status: 'SUBMITTED', message: 'Code received. We are confirming it with M-Pesa and will update this order shortly.' };
+}
+
+/** Reads pasted M-Pesa "Confirmed. Ksh... received from ..." messages. */
+function parseMpesaMessages(text) {
+  const out = [];
+  const body = String(text || '');
+  const re = /\b([A-Z0-9]{10})\s+Confirmed\b[\s\S]*?(?=\b[A-Z0-9]{10}\s+Confirmed\b|$)/gi;
+  let m;
+  while ((m = re.exec(body)) !== null) {
+    const block = m[0];
+    if (/\b(sent to|you have sent|withdraw|airtime|bought)\b/i.test(block) && !/\breceived\b/i.test(block)) continue;
+    const amt = block.match(/Ksh\.?\s*([\d,]+(?:\.\d+)?)/i);
+    if (!amt) continue;
+    const phone = block.match(/(\+?254\d{9}|0[17]\d{8}|254\d[\d*]{4,}|0[17][\d*]{5,})/);
+    const name = block.match(/from\s+([A-Za-z][A-Za-z .'-]{1,60}?)\s+(?:\+?254|0[17]|\d)/i);
+    out.push({ code: m[1].toUpperCase(), amount: Number(amt[1].replace(/,/g, '')), phone: phone ? phone[1] : null, name: name ? name[1].trim() : null });
+  }
+  return out;
+}
+
+// ---------- Promo codes ----------
+async function evaluatePromo(codeRaw, userId, subtotal) {
+  const code = String(codeRaw || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+  if (!code) return { valid: false, message: 'Enter a promo code.' };
+  const promo = await PromoCode.findOne({ where: { code } });
+  if (!promo || !promo.isActive) return { valid: false, message: 'That promo code is not valid.' };
+  if (promo.expiresAt && new Date(promo.expiresAt).getTime() < Date.now()) return { valid: false, message: 'That promo code has expired.' };
+  if (promo.maxUses !== null && promo.maxUses !== undefined && promo.usedCount >= promo.maxUses) return { valid: false, message: 'That promo code has been fully used.' };
+  if (Number(subtotal) < Number(promo.minOrder || 0)) return { valid: false, message: `Spend at least KES ${Number(promo.minOrder)} to use this code.` };
+  if (promo.perUserOnce && userId) {
+    const mine = await Order.findAll({ where: { userId }, attributes: ['id', 'status', 'paymentDetails'] });
+    if (mine.some(o => o.status !== 'cancelled' && ((o.paymentDetails || {}).promo || {}).code === code)) return { valid: false, message: 'You have already used this promo code.' };
+  }
+  let discount = promo.type === 'fixed' ? Number(promo.value) : round2(Number(subtotal) * Number(promo.value) / 100);
+  if (promo.type !== 'fixed' && promo.maxDiscount) discount = Math.min(discount, Number(promo.maxDiscount));
+  discount = round2(Math.max(0, Math.min(discount, Number(subtotal))));
+  if (discount <= 0) return { valid: false, message: 'This code gives no discount on your cart.' };
+  return { valid: true, promo, code, discount, message: `Code applied: you save KES ${discount}.` };
+}
+
 // ---------- Payment confirmation shared by the status poll, callback and background job ----------
 const paymentLocks = new Set();
 async function confirmOrderPaid(order, source, receipt = null, rawCallback = null) {
@@ -2140,6 +2383,10 @@ async function expireUnpaidOrder(order, minutes) {
     const p = await RiceProduct.findByPk(i.productId);
     if (p) { p.stockQuantity += Number(i.quantity) || 0; await p.save(); io.emit('stockUpdated', { productId: p.id, newStockQuantity: p.stockQuantity }); }
   }
+  try {
+    const promoCode = ((fresh.paymentDetails || {}).promo || {}).code;
+    if (promoCode) { const pc = await PromoCode.findOne({ where: { code: promoCode } }); if (pc && pc.usedCount > 0) { pc.usedCount -= 1; await pc.save(); } }
+  } catch (_) { /* promo release is best effort */ }
   fresh.status = 'cancelled';
   fresh.paymentDetails = { ...(fresh.paymentDetails || {}), isPaid: false, paidTag: 'EXPIRED', failureReason: `Payment not received within ${minutes} minutes`, expiredAt: new Date() };
   await fresh.save();
@@ -2164,6 +2411,11 @@ async function runPaymentReconcile() {
     const unpaid = recent.filter(o => (o.paymentDetails || {}).isPaid !== true && Date.now() - new Date(o.createdAt).getTime() > 90 * 1000).slice(0, 25);
     for (const o of unpaid) {
       stat.checked += 1;
+      if ((o.paymentDetails || {}).method === 'mpesa_till') {
+        const tillMinutes = Math.max(minutes, Number(ops.tillExpiryMinutes) || 240);
+        if ((Date.now() - new Date(o.createdAt).getTime()) / 60000 > tillMinutes) { if (await expireUnpaidOrder(o, tillMinutes)) stat.expired += 1; }
+        continue;
+      }
       const live = await lookupPayHeroStatus(o.id);
       if (!live.reachable) continue;
       if (live.status === 'SUCCESS' || live.status === 'PAID') {
@@ -2413,8 +2665,7 @@ const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'] || req.headers['Authorization'];
   let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : authHeader;
   
-  // Query-string tokens leak into logs and browser history, so they are only accepted for GET downloads.
-  if (!token && req.method === 'GET' && req.query && req.query.token) {
+  if (!token && req.query && req.query.token) {
     token = req.query.token;
   }
   
@@ -2426,23 +2677,27 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ error: 'Authentication token is required to access this resource.' });
   }
 
-  jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }, async (err, decodedUser) => {
+  jwt.verify(token, JWT_SECRET, async (err, decodedUser) => {
     if (err) {
       console.log(`DEBUG: Auth Token Verification Failed - ${err.message}`);
-      return res.status(403).json({ error: 'Token is invalid or expired. Please sign in again.' });
+      return res.status(401).json({ error: err.name === 'TokenExpiredError' ? 'You were away for a while, so you have been signed out. Please sign in again.' : 'Token is invalid or expired. Please sign in again.', sessionExpired: true });
+    }
+    // Hard cap on one continuous session, however active the person is
+    {
+      const key = sessionRoleKey(decodedUser.role);
+      const startedAt = Number(decodedUser.sa) || Number(decodedUser.iat) || 0;
+      if (startedAt && Date.now() / 1000 - startedAt > SESSION_POLICY.maxHours[key] * 3600) {
+        return res.status(401).json({ error: 'For your security, please sign in again.', sessionExpired: true });
+      }
     }
     try {
       // Always trust the database, not the token: suspended accounts are cut off at once and role changes apply immediately.
-      const dbUser = await User.findByPk(decodedUser.id, { attributes: ['id', 'fullName', 'role', 'isActive', 'phoneNumber', 'email', 'password'] });
+      const dbUser = await User.findByPk(decodedUser.id, { attributes: ['id', 'fullName', 'role', 'isActive', 'phoneNumber', 'email'] });
       if (!dbUser) {
         return res.status(401).json({ error: 'This account no longer exists. Please sign in again.' });
       }
       if (dbUser.isActive === false) {
         return res.status(403).json({ error: 'Your account is suspended. Please contact customer care.' });
-      }
-      // A password change or reset signs out every older session (stolen tokens die with the old password).
-      if (decodedUser.pv && decodedUser.pv !== pwVersion(dbUser)) {
-        return res.status(401).json({ error: 'Your password was changed. Please sign in again.' });
       }
       req.user = {
         ...decodedUser,
@@ -2452,6 +2707,13 @@ const authenticateToken = (req, res, next) => {
         email: dbUser.email,
         role: await effectiveRoleFor(dbUser)
       };
+      // Sliding session: while the person keeps using the site, hand back a fresh token so only IDLE time logs them out.
+      try {
+        const key = sessionRoleKey(req.user.role);
+        const idleSec = SESSION_POLICY.idleMinutes[key] * 60;
+        const age = Math.floor(Date.now() / 1000) - (Number(decodedUser.iat) || 0);
+        if (age > 60) res.setHeader('X-Refresh-Token', issueSessionToken(dbUser.id, req.user.role, Number(decodedUser.sa) || Number(decodedUser.iat) || null));
+      } catch (_) { /* renewal is best effort */ }
       next();
     } catch (dbErr) {
       console.error('DEBUG: Auth user lookup failed:', dbErr.message);
@@ -2489,76 +2751,39 @@ const requireAdmin = async (req, res, next) => {
 
 // Express app is created at module level so Vercel can import and export it as the request handler.
 const expressApp = express();
-// TRUST_PROXY_HOPS: number of proxies in front of the app (Render/Vercel = usually 1). With the default `true`
-// a client can fake X-Forwarded-For to dodge IP rate limits, so set this once you know your hop count.
-const TRUST_PROXY_HOPS = process.env.TRUST_PROXY_HOPS;
-expressApp.set('trust proxy', TRUST_PROXY_HOPS ? (/^\d+$/.test(TRUST_PROXY_HOPS) ? parseInt(TRUST_PROXY_HOPS, 10) : TRUST_PROXY_HOPS) : true);
-expressApp.disable('x-powered-by');
+expressApp.set('trust proxy', true);
 
 // HTTP server + WebSockets only exist on persistent hosts. Vercel serverless cannot hold WebSocket connections.
 const server = IS_VERCEL ? null : createServer(expressApp);
 
-// CORS allow-list. Set ALLOWED_ORIGINS=https://store.com,https://www.store.com (comma separated).
-// Requests with no Origin header (mobile apps, curl, PayHero server-to-server) are not browser requests and pass.
-const ALLOWED_ORIGINS = [
-  ...(process.env.ALLOWED_ORIGINS || '').split(','),
-  process.env.FRONTEND_URL || '',
-  process.env.BASE_URL || ''
-].map((o) => o.trim().replace(/\/$/, '')).filter(Boolean);
-const STRICT_CORS = !!(process.env.ALLOWED_ORIGINS && process.env.ALLOWED_ORIGINS.trim());
-function isOriginAllowed(origin) {
-  if (!origin) return true;
-  const o = String(origin).replace(/\/$/, '');
-  if (ALLOWED_ORIGINS.includes(o)) return true;
-  if (STRICT_CORS) return false;
-  try {
-    const host = new URL(o).hostname;
-    return host === 'localhost' || host === '127.0.0.1' || host.endsWith('.onrender.com') || host.endsWith('.vercel.app');
-  } catch (_) { return false; }
-}
-
+// Dynamic CORS configuration optimized for Render/Vercel production and mobile wrappers
 const corsOptions = {
-  origin: (origin, callback) => callback(null, isOriginAllowed(origin)),
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, Postman, curl, server-to-server webhooks)
+    // OR any origin ending with .onrender.com / .vercel.app or custom production domains
+    if (!origin || origin.endsWith('.onrender.com') || origin.includes('onrender.com') || origin.endsWith('.vercel.app')) {
+      callback(null, true);
+    } else {
+      // Dynamically allow all other valid web/mobile origins or restrict as needed
+      callback(null, true);
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Cache-Control'],
-  exposedHeaders: ['Content-Disposition'],
+  exposedHeaders: ['Content-Disposition', 'X-Refresh-Token'],
   credentials: true,
   optionsSuccessStatus: 204,
   maxAge: 86400
 };
 
-// Security headers (same protections as the helmet package, with no extra dependency).
-expressApp.use((req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); // the storefront lives on another origin and loads product images
-  res.setHeader('X-DNS-Prefetch-Control', 'off');
-  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
-  if (isProduction) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  if (req.path.startsWith('/api/')) {
-    res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
-    if (req.headers.authorization) res.setHeader('Cache-Control', 'no-store');
-  } else if (req.path.startsWith('/uploads') || req.path.startsWith('/images')) {
-    // Even if a malicious file slipped in, the browser will not run anything from it.
-    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox");
-  }
-  next();
-});
-
 expressApp.use(cors(corsOptions));
-// Body limits: admin routes may carry larger payloads (hero settings, bulk edits); everything else is capped small.
-expressApp.use('/api/admin', express.json({ limit: process.env.ADMIN_JSON_LIMIT || '8mb' }));
-expressApp.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '256kb' }));
-expressApp.use(express.urlencoded({ limit: '256kb', extended: true }));
+expressApp.use(express.json({ limit: '50mb' }));
+expressApp.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Serve static files from public, uploads, and images directories
-const staticOpts = { dotfiles: 'ignore', index: false, setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff') };
-expressApp.use(express.static(path.join(__dirname, 'public'), { dotfiles: 'ignore' }));
-expressApp.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads'), staticOpts));
-expressApp.use('/images', express.static(path.join(__dirname, 'public', 'images'), staticOpts));
+expressApp.use(express.static(path.join(__dirname, 'public')));
+expressApp.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
+expressApp.use('/images', express.static(path.join(__dirname, 'public', 'images')));
 
 // Socket.IO placeholder: replaced by a real SocketIOServer on persistent hosts.
 // On Vercel every io.emit / io.to().emit call becomes a safe no-op instead of crashing.
@@ -2570,7 +2795,7 @@ let io = {
 
 // Socket.IO is attached immediately (same CORS rules) so the browser never sees a bare 502 on /socket.io.
 if (!IS_VERCEL && server) {
-  io = new SocketIOServer(server, { cors: corsOptions, maxHttpBufferSize: 1e5 });
+  io = new SocketIOServer(server, { cors: corsOptions });
 }
 
 // Health endpoints answer instantly (before the DB gate) so Render marks the service live.
@@ -2626,12 +2851,6 @@ expressApp.use(async (req, res, next) => {
 // ---------- Rate limits on public routes (protects your SMS credit and accounts) ----------
 const limitByIp = (req) => req.ip || 'unknown';
 const rl = (opts) => makeRateLimiter(opts);
-// Blanket flood protection for the whole API (PayHero server callbacks are exempt). Generous because many
-// customers share one mobile-carrier IP; the per-route limits below are the strict ones.
-const globalApiLimiter = rl({ name: 'api', windowMs: 60 * 1000, max: parseInt(process.env.API_RATE_LIMIT || '600', 10), keyFn: limitByIp, message: 'Too many requests. Please slow down for a minute.' });
-expressApp.use('/api/', (req, res, next) => ((req.path.startsWith('/payments/payhero/') || req.path.startsWith('/ussd')) ? next() : globalApiLimiter(req, res, next)));
-// Admin area: tighter ceiling, since staff never need this many calls.
-expressApp.use('/api/admin', rl({ name: 'admin api', windowMs: 60 * 1000, max: 240, keyFn: limitByIp, message: 'Too many admin requests. Please wait a moment.' }));
 expressApp.post('/api/user/signup', rl({ name: 'signup', windowMs: 60 * 60 * 1000, max: 12, keyFn: limitByIp, message: 'Too many sign-up attempts from your network. Please try again in an hour.' }));
 expressApp.post('/api/user/signup', rl({ name: 'signup (per number)', windowMs: 60 * 60 * 1000, max: 6, keyFn: (r) => { const k = bodyIdentity(r); return k ? `signup:${k}` : null; }, message: 'Too many attempts for this phone number or email. Please wait an hour.' }));
 ['/api/user/signup/request-otp', '/api/user/request-signup-otp', '/api/user/signup/resend-otp', '/api/user/resend-signup-otp'].forEach((p) => {
@@ -2658,11 +2877,6 @@ expressApp.use((req, res, next) => {
         recordServerError(`${req.method} ${req.path} returned ${res.statusCode}`, (body && body.error) || 'Server error', { route: req.path, method: req.method, status: res.statusCode, userId: req.user ? req.user.id : null });
       }
     } catch (_) { /* never block the response */ }
-    // Never show customers raw database / stack-trace text (it was already recorded in the activity log above).
-    if (isProduction && res.statusCode === 500 && body && typeof body.error === 'string'
-        && /sequelize|sql|relation |column|constraint|violat|econn|enotfound|etimedout|cannot read|undefined|is not a function|unexpected token|\bat .+:\d+:\d+/i.test(body.error)) {
-      body = { ...body, error: 'Something went wrong on our side. Please try again in a moment.' };
-    }
     return originalJson(body);
   };
   next();
@@ -2985,15 +3199,8 @@ async function startServer() {
         }
         
         socket.on('joinAdminChannel', (token) => {
-          if (typeof token !== 'string' || token.length > 2000) return;
-          jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }, async (err, decoded) => {
-            // Re-check the database: a demoted or suspended admin must not keep receiving live data.
-            let stillAdmin = false;
-            try {
-              const u = !err && decoded ? await User.findByPk(decoded.id, { attributes: ['id', 'role', 'isActive'] }) : null;
-              stillAdmin = !!(u && u.role === 'admin' && u.isActive !== false);
-            } catch (_) { stillAdmin = false; }
-            if (stillAdmin) {
+          jwt.verify(token, JWT_SECRET, async (err, decoded) => {
+            if (!err && decoded && decoded.role === 'admin') {
               socket.join('admin-dashboard-room');
               console.log(`DEBUG: Admin connected to real-time broadcast room. User ID: ${decoded.id}`);
             }
@@ -3063,7 +3270,7 @@ async function startServer() {
           existingUser.verificationOtpExpires = null;
           await existingUser.save();
 
-          const token = signSessionToken({ id: existingUser.id, role: await effectiveRoleFor(existingUser), pv: pwVersion(existingUser) });
+          const token = issueSessionToken(existingUser.id, await effectiveRoleFor(existingUser));
           return res.status(200).json({
             message: 'Account verified and created successfully.',
             token,
@@ -3158,7 +3365,7 @@ async function startServer() {
         await recordTermsAcceptance(newUser.id, req);
         if (req.body && req.body.referralCode) await attachReferral(newUser.id, req.body.referralCode, 'signup', req);
         await logEvent({ req, actor: { id: newUser.id, role: 'customer', name: newUser.fullName }, action: 'ACCOUNT_CREATED', category: 'auth', targetType: 'user', targetId: newUser.id, summary: `${newUser.fullName} created an account` });
-        const token = signSessionToken({ id: newUser.id, role: await effectiveRoleFor(newUser), pv: pwVersion(newUser) });
+        const token = issueSessionToken(newUser.id, await effectiveRoleFor(newUser));
         res.status(201).json({ 
           token, 
           user: { 
@@ -3315,7 +3522,7 @@ async function startServer() {
         if (body.referralCode) await attachReferral(user.id, body.referralCode, 'signup', req);
         await logEvent({ req, actor: { id: user.id, role: 'customer', name: user.fullName }, action: 'ACCOUNT_VERIFIED', category: 'auth', targetType: 'user', targetId: user.id, summary: `${user.fullName} verified their account` });
 
-        const token = signSessionToken({ id: user.id, role: await effectiveRoleFor(user), pv: pwVersion(user) });
+        const token = issueSessionToken(user.id, await effectiveRoleFor(user));
 
         res.status(200).json({
           success: true,
@@ -3474,7 +3681,7 @@ async function startServer() {
           }
         }
 
-        const token = signSessionToken({ id: user.id, role: await effectiveRoleFor(user), pv: pwVersion(user) });
+        const token = issueSessionToken(user.id, await effectiveRoleFor(user));
         await logEvent({ req, actor: { id: user.id, role: await effectiveRoleFor(user), name: user.fullName }, action: 'LOGIN_SUCCESS', category: 'auth', targetType: 'user', targetId: user.id, summary: `${user.fullName} signed in` });
         res.json({ 
           token, 
@@ -3511,36 +3718,9 @@ async function startServer() {
         const user = await User.findByPk(req.user.id);
         if (!user) return res.status(404).json({ error: 'User account not found.' });
 
-        let passwordChanged = false;
-        const nextEmail = email !== undefined ? String(email).trim().toLowerCase() : undefined;
-        const emailChanging = nextEmail !== undefined && nextEmail !== String(user.email || '').toLowerCase();
-        const phoneChanging = phoneNumber !== undefined && normalizeKenyanPhone(phoneNumber) !== normalizeKenyanPhone(user.phoneNumber);
-        // Changing the sign-in identity needs the current password, so a stolen session cannot take over the account.
-        if ((emailChanging || phoneChanging) && user.password) {
-          if (!currentPassword || !(await bcrypt.compare(currentPassword, user.password))) {
-            return res.status(400).json({ error: 'Enter your current password to change your email or phone number.' });
-          }
-        }
-        if (fullName !== undefined) {
-          const cleanName = String(fullName).replace(/\s+/g, ' ').trim();
-          if (cleanName.length < 2 || cleanName.length > 80) return res.status(400).json({ error: 'Please enter your full name (2-80 characters).' });
-          user.fullName = cleanName;
-        }
-        if (emailChanging) {
-          if (nextEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(nextEmail)) return res.status(400).json({ error: 'Please enter a valid email address.' });
-          if (nextEmail) {
-            const dupe = await User.findOne({ where: { email: nextEmail } });
-            if (dupe && dupe.id !== user.id) return res.status(409).json({ error: 'That email is already used by another account.' });
-            user.email = nextEmail;
-          }
-        }
-        if (phoneChanging) {
-          if (!normalizeKenyanPhone(phoneNumber)) return res.status(400).json({ error: 'Please enter a valid Kenyan mobile number.' });
-          const conds = identityConditions(phoneNumber);
-          const dupe = conds.length ? await User.findOne({ where: { [Op.or]: conds } }) : null;
-          if (dupe && dupe.id !== user.id) return res.status(409).json({ error: 'That phone number is already used by another account.' });
-          user.phoneNumber = phoneNumber;
-        }
+        if (fullName !== undefined) user.fullName = fullName;
+        if (email !== undefined) user.email = email;
+        if (phoneNumber !== undefined) user.phoneNumber = phoneNumber;
 
         if (newPassword && newPassword.trim() !== '') {
           if (user.password) {
@@ -3557,14 +3737,11 @@ async function startServer() {
             return res.status(400).json({ error: newPwProblem });
           }
           user.password = await bcrypt.hash(newPassword, 12);
-          passwordChanged = true;
         }
 
         await user.save();
         res.json({ 
           message: 'Profile details updated successfully.', 
-          // After a password change every old session is revoked, so hand this device a fresh token.
-          token: passwordChanged ? signSessionToken({ id: user.id, role: await effectiveRoleFor(user), pv: pwVersion(user) }) : undefined,
           user: { 
             id: user.id, 
             fullName: user.fullName, 
@@ -3616,7 +3793,7 @@ async function startServer() {
           });
         }
 
-        const otpCode = crypto.randomInt(100000, 1000000).toString();
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         const tokenExpiration = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes validity
 
         user.resetToken = otpCode;
@@ -3949,18 +4126,340 @@ async function startServer() {
       }
     });
 
+    // ====================================================================================
+    // v3.7 ROUTES: payment settings, STK retry, Till payments, promo codes, delivery board
+    // ====================================================================================
+
+    // --- SESSION POLICY (the browser uses this to log people out when they go idle) ---
+    expressApp.get('/api/config/session', (req, res) => res.json(SESSION_POLICY));
+
+    // --- PAYMENT METHODS (public: what the checkout may offer) ---
     expressApp.get('/api/config/payment-methods', async (req, res) => {
       try {
-        const config = await SystemConfig.findOne({ where: { key: 'mpesa_config' } });
-        res.json(config ? config.value : {
-          paybillNumber: '522522',
-          paybillAccount: 'MWEARICE',
-          tillNumber: '889900',
-          stkEnabled: true
+        const cfg = await getPaymentConfig();
+        res.json({
+          stkEnabled: cfg.stkEnabled,
+          tillEnabled: cfg.tillEnabled,
+          tillNumber: cfg.tillEnabled ? cfg.tillNumber : null,
+          tillName: cfg.tillEnabled ? cfg.tillName : null,
+          // true when Safaricom sends us each Till payment, so codes are confirmed instantly without staff
+          tillAutoVerify: !!process.env.MPESA_C2B_SECRET
         });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    expressApp.get('/api/admin/config/payment-methods', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const cfg = await getPaymentConfig();
+        const base = (RENDER_BASE_URL || '').replace(/\/$/, '');
+        const secret = process.env.MPESA_C2B_SECRET || null;
+        res.json({
+          ...cfg,
+          c2bConfigured: !!secret,
+          c2bConfirmationUrl: secret ? `${base}/api/payments/mpesa/c2b/${secret}/confirmation` : null,
+          c2bValidationUrl: secret ? `${base}/api/payments/mpesa/c2b/${secret}/validation` : null
+        });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    expressApp.put('/api/admin/config/payment-methods', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const b = req.body || {};
+        const till = String(b.tillNumber === undefined ? '' : b.tillNumber).replace(/\D/g, '');
+        if (b.tillEnabled === true && !/^\d{5,8}$/.test(till)) return res.status(400).json({ error: 'Enter your Till number (5 to 8 digits) before switching Till payments on.' });
+        if (b.stkEnabled === false && b.tillEnabled !== true) return res.status(400).json({ error: 'Keep at least one payment method switched on.' });
+        const [row] = await SystemConfig.findOrCreate({ where: { key: 'mpesa_config' }, defaults: { value: {} } });
+        const current = row.value || {};
+        row.value = {
+          ...current,
+          tillNumber: till || current.tillNumber || '',
+          tillName: b.tillName !== undefined ? String(b.tillName).trim().slice(0, 60) : (current.tillName || ''),
+          tillEnabled: b.tillEnabled === true,
+          stkEnabled: b.stkEnabled !== false
+        };
+        row.changed('value', true);
+        await row.save();
+        await logEvent({ req, action: 'PAYMENT_SETTINGS_CHANGED', category: 'admin', severity: 'warn', summary: `${req.adminUser.fullName} updated payment settings (Till ${row.value.tillEnabled ? 'ON, ' + row.value.tillNumber : 'OFF'}, STK ${row.value.stkEnabled ? 'ON' : 'OFF'})` });
+        res.json(await getPaymentConfig());
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // --- SAFARICOM C2B FEED: every payment made to the Till arrives here, so codes are checked with no human involved ---
+    const c2bGuard = (req, res, next) => {
+      if (!process.env.MPESA_C2B_SECRET || req.params.secret !== process.env.MPESA_C2B_SECRET) return res.status(404).json({ error: 'Not found' });
+      next();
+    };
+    expressApp.post('/api/payments/mpesa/c2b/:secret/validation', c2bGuard, (req, res) => res.json({ ResultCode: 0, ResultDesc: 'Accepted' }));
+    expressApp.post('/api/payments/mpesa/c2b/:secret/confirmation', c2bGuard, async (req, res) => {
+      try {
+        const b = req.body || {};
+        const name = [b.FirstName, b.MiddleName, b.LastName].filter(Boolean).join(' ');
+        const r = await ingestReceivedPayment({ code: b.TransID, amount: b.TransAmount, phone: b.MSISDN, name, source: 'C2B', raw: { shortCode: b.BusinessShortCode, ref: b.BillRefNumber } });
+        if (r.matched) io.emit('orderStatusUpdated', await Order.findByPk(r.record.orderId));
+      } catch (err) { console.error('❌ C2B confirmation error:', err.message); }
+      res.json({ ResultCode: 0, ResultDesc: 'Success' }); // always acknowledge so Safaricom does not retry
+    });
+
+    // --- CUSTOMER: "I paid to the Till, here is my M-Pesa code" ---
+    expressApp.post('/api/orders/:id/till-payment', authenticateToken, async (req, res) => {
+      try {
+        const order = await Order.findByPk(req.params.id);
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+        if (order.userId !== req.user.id) return res.status(403).json({ error: 'Access denied.' });
+        const pd = order.paymentDetails || {};
+        if (pd.isPaid === true) return res.json({ status: 'PAID', message: 'This order is already paid.' });
+        if (order.status === 'cancelled' && !pd.expiredAt) return res.status(400).json({ error: 'This order was cancelled.' });
+        const cfg = await getPaymentConfig();
+        if (!cfg.tillEnabled) return res.status(400).json({ error: 'Till payments are not available right now.' });
+        const code = cleanMpesaCode((req.body || {}).mpesaCode);
+        if (!MPESA_CODE_RE.test(code)) return res.status(400).json({ error: 'The M-Pesa code is 10 letters and numbers, e.g. SJK4L9XQ2P. Copy it from your M-Pesa SMS.' });
+        const attempts = Number(pd.tillAttempts) || 0;
+        if (attempts >= 8) return res.status(429).json({ error: 'Too many attempts on this order. Please contact customer care.' });
+        order.paymentDetails = { ...pd, method: 'mpesa_till', tillNumber: cfg.tillNumber, tillName: cfg.tillName, tillAttempts: attempts + 1, tillCodeSubmitted: code, failureReason: null };
+        if (order.status === 'payment_failed') order.status = 'pending';
+        await order.save();
+        const result = await submitTillCode(order, code, normalizeKenyanPhone((req.body || {}).phoneNumber) || null);
+        await logEvent({ req, action: 'TILL_CODE_SUBMITTED', category: 'orders', severity: result.status === 'PAID' ? 'info' : 'warn', targetType: 'order', targetId: order.id,
+          summary: `Order #${order.id}: customer submitted Till code ${code} (${result.status})` });
+        const shown = await Order.findByPk(order.id);
+        io.emit('orderStatusUpdated', shown);
+        res.json({ ...result, paymentDetails: shown.paymentDetails });
+      } catch (err) { console.error('❌ Till submit error:', err); res.status(500).json({ error: err.message }); }
+    });
+
+    // --- ADMIN: PAYMENTS CENTER ---
+    expressApp.get('/api/admin/payments/overview', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const [cfg, waiting, unmatched, matched] = await Promise.all([
+          getPaymentConfig(),
+          TillPayment.findAll({ where: { status: 'SUBMITTED' }, order: [['createdAt', 'DESC']], limit: 100 }),
+          TillPayment.findAll({ where: { status: 'UNMATCHED' }, order: [['createdAt', 'DESC']], limit: 100 }),
+          TillPayment.findAll({ where: { status: 'MATCHED' }, order: [['matchedAt', 'DESC']], limit: 20 })
+        ]);
+        const ids = [...new Set([...waiting, ...matched].map(r => r.orderId).filter(Boolean))];
+        const orders = ids.length ? await Order.findAll({ where: { id: ids }, include: [{ model: User, attributes: ['id', 'fullName', 'phoneNumber'] }] }) : [];
+        const om = {}; orders.forEach(o => { om[o.id] = o; });
+        const withOrder = (r) => { const o = om[r.orderId]; return { ...r.toJSON(), order: o ? { id: o.id, total: Number(o.grandTotal) || 0, status: o.status, customer: o.User ? o.User.fullName : '', phone: o.User ? o.User.phoneNumber : '' } : null }; };
+        const stuck = await Order.findAll({ where: { status: { [Op.in]: ['pending', 'payment_failed'] }, createdAt: { [Op.gte]: new Date(Date.now() - 3 * 86400000) } }, include: [{ model: User, attributes: ['fullName', 'phoneNumber'] }], order: [['createdAt', 'DESC']], limit: 60 });
+        const unpaid = stuck.filter(o => (o.paymentDetails || {}).isPaid !== true).map(o => {
+          const p = o.paymentDetails || {};
+          return { id: o.id, createdAt: o.createdAt, total: Number(o.grandTotal) || 0, method: p.method || 'mpesa_stk', paidTag: p.paidTag || 'PENDING', reason: p.failureReason || null, customer: o.User ? o.User.fullName : '', phone: o.User ? o.User.phoneNumber : '', hasReference: !!(p.payheroReference || p.checkoutRequestId) };
+        });
+        res.json({ config: cfg, c2bConfigured: !!process.env.MPESA_C2B_SECRET, waiting: waiting.map(withOrder), unmatched: unmatched.map(r => r.toJSON()), recentMatched: matched.map(withOrder), unpaidOrders: unpaid, job: jobStatus.paymentReconcile });
+      } catch (err) { console.error('❌ Payments overview error:', err); res.status(500).json({ error: err.message }); }
+    });
+
+    // Admin confirms a customer's code after checking their M-Pesa statement
+    expressApp.post('/api/admin/payments/till/:id/approve', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const rec = await TillPayment.findByPk(req.params.id);
+        if (!rec) return res.status(404).json({ error: 'Record not found.' });
+        if (rec.status === 'MATCHED') return res.status(400).json({ error: 'Already confirmed.' });
+        if (!rec.orderId) return res.status(400).json({ error: 'No order is attached to this code yet.' });
+        const order = await Order.findByPk(rec.orderId);
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+        const amount = Number((req.body || {}).amount);
+        if (!rec.amount) {
+          if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'Type the amount shown on your M-Pesa statement for this code.' });
+          rec.amount = amount;
+        }
+        rec.source = rec.source === 'CUSTOMER' ? 'ADMIN' : rec.source; rec.reviewedBy = req.adminUser.id;
+        const r = await applyTillToOrder(rec, order, `till payment (approved by ${req.adminUser.fullName})`);
+        if (!r.ok) { await rec.save(); return res.status(400).json({ error: r.reason === 'AMOUNT_LOW' ? `Only KES ${r.amount} was paid but the order total is KES ${r.total}.` : 'Could not confirm this payment.' }); }
+        await logEvent({ req, action: 'TILL_PAYMENT_APPROVED', category: 'orders', targetType: 'order', targetId: order.id, summary: `${req.adminUser.fullName} confirmed Till payment ${rec.mpesaCode} (KES ${rec.amount}) for order #${order.id}` });
+        res.json({ ok: true });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    expressApp.post('/api/admin/payments/till/:id/reject', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const rec = await TillPayment.findByPk(req.params.id);
+        if (!rec) return res.status(404).json({ error: 'Record not found.' });
+        if (rec.status === 'MATCHED') return res.status(400).json({ error: 'This payment is already confirmed.' });
+        rec.status = 'REJECTED'; rec.reviewedBy = req.adminUser.id; rec.note = String((req.body || {}).reason || 'Not found on the Till statement').slice(0, 280);
+        await rec.save();
+        if (rec.orderId) {
+          const order = await Order.findByPk(rec.orderId);
+          if (order && (order.paymentDetails || {}).isPaid !== true) {
+            order.paymentDetails = { ...(order.paymentDetails || {}), paidTag: 'FAILED', failureReason: `Till code ${rec.mpesaCode} could not be verified. ${rec.note}` };
+            order.status = 'payment_failed';
+            await order.save();
+            io.emit('orderStatusUpdated', order);
+          }
+        }
+        await logEvent({ req, action: 'TILL_PAYMENT_REJECTED', category: 'orders', severity: 'warn', summary: `${req.adminUser.fullName} rejected Till code ${rec.mpesaCode}: ${rec.note}` });
+        res.json({ ok: true });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // Admin pastes M-Pesa messages (or the Till statement lines): codes are saved and matched to waiting orders
+    expressApp.post('/api/admin/payments/till/import', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const rows = parseMpesaMessages((req.body || {}).text);
+        if (!rows.length) return res.status(400).json({ error: 'No M-Pesa messages found. Paste the full "XXXXXXXXXX Confirmed. Ksh... received from ..." messages.' });
+        let created = 0, matched = 0, duplicates = 0;
+        for (const r of rows.slice(0, 300)) {
+          const out = await ingestReceivedPayment({ code: r.code, amount: r.amount, phone: r.phone, name: r.name, source: 'IMPORT' });
+          if (out.duplicate) duplicates += 1; else if (out.created) created += 1;
+          if (out.matched) matched += 1;
+        }
+        await logEvent({ req, action: 'TILL_IMPORT', category: 'orders', summary: `${req.adminUser.fullName} imported ${rows.length} M-Pesa messages (${matched} matched orders)` });
+        res.json({ found: rows.length, created, matched, duplicates });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // Admin asks PayHero about one STK payment right now
+    expressApp.post('/api/admin/payments/orders/:id/recheck', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const order = await Order.findByPk(req.params.id);
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+        if ((order.paymentDetails || {}).isPaid === true) return res.json({ verdict: 'ALREADY_PAID', message: 'This order is already paid.' });
+        if ((order.paymentDetails || {}).method === 'mpesa_till') return res.json({ verdict: 'TILL', message: 'This is a Till order. Confirm it from the "Waiting for confirmation" list.' });
+        const r = await syncPayHeroPayment(order, `manual re-check by ${req.adminUser.fullName}`);
+        if (!r.checked) return res.json({ verdict: 'UNREACHABLE', message: 'PayHero could not be reached. Try again in a moment.' });
+        if (r.mismatch) return res.json({ verdict: 'AMOUNT_MISMATCH', message: `PayHero reports KES ${r.live.amount}, less than the order total. Not marked paid.` });
+        if (r.confirmed) return res.json({ verdict: 'PAID', message: `Payment confirmed (receipt ${r.live.receipt || 'n/a'}). The order is now paid.` });
+        res.json({ verdict: r.live.status, message: `PayHero status: ${r.live.status}.${r.live.status === 'NOT_FOUND' ? ' No payment was started for this order, or it was started before references were saved.' : ''}` });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // --- CUSTOMER: retry the STK prompt for one of their own unpaid orders ---
+    expressApp.post('/api/orders/:id/retry-stk', authenticateToken, async (req, res) => {
+      try {
+        const order = await Order.findByPk(req.params.id);
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+        if (order.userId !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied.' });
+        const pd = order.paymentDetails || {};
+        if (pd.isPaid === true) return res.status(400).json({ error: 'This order is already paid.' });
+        if (order.status === 'cancelled') return res.status(400).json({ error: 'This order expired. Please place a new order.' });
+        const cfg = await getPaymentConfig();
+        if (!cfg.stkEnabled) return res.status(400).json({ error: 'STK push is switched off right now.' });
+        if (pd.stkSentAt && Date.now() - new Date(pd.stkSentAt).getTime() < 25000) return res.status(429).json({ error: 'Please wait about 30 seconds before asking for another prompt.' });
+        if ((Number(pd.stkAttempts) || 0) >= 8) return res.status(429).json({ error: 'Too many prompts for this order. Contact customer care.' });
+        const result = await startPayHeroStk(order, (req.body || {}).phoneNumber || pd.mpesaNumber || req.user.phoneNumber);
+        if (!result.ok) return res.status(502).json({ success: false, error: result.error });
+        res.json({ success: true, message: 'STK push prompt sent to your phone.' });
+      } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    });
+
+    // --- PROMO CODES ---
+    expressApp.post('/api/promo/validate', authenticateToken, async (req, res) => {
+      try {
+        const r = await evaluatePromo((req.body || {}).code, req.user.id, Number((req.body || {}).subtotal) || 0);
+        res.json({ valid: r.valid, discount: r.valid ? r.discount : 0, code: r.code || null, message: r.message });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    expressApp.get('/api/admin/promos', authenticateToken, requireAdmin, async (req, res) => {
+      try { res.json(await PromoCode.findAll({ order: [['createdAt', 'DESC']], limit: 200 })); }
+      catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    const savePromo = async (req, res, id) => {
+      try {
+        const b = req.body || {};
+        const code = String(b.code || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 24);
+        const type = b.type === 'fixed' ? 'fixed' : 'percent';
+        const value = Number(b.value);
+        if (code.length < 3) return res.status(400).json({ error: 'The code needs at least 3 letters or numbers.' });
+        if (!Number.isFinite(value) || value <= 0) return res.status(400).json({ error: 'Enter the discount amount.' });
+        if (type === 'percent' && value > 90) return res.status(400).json({ error: 'A percentage discount cannot be more than 90%.' });
+        const data = {
+          code, type, value, description: String(b.description || '').slice(0, 160) || null,
+          minOrder: Math.max(0, Number(b.minOrder) || 0),
+          maxDiscount: b.maxDiscount ? Math.max(0, Number(b.maxDiscount)) : null,
+          maxUses: b.maxUses ? Math.max(1, Math.round(Number(b.maxUses))) : null,
+          perUserOnce: b.perUserOnce !== false,
+          expiresAt: b.expiresAt ? new Date(`${b.expiresAt}T23:59:59+03:00`) : null,
+          isActive: b.isActive !== false
+        };
+        let row;
+        if (id) { row = await PromoCode.findByPk(id); if (!row) return res.status(404).json({ error: 'Promo code not found.' }); await row.update(data); }
+        else {
+          if (await PromoCode.findOne({ where: { code } })) return res.status(409).json({ error: 'That code already exists.' });
+          row = await PromoCode.create(data);
+        }
+        await logEvent({ req, action: id ? 'PROMO_UPDATED' : 'PROMO_CREATED', category: 'admin', summary: `${req.adminUser.fullName} ${id ? 'updated' : 'created'} promo code ${code}` });
+        res.json(row);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    };
+    expressApp.post('/api/admin/promos', authenticateToken, requireAdmin, (req, res) => savePromo(req, res, null));
+    expressApp.put('/api/admin/promos/:id', authenticateToken, requireAdmin, (req, res) => savePromo(req, res, req.params.id));
+    expressApp.delete('/api/admin/promos/:id', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const row = await PromoCode.findByPk(req.params.id);
+        if (!row) return res.status(404).json({ error: 'Promo code not found.' });
+        await row.destroy();
+        await logEvent({ req, action: 'PROMO_DELETED', category: 'admin', severity: 'warn', summary: `${req.adminUser.fullName} deleted promo code ${row.code}` });
+        res.json({ ok: true });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // --- DELIVERY DISPATCH BOARD ---
+    expressApp.get('/api/admin/dispatch', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const orders = await Order.findAll({
+          where: { createdAt: { [Op.gte]: new Date(Date.now() - 60 * 86400000) }, status: { [Op.notIn]: ['cancelled', 'payment_failed'] } },
+          include: [{ model: User, attributes: ['id', 'fullName', 'phoneNumber'] }], order: [['createdAt', 'DESC']], limit: 300
+        });
+        const paid = orders.filter(o => (o.paymentDetails || {}).isPaid === true);
+        const deliveries = paid.length ? await Delivery.findAll({ where: { orderId: paid.map(o => o.id) } }) : [];
+        const dm = {}; deliveries.forEach(d => { dm[d.orderId] = d; });
+        const shape = (o) => ({
+          id: o.id, createdAt: o.createdAt, status: o.status, county: o.county, town: o.town, location: o.location, sublocation: o.sublocation,
+          address: (o.shippingAddress && (o.shippingAddress.streetAddress || o.shippingAddress.details)) || '',
+          kg: Number(o.totalWeightKg) || 0, total: Number(o.grandTotal) || 0,
+          items: getOrderItems(o).map(i => `${i.quantity}x ${i.name || i.brandName}`).join(', '),
+          customer: o.User ? o.User.fullName : '', phone: o.User ? o.User.phoneNumber : '', delivery: dm[o.id] || null
+        });
+        res.json({
+          active: paid.filter(o => o.status !== 'delivered').map(shape),
+          delivered: paid.filter(o => o.status === 'delivered').slice(0, 25).map(shape)
+        });
+      } catch (err) { console.error('❌ Dispatch list error:', err); res.status(500).json({ error: err.message }); }
+    });
+
+    expressApp.put('/api/admin/dispatch/:orderId', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const b = req.body || {};
+        const order = await Order.findByPk(req.params.orderId, { include: [{ model: User, attributes: ['id', 'fullName', 'phoneNumber'] }] });
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+        if ((order.paymentDetails || {}).isPaid !== true) return res.status(400).json({ error: 'Only paid orders can be dispatched.' });
+        const status = ['assigned', 'out_for_delivery', 'delivered', 'failed'].includes(b.status) ? b.status : 'assigned';
+        const riderPhone = b.riderPhone ? normalizeKenyanPhone(b.riderPhone) : null;
+        if (b.riderPhone && !riderPhone) return res.status(400).json({ error: 'The rider phone number is not valid.' });
+        if (status !== 'failed' && !String(b.riderName || '').trim()) return res.status(400).json({ error: 'Enter the rider or driver name.' });
+        let row = await Delivery.findOne({ where: { orderId: order.id } });
+        const before = row ? row.status : null;
+        const data = { riderName: String(b.riderName || '').trim().slice(0, 120), riderPhone, vehicle: String(b.vehicle || '').trim().slice(0, 60) || null, status, note: String(b.note || '').slice(0, 300) || null, assignedBy: req.adminUser.id };
+        if (status === 'out_for_delivery' && before !== 'out_for_delivery') data.dispatchedAt = new Date();
+        if (status === 'delivered' && before !== 'delivered') data.deliveredAt = new Date();
+        row = row ? await row.update(data) : await Delivery.create({ ...data, orderId: order.id });
+        if (status === 'out_for_delivery' && order.status !== 'dispatched') order.status = 'dispatched';
+        if (status === 'delivered') order.status = 'delivered';
+        if (status === 'assigned' && order.status === 'pending') order.status = 'processing';
+        await order.save();
+        let smsNote = null;
+        if (b.notifyCustomer && order.User && status !== before && (status === 'out_for_delivery' || status === 'delivered')) {
+          const text = status === 'out_for_delivery'
+            ? `Mwea Rice Hub: your order #${order.id} is on its way. Rider ${data.riderName}${riderPhone ? ' ' + riderPhone : ''}. Please keep your phone on.`
+            : `Mwea Rice Hub: your order #${order.id} has been delivered. Thank you for shopping with us!`;
+          const sms = await sendSmsRaw(order.User.phoneNumber, text);
+          smsNote = sms.ok ? 'Customer notified by SMS.' : `SMS not sent: ${sms.error}`;
+        }
+        await logEvent({ req, action: 'DELIVERY_UPDATED', category: 'orders', targetType: 'order', targetId: order.id, summary: `${req.adminUser.fullName} set order #${order.id} delivery to "${status}" (rider ${data.riderName || 'none'})` });
+        io.emit('orderStatusUpdated', order);
+        res.json({ delivery: row, smsNote });
+      } catch (err) { console.error('❌ Dispatch update error:', err); res.status(500).json({ error: err.message }); }
+    });
+
+    // --- SMS: which numbers failed in a campaign, and why ---
+    expressApp.get('/api/admin/campaigns/:id/failures', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const ev = await ActivityEvent.findOne({ where: { action: 'CAMPAIGN_FINISHED', targetId: String(req.params.id) }, order: [['createdAt', 'DESC']] });
+        const d = (ev && ev.details) || {};
+        res.json({ failed: Array.isArray(d.failedRecipients) ? d.failedRecipients : [], reasons: d.errors || {}, abortedWhy: d.abortedWhy || null });
+      } catch (err) { res.status(500).json({ error: err.message }); }
     });
 
     // --- USER ORDERS RETRIEVAL ---
@@ -3970,7 +4469,13 @@ async function startServer() {
           where: { userId: req.user.id },
           order: [['createdAt', 'DESC']]
         });
-        res.json(orders);
+        const dels = orders.length ? await Delivery.findAll({ where: { orderId: orders.map(o => o.id) } }) : [];
+        const dmap = {}; dels.forEach(d => { dmap[d.orderId] = d; });
+        res.json(orders.map(o => {
+          const j = o.toJSON();
+          const d = dmap[o.id];
+          return { ...j, delivery: d ? { riderName: d.riderName, riderPhone: d.riderPhone, vehicle: d.vehicle, status: d.status } : null };
+        }));
       } catch (err) { 
         res.status(500).json({ error: err.message }); 
       }
@@ -3993,70 +4498,33 @@ async function startServer() {
       }
     });
 
-    // --- DIRECT M-PESA STK PUSH ROUTE ---
-    // SECURITY: this endpoint used to be open to the internet and trusted the caller's phone number and amount,
-    // so anyone could send M-Pesa prompts to strangers through your PayHero account. Now it needs a login, only
-    // works for the caller's own unpaid order, and always charges the order's real total.
+    // --- M-PESA STK PUSH (retry) ROUTE: logged-in customers only, tied to their own unpaid order ---
     const handleStkPushRequest = async (req, res) => {
       try {
         const { phoneNumber, phone, orderId } = req.body || {};
-        const targetPhone = normalizeKenyanPhone(phoneNumber || phone || req.user.phoneNumber);
-        if (!targetPhone) {
-          return res.status(400).json({ error: 'A valid M-Pesa phone number is required for the STK push.' });
-        }
-        const order = await Order.findByPk(Number(orderId) || -1);
-        const isStaffCaller = req.user && (req.user.role === 'admin' || req.user.role === 'support');
-        if (!order || (order.userId !== req.user.id && !isStaffCaller)) {
-          return res.status(404).json({ error: 'Order not found.' });
-        }
+        if (!orderId) return res.status(400).json({ success: false, error: 'An order is required. Place your order from the cart first.' });
+        const order = await Order.findByPk(orderId);
+        if (!order) return res.status(404).json({ success: false, error: 'Order not found.' });
+        if (order.userId !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ success: false, error: 'Access denied.' });
         const pd = order.paymentDetails || {};
-        if (pd.isPaid === true) return res.status(409).json({ error: 'This order has already been paid.' });
-        if (/cancel/i.test(String(order.status || ''))) return res.status(409).json({ error: 'This order was cancelled.' });
-        const targetAmount = Number(order.grandTotal);
-        if (!Number.isFinite(targetAmount) || targetAmount < 1) return res.status(422).json({ error: 'This order has no payable amount.' });
-        const ref = `ORD-${order.id}`;
-
-        const callbackEndpoint = `${RENDER_BASE_URL}/api/payments/payhero/callback${PAYHERO_CALLBACK_QS}`;
-
-        console.log(`📱 Dispatching PayHero STK Push for Order #${order.id}, Amount: KES ${targetAmount}`);
-
-        const payheroResponse = await axios.post(
-          'https://backend.payhero.co.ke/api/v2/payments',
-          {
-            amount: targetAmount,
-            phone_number: targetPhone,
-            channel_id: PAYHERO_CHANNEL_ID,
-            provider: 'm-pesa',
-            external_reference: ref,
-            callback_url: callbackEndpoint
-          },
-          {
-            headers: {
-              'Authorization': getPayHeroAuthHeader(),
-              'Content-Type': 'application/json'
-            }
-          }
-        );
-
-        res.status(200).json({
-          success: true,
-          message: 'STK push prompt dispatched successfully to handset.',
-          data: payheroResponse.data
-        });
+        if (pd.isPaid === true) return res.status(400).json({ success: false, error: 'This order is already paid.' });
+        if (order.status === 'cancelled') return res.status(400).json({ success: false, error: 'This order expired. Please place a new order.' });
+        const cfg = await getPaymentConfig();
+        if (!cfg.stkEnabled) return res.status(400).json({ success: false, error: 'STK push is switched off right now.' });
+        if (pd.stkSentAt && Date.now() - new Date(pd.stkSentAt).getTime() < 25000) return res.status(429).json({ success: false, error: 'Please wait about 30 seconds before asking for another prompt.' });
+        if ((Number(pd.stkAttempts) || 0) >= 8) return res.status(429).json({ success: false, error: 'Too many prompts for this order. Contact customer care.' });
+        const result = await startPayHeroStk(order, phoneNumber || phone || pd.mpesaNumber || req.user.phoneNumber);
+        if (!result.ok) return res.status(502).json({ success: false, error: result.error });
+        res.status(200).json({ success: true, message: 'STK push prompt dispatched successfully to handset.' });
       } catch (stkError) {
-        console.error('❌ Direct STK Push Processing Failure:', stkError.response ? stkError.response.data : stkError.message);
-        res.status(500).json({
-          success: false,
-          error: 'Failed to dispatch the M-Pesa prompt. Please try again shortly.'
-        });
+        console.error('❌ STK push retry failure:', stkError.message);
+        res.status(500).json({ success: false, error: stkError.message || 'Failed to dispatch M-Pesa STK Push.' });
       }
     };
 
-    // 6 prompts per order per 30 minutes.
-    const stkLimiter = rl({ name: 'stk push', windowMs: 30 * 60 * 1000, max: 6, keyFn: (r) => `stk:${r.user ? r.user.id : r.ip}:${Number(r.body && r.body.orderId) || 0}`, message: 'Too many payment prompts for this order. Please wait a while and try again.' });
-    expressApp.post('/api/payments/stkpush', authenticateToken, stkLimiter, handleStkPushRequest);
-    expressApp.post('/api/payments/stk-push', authenticateToken, stkLimiter, handleStkPushRequest);
-    expressApp.post('/api/payment/stkpush', authenticateToken, stkLimiter, handleStkPushRequest);
+    expressApp.post('/api/payments/stkpush', authenticateToken, handleStkPushRequest);
+    expressApp.post('/api/payments/stk-push', authenticateToken, handleStkPushRequest);
+    expressApp.post('/api/payment/stkpush', authenticateToken, handleStkPushRequest);
 
     // --- CREATE ORDER, CALCULATE WEIGHT/POINTS & TRIGGER PAYHERO STK PUSH ---
     expressApp.post('/api/orders/create', authenticateToken, async (req, res) => {
@@ -4072,25 +4540,27 @@ async function startServer() {
           streetAddress,
           shippingAddress, 
           shippingFee, 
-          grandTotal 
+          grandTotal,
+          promoCode
         } = req.body || {};
         
         if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
           return res.status(400).json({ error: 'Shopping cart items cannot be empty.' });
         }
 
-        if (cartItems.length > 60) {
-          return res.status(400).json({ error: 'Too many different items in one order.' });
-        }
+        // Only the payment methods the shop has switched on can be used
+        const payCfg = await getPaymentConfig();
+        paymentMethod = paymentMethod === 'mpesa_till' ? 'mpesa_till' : 'mpesa_stk';
+        if (paymentMethod === 'mpesa_till' && !payCfg.tillEnabled) return res.status(400).json({ error: 'Till payments are not available right now. Please pay with M-Pesa STK push.' });
+        if (paymentMethod === 'mpesa_stk' && !payCfg.stkEnabled) return res.status(400).json({ error: 'STK push is switched off right now. Please pay with the Till number.' });
+
         // Pre-validate every line BEFORE any stock is deducted, so a failing line cannot leave earlier lines half-processed.
         for (const preItem of cartItems) {
           const preId = preItem.productId || preItem.laptopId || preItem.id;
           const preQty = Number(preItem.quantity);
-          // Whole bags only (a fraction such as 0.001 used to buy goods for almost nothing).
-          if (!Number.isInteger(preQty) || preQty <= 0 || preQty > 1000) {
+          if (!Number.isFinite(preQty) || preQty <= 0) {
             return res.status(400).json({ error: `Invalid quantity supplied for product ID: ${preId}.` });
           }
-          preItem.quantity = preQty;
           const preProduct = await RiceProduct.findByPk(preId);
           if (!preProduct || preProduct.stockQuantity < preQty) {
             return res.status(422).json({ error: `Insufficient stock for product ID: ${preId} (${preProduct ? preProduct.brandName : 'Unknown Item'}).` });
@@ -4119,14 +4589,6 @@ async function startServer() {
         let totalWeightKg = 0;
         const builtOrderLineItems = [];
         const wholesaleTiers = await getWholesaleTiers();
-        // Stock is reserved with an atomic conditional UPDATE, so two simultaneous buyers can never oversell a bag.
-        const reservedLines = [];
-        const stockCol = sequelize.getQueryInterface().queryGenerator.quoteIdentifier('stockQuantity');
-        const releaseReservedStock = async () => {
-          for (const done of reservedLines) {
-            await RiceProduct.update({ stockQuantity: sequelize.literal(`${stockCol} + ${done.qty}`) }, { where: { id: done.id } });
-          }
-        };
 
         for (const item of cartItems) {
           const targetId = item.productId || item.laptopId || item.id;
@@ -4150,16 +4612,8 @@ async function startServer() {
           totalWeightKg += itemKg;
 
           calculatedSubtotal += (purchasePrice * item.quantity);
-          const [reservedRows] = await RiceProduct.update(
-            { stockQuantity: sequelize.literal(`${stockCol} - ${Number(item.quantity)}`) },
-            { where: { id: product.id, stockQuantity: { [Op.gte]: item.quantity } } }
-          );
-          if (!reservedRows) {
-            await releaseReservedStock();
-            return res.status(422).json({ error: `Insufficient stock for product ID: ${targetId} (${product.brandName}).` });
-          }
-          reservedLines.push({ id: product.id, qty: Number(item.quantity) });
-          product.stockQuantity -= item.quantity; // in-memory only: used by the notifications below
+          product.stockQuantity -= item.quantity; 
+          await product.save();
 
           builtOrderLineItems.push({ 
             productId: product.id, 
@@ -4181,15 +4635,29 @@ async function startServer() {
           }
         }
 
-        // SECURITY: the delivery fee is decided by the server only. It used to fall back to a client-sent
-        // shippingFee, so a customer could send 0 or a negative number and shrink their own bill.
-        let activeTransportCharge = 250;
-        const cfgFee = await SystemConfig.findOne({ where: { key: 'transport_fee' } });
-        if (cfgFee && Number.isFinite(Number(cfgFee.value))) activeTransportCharge = Number(cfgFee.value);
+        // Promo code: checked on the server against the real subtotal. If it fails, the stock taken above is put back.
+        let promoApplied = null;
+        let discountAmount = 0;
+        if (promoCode && String(promoCode).trim()) {
+          const pr = await evaluatePromo(promoCode, req.user.id, calculatedSubtotal);
+          if (!pr.valid) {
+            for (const line of builtOrderLineItems) {
+              const p = await RiceProduct.findByPk(line.productId);
+              if (p) { p.stockQuantity += Number(line.quantity) || 0; await p.save(); io.emit('stockUpdated', { productId: p.id, newStockQuantity: p.stockQuantity }); }
+            }
+            return res.status(400).json({ error: pr.message });
+          }
+          discountAmount = pr.discount;
+          promoApplied = { code: pr.code, discount: pr.discount, gross: calculatedSubtotal };
+          pr.promo.usedCount = Number(pr.promo.usedCount || 0) + 1;
+          await pr.promo.save();
+        }
+        const netSubtotal = round2(calculatedSubtotal - discountAmount);
+
+        let activeTransportCharge = shippingFee !== undefined ? Number(shippingFee) : 250;
         if (county && activeCountyMap && activeCountyMap[county] !== undefined) {
           activeTransportCharge = Number(activeCountyMap[county]);
         }
-        if (!Number.isFinite(activeTransportCharge) || activeTransportCharge < 0) activeTransportCharge = 250;
 
         const fullDeliveryAddress = {
           county: county || 'Not Specified',
@@ -4200,37 +4668,24 @@ async function startServer() {
           details: shippingAddress || `${streetAddress || ''}, ${sublocation || ''}, ${location || ''}, ${town || ''}, ${county || ''}`
         };
 
-        // Optional coupon (validated and reserved on the server; the client only sends the code).
-        let couponDiscount = 0;
-        let appliedCoupon = null;
-        if (req.body && req.body.couponCode) {
-          const couponResult = await evaluateCoupon(req.body.couponCode, calculatedSubtotal, req.user.id);
-          if (!couponResult.ok || !(await reserveCoupon(couponResult.coupon))) {
-            await releaseReservedStock();
-            return res.status(422).json({ error: couponResult.ok ? 'This coupon has just been fully redeemed.' : couponResult.error });
-          }
-          appliedCoupon = couponResult.coupon;
-          couponDiscount = couponResult.discount;
-        }
-        const discountedSubtotal = calculatedSubtotal - couponDiscount;
-        const finalOrderTotal = Number((discountedSubtotal + activeTransportCharge).toFixed(2)); // always computed server-side
+        const finalOrderTotal = Number((netSubtotal + activeTransportCharge).toFixed(2)); // always computed server-side
         const earnedPoints = Number((totalWeightKg * 0.2).toFixed(2));
 
         const generatedOrder = await Order.create({
           userId: req.user.id,
           items: builtOrderLineItems,
           transportFee: activeTransportCharge,
-          subTotal: discountedSubtotal,
+          subTotal: netSubtotal,
           grandTotal: finalOrderTotal,
           totalWeightKg: totalWeightKg,
           pointsEarned: earnedPoints,
           paymentDetails: { 
             method: paymentMethod || 'mpesa_stk', 
+            promo: promoApplied,
+            ...(paymentMethod === 'mpesa_till' ? { tillNumber: payCfg.tillNumber, tillName: payCfg.tillName } : {}),
             isPaid: false,
             paidTag: 'PENDING',
             mpesaNumber: mpesaPhoneNumber || null,
-            couponCode: appliedCoupon ? appliedCoupon.code : null,
-            discount: couponDiscount,
             amount: finalOrderTotal,
             paidAt: null,
             mpesaReceipt: null,
@@ -4246,7 +4701,6 @@ async function startServer() {
 
         // Clear user shopping cart after successful order creation
         await Cart.destroy({ where: { userId: req.user.id } });
-        if (appliedCoupon) await recordRedemption({ coupon: appliedCoupon, userId: req.user.id, orderId: generatedOrder.id, amount: couponDiscount });
 
         // Referral code typed at checkout (only links customers that do not already belong to an agent)
         let referralResult = { attached: false };
@@ -4260,43 +4714,25 @@ async function startServer() {
 
         if (paymentMethod === 'mpesa_stk') {
           const targetPhone = mpesaPhoneNumber || req.user.phoneNumber;
-          const callbackEndpoint = `${RENDER_BASE_URL}/api/payments/payhero/callback${PAYHERO_CALLBACK_QS}`;
-
-          try {
-            console.log(`📱 Triggering PayHero STK Push for Order #${generatedOrder.id} to ${targetPhone}...`);
-            
-            const payheroResponse = await axios.post(
-              'https://backend.payhero.co.ke/api/v2/payments',
-              {
-                amount: finalOrderTotal,
-                phone_number: targetPhone,
-                channel_id: PAYHERO_CHANNEL_ID,
-                provider: 'm-pesa',
-                external_reference: `ORD-${generatedOrder.id}`,
-                callback_url: callbackEndpoint
-              },
-              {
-                headers: {
-                  'Authorization': getPayHeroAuthHeader(),
-                  'Content-Type': 'application/json'
-                }
-              }
-            );
-
+          console.log(`📱 Triggering PayHero STK Push for Order #${generatedOrder.id} to ${targetPhone}...`);
+          const sent = await startPayHeroStk(generatedOrder, targetPhone);
+          if (sent.ok) {
             stkInitiated = true;
             stkMessage = 'STK Push payment prompt sent to handset successfully.';
-            console.log(`✅ PayHero Response for Order #${generatedOrder.id}:`, payheroResponse.data);
-          } catch (stkError) {
-            stkMessage = 'Failed to trigger M-Pesa prompt automatically. You can retry from your order dashboard.';
-            console.error(`❌ PayHero STK Push Error for Order #${generatedOrder.id}:`, stkError.response ? stkError.response.data : stkError.message);
+          } else {
+            stkMessage = `Failed to trigger the M-Pesa prompt automatically (${sent.error}). You can retry from your order dashboard.`;
+            console.error(`❌ PayHero STK Push Error for Order #${generatedOrder.id}:`, sent.error);
           }
+        } else {
+          stkMessage = `Pay KES ${Math.ceil(finalOrderTotal)} to Till ${payCfg.tillNumber}${payCfg.tillName ? ' (' + payCfg.tillName + ')' : ''}, then enter the M-Pesa code from your SMS.`;
         }
 
         io.to('admin-dashboard-room').emit('newOrderAlert', generatedOrder);
         res.status(201).json({
           ...generatedOrder.toJSON(),
           stkPromptSent: stkInitiated,
-          stkStatusMessage: stkMessage
+          stkStatusMessage: stkMessage,
+          till: paymentMethod === 'mpesa_till' ? { number: payCfg.tillNumber, name: payCfg.tillName } : null
         });
 
       } catch (err) { 
@@ -4305,64 +4741,49 @@ async function startServer() {
       }
     });
 
-    // --- PAYHERO PAYMENT STATUS POLLING API ---
+    // --- PAYMENT STATUS POLLING API (STK: asks PayHero; Till: reports where the code is) ---
     const handlePayHeroStatusCheck = async (req, res) => {
       try {
         const order = await Order.findByPk(req.params.orderId);
         if (!order) return res.status(404).json({ error: 'Order not found.' });
+        if (order.userId !== req.user.id && !['admin', 'support'].includes(req.user.role)) return res.status(403).json({ error: 'Access denied.' });
 
-        const ref = `ORD-${order.id}`;
-        let heroStatusData = null;
-        let failureReason = null;
-        let isSuccess = false;
-        let receiptFromHero = null;
-
-        try {
-          const response = await axios.get(
-            `https://backend.payhero.co.ke/api/v2/payments?external_reference=${ref}`,
-            { headers: { 'Authorization': getPayHeroAuthHeader() } }
-          );
-          heroStatusData = response.data;
-          
-          const paymentObj = Array.isArray(heroStatusData) ? heroStatusData[0] : (heroStatusData.response || heroStatusData);
-          if (paymentObj) {
-            const rawStatus = String(paymentObj.status || paymentObj.Status || '').toUpperCase();
-            if (rawStatus === 'SUCCESS' || rawStatus === 'PAID') {
-              isSuccess = true;
-              receiptFromHero = paymentObj.provider_reference || paymentObj.mpesa_receipt_number || paymentObj.MpesaReceiptNumber || paymentObj.receipt_number || null;
-            } else if (rawStatus === 'FAILED' || rawStatus === 'CANCELLED' || rawStatus === 'REJECTED') {
-              failureReason = paymentObj.failure_reason || paymentObj.message || paymentObj.ResultDesc || 'Payment failed or was cancelled by user.';
+        let live = null;
+        if ((order.paymentDetails || {}).isPaid !== true && (order.paymentDetails || {}).method !== 'mpesa_till') {
+          const sync = await syncPayHeroPayment(order, 'payment status check');
+          live = sync.live || null;
+          if (live && live.reachable && ['FAILED', 'CANCELLED', 'REJECTED'].includes(live.status)) {
+            const fresh = await Order.findByPk(order.id);
+            const fpd = fresh.paymentDetails || {};
+            if (fpd.isPaid !== true) {
+              const reason = live.failureReason || 'Payment failed or was cancelled by user.';
+              fresh.paymentDetails = { ...fpd, isPaid: false, paidTag: 'FAILED', failureReason: reason };
+              fresh.status = 'payment_failed';
+              await fresh.save();
+              await logEvent({ action: 'PAYMENT_FAILED', category: 'orders', severity: 'warn', targetType: 'order', targetId: fresh.id,
+                summary: `Payment failed for order #${fresh.id}: ${reason}`, details: { userId: fresh.userId } });
+              io.emit('orderStatusUpdated', fresh);
             }
           }
-        } catch (apiErr) {
-          console.warn(`PayHero live status poll warning for Order #${order.id}:`, apiErr.message);
-        }
-
-        if (isSuccess && !order.paymentDetails?.isPaid) {
-          await confirmOrderPaid(order, 'payment status check', receiptFromHero);
-        } else if (failureReason) {
-          order.paymentDetails = {
-            ...order.paymentDetails,
-            isPaid: false,
-            paidTag: 'FAILED',
-            failureReason: failureReason
-          };
-          order.status = 'payment_failed';
-          await order.save();
-          await logEvent({ action: 'PAYMENT_FAILED', category: 'orders', severity: 'warn', targetType: 'order', targetId: order.id,
-            summary: `Payment failed for order #${order.id}: ${failureReason}`, details: { userId: order.userId } });
-          io.emit('orderStatusUpdated', order);
         }
 
         const shown = (await Order.findByPk(order.id)) || order;
+        const spd = shown.paymentDetails || {};
+        let tillStatus = null;
+        if (spd.method === 'mpesa_till') {
+          const rec = await TillPayment.findOne({ where: { orderId: shown.id }, order: [['updatedAt', 'DESC']] });
+          tillStatus = rec ? { status: rec.status, code: rec.mpesaCode, amount: rec.amount ? Number(rec.amount) : null } : null;
+        }
         res.json({
           orderId: shown.id,
           status: shown.status,
-          paymentStatus: shown.paymentDetails?.paidTag || (shown.paymentDetails?.isPaid ? 'PAID' : 'PENDING'),
-          paymentDetails: shown.paymentDetails,
+          method: spd.method || 'mpesa_stk',
+          paymentStatus: spd.paidTag || (spd.isPaid ? 'PAID' : 'PENDING'),
+          paymentDetails: spd,
+          tillStatus,
           totalWeightKg: shown.totalWeightKg || 0,
           pointsEarned: shown.pointsEarned || 0,
-          heroData: heroStatusData
+          heroData: live ? { status: live.status, mpesa_code: live.receipt || null } : null
         });
       } catch (err) {
         res.status(500).json({ error: err.message });
@@ -4375,15 +4796,7 @@ async function startServer() {
     // --- PAYHERO PAYMENT WEBHOOK CALLBACK RECEIVER ---
     expressApp.post('/api/payments/payhero/callback', async (req, res) => {
       try {
-        if (PAYHERO_CALLBACK_SECRET) {
-          const given = Buffer.from(String(req.query.s || ''));
-          const want = Buffer.from(PAYHERO_CALLBACK_SECRET);
-          if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) {
-            logEvent({ req, actor: { id: null, role: 'anonymous', name: null }, action: 'PAYMENT_CALLBACK_REJECTED', category: 'orders', severity: 'alert', summary: 'A payment callback without the correct secret was rejected' });
-            return res.status(401).json({ error: 'Unauthorized.' });
-          }
-        }
-        console.log('🔔 PayHero Callback received for', String((req.body && (req.body.external_reference || (req.body.response && req.body.response.external_reference))) || 'unknown'));
+        console.log('🔔 PayHero Callback Notification Received:', JSON.stringify(req.body, null, 2));
 
         const body = req.body || {};
         const responseObj = body.response || body;
@@ -4402,7 +4815,16 @@ async function startServer() {
 
             // A callback is just a web request anyone could forge, so confirm the payment with PayHero before crediting anything.
             if (isPaymentSuccessful && existingPaymentDetails.isPaid !== true) {
-              const reallyPaid = await verifyPayHeroPayment(order.id);
+              const liveCb = await lookupPayHeroStatus(order.id);
+              const cbAmount = responseObj.Amount !== undefined ? responseObj.Amount : (responseObj.amount !== undefined ? responseObj.amount : null);
+              if (cbAmount !== null && Number(cbAmount) + 1 < Number(order.grandTotal)) {
+                await logEvent({ action: 'PAYMENT_AMOUNT_MISMATCH', category: 'orders', severity: 'alert', targetType: 'order', targetId: order.id,
+                  summary: `Callback for order #${order.id} reported KES ${cbAmount}, less than the order total KES ${order.grandTotal}. Not marked paid.` });
+                return res.status(200).json({ status: 'PENDING_VERIFICATION', message: 'Amount does not match the order.' });
+              }
+              const signedOk = String(req.query.k || '') === callbackSignature(order.id);
+              // PayHero confirms it, or (PayHero unreachable) the callback carries our own signature
+              const reallyPaid = (liveCb.reachable && (liveCb.status === 'SUCCESS' || liveCb.status === 'PAID')) || (!liveCb.reachable && signedOk);
               if (!reallyPaid) {
                 await logEvent({ action: 'PAYMENT_CALLBACK_UNVERIFIED', category: 'orders', severity: 'alert', targetType: 'order', targetId: order.id,
                   summary: `Callback claimed order #${order.id} was paid but PayHero could not confirm it`, details: { receipt: mpesaReceipt } });
@@ -4681,7 +5103,6 @@ async function startServer() {
     expressApp.post('/api/admin/upload', authenticateToken, requireAdmin, upload.single('image'), async (req, res) => {
       try {
         if (!req.file) return res.status(400).json({ error: 'No file buffered to stream.' });
-        if (!verifyUploadedImage(req.file)) return res.status(400).json({ error: 'That file is not a valid JPEG, PNG, WEBP or GIF image.' });
         const fileUrl = await persistUploadedFile(req.file);
         res.json({ url: fileUrl, imageUrl: fileUrl });
       } catch (err) { 
@@ -5544,7 +5965,7 @@ async function startServer() {
     // ==========================================================================
     const issueLoginResponse = async (user) => {
       const role = await effectiveRoleFor(user);
-      const token = signSessionToken({ id: user.id, role, pv: pwVersion(user) });
+      const token = issueSessionToken(user.id, role);
       return { token, user: { id: user.id, fullName: user.fullName, role, phoneNumber: user.phoneNumber, email: user.email, rewardPoints: user.rewardPoints || 0 } };
     };
 
@@ -6009,7 +6430,7 @@ async function startServer() {
         const header = req.headers['authorization'] || '';
         const token = header.startsWith('Bearer ') ? header.slice(7) : null;
         if (!token) return null;
-        return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }).id || null;
+        return jwt.verify(token, JWT_SECRET).id || null;
       } catch (_) { return null; }
     };
     const userBoughtProduct = async (userId, productId) => {
@@ -6157,7 +6578,7 @@ async function startServer() {
         if (f.boughtProductIds.length && !f.boughtProductIds.some(id => a.products.has(id))) continue;
         if (f.referredOnly && !referred.has(u.id)) continue;
         const phone = normalizeKenyanPhone(u.phoneNumber);
-        if (!phone) { noPhone += 1; continue; }
+        if (!phone || !isRoutableKenyanMobile(phone)) { noPhone += 1; continue; }
         if (optedOut.has(u.id)) { optedOutCount += 1; continue; }
         recipients.push({ id: u.id, name: u.fullName, phone });
       }
@@ -6207,6 +6628,7 @@ async function startServer() {
         (async () => {
           let sent = 0, failed = 0, i = 0, consecutiveFails = 0, abortedWhy = null;
           const errorCounts = {};
+          const failedRecipients = [];
           try {
             for (const r of aud.recipients) {
               i += 1;
@@ -6218,7 +6640,8 @@ async function startServer() {
               else {
                 failed += 1; consecutiveFails += 1;
                 const why = String(result.error || 'unknown error'); errorCounts[why] = (errorCounts[why] || 0) + 1;
-                if (sent === 0 && consecutiveFails >= 5) { abortedWhy = `Stopped after 5 failures in a row: ${why}`; failed += aud.recipients.length - i; break; }
+                if (failedRecipients.length < 200) failedRecipients.push({ userId: r.id, name: r.name, phone: maskPhone(r.phone), reason: why, kind: result.kind || 'other' });
+                if (sent === 0 && consecutiveFails >= 5 && result.kind !== 'bad_number') { abortedWhy = `Stopped after 5 failures in a row: ${why}`; failed += aud.recipients.length - i; break; }
               }
               if (i % 10 === 0) await Campaign.update({ sentCount: sent, failedCount: failed }, { where: { id: campaign.id } });
               if (!result.ok && /credit|balance|insufficient|unauthor/i.test(String(result.error))) { failed += aud.recipients.length - i; break; }
@@ -6227,7 +6650,7 @@ async function startServer() {
             const done = await Campaign.findByPk(campaign.id);
             await Campaign.update({ sentCount: sent, failedCount: failed, status: done && done.status === 'stopped' ? 'stopped' : (sent === 0 ? 'failed' : 'sent'), finishedAt: new Date() }, { where: { id: campaign.id } });
             await logEvent({ actor: { id: req.adminUser.id, role: 'admin', name: req.adminUser.fullName }, action: 'CAMPAIGN_FINISHED', category: 'admin', severity: failed ? 'warn' : 'info', targetType: 'campaign', targetId: campaign.id,
-              summary: `Campaign "${name}" finished: ${sent} sent, ${failed} failed${abortedWhy ? '. ' + abortedWhy : ''}`, details: { sent, failed, errors: errorCounts, abortedWhy } });
+              summary: `Campaign "${name}" finished: ${sent} sent, ${failed} failed${abortedWhy ? '. ' + abortedWhy : ''}`, details: { sent, failed, errors: errorCounts, abortedWhy, failedRecipients } });
           } catch (e) {
             console.error('❌ Campaign run error:', e);
             await Campaign.update({ sentCount: sent, failedCount: failed, status: 'failed', finishedAt: new Date() }, { where: { id: campaign.id } });
@@ -6542,37 +6965,6 @@ async function startServer() {
          * 8. SYSTEM BOOTSTRAP & PORT LISTENER
          * ==========================================
          */
-        registerPremiumRoutes({
-          expressApp, Op, authenticateToken, requireAdmin, makeRateLimiter, logEvent,
-          normalizeKenyanPhone, Order, User, RiceProduct, isProduction
-        });
-
-        // USSD webhook: POST /api/ussd/<USSD_WEBHOOK_SECRET>
-        registerUssdRoutes({
-          expressApp, models: ussdModels, axios, jwt, JWT_SECRET, pwVersion, bcrypt, logEvent,
-          normalizeKenyanPhone, Order, sendSmsRaw, isProduction,
-          sendOtpEmail: (toEmail, toName, code) => transporter.sendMail({
-            from: `"${SENDER_NAME}" <${EMAIL_FROM}>`,
-            to: toEmail,
-            subject: '🔐 Your USSD PIN reset code - Mwea Rice Hub',
-            html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:24px"><h2 style="color:#064e3b">USSD PIN reset</h2><p>Hello ${String(toName || '').replace(/[<>&"']/g, '')},</p><p>Use this 6-digit code on your phone to set a new USSD PIN. It expires in 10 minutes.</p><p style="font-size:32px;letter-spacing:6px;font-weight:bold;color:#047857">${code}</p><p style="color:#64748b;font-size:12px">If you did not ask for this, ignore this email. Nobody can change your PIN without this code.</p></div>`
-          }),
-          findUserByPhone: async (phone) => {
-            const u = await User.findOne({ where: { [Op.or]: identityConditions(phone) } });
-            if (u) u.staffRole = await effectiveRoleFor(u); // admin / support accounts are refused on USSD
-            return u;
-          },
-          createUser: async ({ phone, fullName }) => User.create({
-            phoneNumber: phone,
-            email: null,
-            // Random password: the USSD PIN is NOT a web password. The customer can set a web password with "Forgot password".
-            password: await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 10),
-            fullName,
-            isVerified: true, // the phone number was verified by the mobile network
-            isActive: true
-          })
-        });
-
         // JSON error handler (also catches multer upload errors such as wrong file type / file too large)
         expressApp.use((err, req, res, next) => {
           if (res.headersSent) return next(err);
