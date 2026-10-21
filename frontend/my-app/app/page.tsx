@@ -164,6 +164,7 @@ export interface CartItem {
   productId: number;
   quantity: number;
   product: Product;
+  bulk?: boolean;
 }
 
 export interface ToastMessage {
@@ -1596,7 +1597,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
               {(product.ratingCount || 0) > 0 ? (
                 <><StarRating value={product.ratingAvg || 0} size={12} /><span className="font-bold text-slate-700">{(product.ratingAvg || 0).toFixed(1)}</span><span className="text-slate-400">({product.ratingCount})</span></>
               ) : (
-                <span className="text-slate-400">No reviews yet</span>
+                <span className="px-1.5 py-0.5 rounded-full bg-sky-50 text-sky-700 font-bold text-[10px]">New · Be the first to review</span>
               )}
             </button>
           )}
@@ -2495,6 +2496,138 @@ function ReviewsModal({ product, token, user, onClose, showToast, onChanged }: {
             ))}
             {data && data.pages > 1 && <div className="flex justify-between text-xs"><button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1.5 rounded-lg bg-slate-100 disabled:opacity-40 cursor-pointer">Newer</button><button disabled={page >= data.pages} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 rounded-lg bg-slate-100 disabled:opacity-40 cursor-pointer">Older</button></div>}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// BULK RICE ORDER TAB — customer enters how many kg they need of a given
+// variety; price is the normal per-kg price, with the admin's bulk % off
+// applied once the order clears the admin-set kg threshold. Uses the exact
+// same cart → checkout → payment flow as a normal purchase.
+// ============================================================================
+interface BulkQuote {
+  productId: number; brandName: string; variety?: string; weightKg: number;
+  requestedKg: number; sacks: number; actualKg: number; pricePerKg: number;
+  grossTotal: number; discountPercent: number; discountAmount: number; netTotal: number;
+  qualifies: boolean; minKgForDiscount: number; inStock: boolean; stockQuantity: number;
+}
+
+function BulkOrderView({ products, addToCart, setView, showToast }: {
+  products: Product[];
+  addToCart: (product: Product, qty?: number, bulk?: boolean) => void;
+  setView: (v: any) => void;
+  showToast: ToastFn;
+}) {
+  const [productId, setProductId] = useState<number | ''>('');
+  const [kg, setKg] = useState<string>('');
+  const [quote, setQuote] = useState<BulkQuote | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [bulkCfg, setBulkCfg] = useState<{ enabled: boolean; minKg: number; discountPercent: number } | null>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/config/bulk-discount`).then(r => r.json()).then(setBulkCfg).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!productId || !kg || Number(kg) <= 0) { setQuote(null); return; }
+    const t = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`${API_BASE_URL}/bulk/quote?productId=${productId}&kg=${Number(kg)}`);
+        const data = await res.json();
+        if (res.ok) setQuote(data); else { setQuote(null); showToast(data.error || 'Could not calculate that quote.', 'error'); }
+      } catch (_) { setQuote(null); } finally { setLoading(false); }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [productId, kg]);
+
+  const selectedProduct = products.find(p => p.id === productId) || null;
+
+  const handleAddBulkToCart = () => {
+    if (!selectedProduct || !quote) return;
+    if (!quote.inStock) { showToast('Not enough stock for that many bags right now.', 'error'); return; }
+    addToCart(selectedProduct, quote.sacks, true);
+    setView('cart');
+  };
+
+  return (
+    <div className="container mx-auto px-4 py-8 space-y-8">
+      <div className="space-y-1">
+        <h2 className="text-2xl sm:text-3xl font-black text-slate-900 flex items-center gap-2"><Layers className="w-7 h-7 text-emerald-600" /> Bulk Rice Order</h2>
+        <p className="text-slate-500 text-xs sm:text-sm">
+          Tell us how many kilograms you need and we'll work out the nearest sack count at our normal price.
+          {bulkCfg?.enabled ? ` Orders of ${bulkCfg.minKg}kg or more of one rice type get ${bulkCfg.discountPercent}% off automatically.` : ' Bulk discount pricing is currently off — you still get the normal price.'}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white rounded-3xl p-6 shadow-sm border border-emerald-100 space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Rice Type</label>
+            <select
+              value={productId}
+              onChange={(e) => setProductId(e.target.value ? Number(e.target.value) : '')}
+              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold bg-white cursor-pointer focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="">Choose a rice type…</option>
+              {products.map(p => (
+                <option key={p.id} value={p.id}>{p.brandName} {p.variety ? `— ${p.variety}` : ''} ({p.weightKg}kg sacks)</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">How many kilograms do you need?</label>
+            <input
+              type="number"
+              min={1}
+              inputMode="numeric"
+              value={kg}
+              onChange={(e) => setKg(e.target.value)}
+              placeholder="e.g. 100"
+              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-extrabold focus:ring-2 focus:ring-emerald-500"
+            />
+            {selectedProduct && <p className="text-[11px] text-slate-400 mt-1">Sold in {selectedProduct.weightKg}kg sacks — we'll round up to the nearest whole sack.</p>}
+          </div>
+
+          <button
+            onClick={handleAddBulkToCart}
+            disabled={!quote || loading || !quote.inStock}
+            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-sm shadow-lg shadow-emerald-600/20 disabled:opacity-40 flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <ShoppingCart className="w-4 h-4" /> Add Bulk Order To Cart
+          </button>
+        </div>
+
+        <div className="bg-slate-950 rounded-3xl p-6 text-white space-y-3">
+          <h3 className="font-black text-sm flex items-center gap-2"><Percent className="w-4 h-4 text-emerald-400" /> Your Quote</h3>
+          {!productId || !kg ? (
+            <p className="text-xs text-slate-400 py-8 text-center">Choose a rice type and enter the kilograms you need to see your price.</p>
+          ) : loading ? (
+            <p className="text-xs text-slate-400 py-8 text-center flex items-center justify-center gap-2"><RefreshCw className="w-4 h-4 animate-spin" /> Calculating…</p>
+          ) : quote ? (
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between text-slate-400"><span>Sacks needed:</span><span className="font-bold text-white">{quote.sacks} × {quote.weightKg}kg</span></div>
+              <div className="flex justify-between text-slate-400"><span>Total weight:</span><span className="font-bold text-white">{quote.actualKg}kg</span></div>
+              <div className="flex justify-between text-slate-400"><span>Price per kg:</span><span className="font-bold text-white">{formatKES(quote.pricePerKg)}</span></div>
+              <div className="flex justify-between text-slate-400"><span>Subtotal:</span><span className="font-bold text-white">{formatKES(quote.grossTotal)}</span></div>
+              {quote.qualifies ? (
+                <div className="flex justify-between text-emerald-400 font-bold"><span>Bulk discount ({quote.discountPercent}%):</span><span>-{formatKES(quote.discountAmount)}</span></div>
+              ) : bulkCfg?.enabled ? (
+                <p className="text-[11px] text-amber-400">Add {Math.max(0, bulkCfg.minKg - quote.actualKg)}kg more to unlock {bulkCfg.discountPercent}% off.</p>
+              ) : null}
+              <div className="border-t border-slate-800 pt-2 flex justify-between text-base font-black">
+                <span>Total:</span><span className="text-emerald-400">{formatKES(quote.netTotal)}</span>
+              </div>
+              {!quote.inStock && <p className="text-[11px] text-rose-400 font-bold">Only {quote.stockQuantity} sacks in stock — reduce the kg or pick another rice type.</p>}
+              <p className="text-[10px] text-slate-500 pt-2">Checkout, delivery and M-Pesa payment work exactly the same as a normal order — this just adds a discounted bulk line to your cart.</p>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400 py-8 text-center">No quote yet.</p>
+          )}
         </div>
       </div>
     </div>
@@ -3950,6 +4083,137 @@ function AdminPaymentsPanel({ token, showToast }: { token: string | null; showTo
 }
 
 // ---------------------------------------------------------------------------
+// AI SHOPPING ASSISTANT — floating chat, backed by /api/chat on the server,
+// which feeds the live product catalog, prices and (if signed in) the
+// customer's own recent orders to the model. See server.js for the prompt.
+// ---------------------------------------------------------------------------
+interface ChatMsg { role: 'user' | 'assistant'; content: string; }
+
+function ShoppingAssistantWidget({ token, user }: { token: string | null; user: UserAccount | null }) {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState<ChatMsg[]>([
+    { role: 'assistant', content: "Hi! I'm the Mwea Rice Hub assistant. Ask me about rice types, prices, bulk orders, delivery fees or your order status." }
+  ]);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, open]);
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+    const nextMessages = [...messages, { role: 'user' as const, content: text }];
+    setMessages(nextMessages);
+    setInput('');
+    setSending(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ message: text, history: nextMessages.slice(-10) })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.reply) {
+        setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', content: data.error || "Sorry, I'm having trouble replying right now — please try again shortly, or reach customer care directly." }]);
+      }
+    } catch (_) {
+      setMessages(prev => [...prev, { role: 'assistant', content: "I couldn't reach the server. Please check your connection and try again." }]);
+    } finally { setSending(false); }
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="fixed z-[70] bottom-20 md:bottom-6 right-4 md:right-6 w-14 h-14 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-600 text-white shadow-2xl shadow-emerald-700/40 flex items-center justify-center cursor-pointer hover:scale-105 transition-transform"
+        aria-label="Chat with the shopping assistant"
+      >
+        {open ? <X className="w-6 h-6" /> : <MessageSquare className="w-6 h-6" />}
+      </button>
+
+      {open && (
+        <div className="fixed z-[70] bottom-36 md:bottom-24 right-4 md:right-6 w-[calc(100vw-2rem)] sm:w-96 max-w-sm h-[28rem] bg-white rounded-3xl shadow-2xl border border-emerald-100 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4">
+          <div className="px-4 py-3 bg-gradient-to-r from-emerald-700 to-teal-700 text-white flex items-center gap-2">
+            <Leaf className="w-4 h-4" />
+            <div className="min-w-0"><p className="text-xs font-black leading-tight">Rice Hub Assistant</p><p className="text-[10px] text-emerald-100">Products, prices & your orders</p></div>
+          </div>
+          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2 bg-slate-50">
+            {messages.map((m, i) => (
+              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-[12px] leading-relaxed whitespace-pre-wrap ${m.role === 'user' ? 'bg-emerald-600 text-white rounded-br-sm' : 'bg-white text-slate-800 border border-slate-100 rounded-bl-sm'}`}>
+                  {m.content}
+                </div>
+              </div>
+            ))}
+            {sending && <div className="flex justify-start"><div className="px-3 py-2 rounded-2xl bg-white border border-slate-100 text-[11px] text-slate-400 flex items-center gap-1.5"><RefreshCw className="w-3 h-3 animate-spin" /> Typing…</div></div>}
+            <div ref={bottomRef} />
+          </div>
+          <div className="p-2.5 border-t border-slate-100 flex gap-2">
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+              placeholder={user ? 'Ask about rice, prices, your orders…' : 'Ask about rice, prices, delivery…'}
+              className="flex-1 min-w-0 px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-emerald-500"
+            />
+            <button onClick={send} disabled={sending || !input.trim()} className="px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white cursor-pointer" aria-label="Send">
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BULK RICE PRICING — admin sets the % off and the minimum kg to qualify
+// ---------------------------------------------------------------------------
+function AdminBulkPricingPanel({ token, showToast }: { token: string | null; showToast: ToastFn }) {
+  const [form, setForm] = useState({ enabled: true, minKg: '50', discountPercent: '10' });
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/config/bulk-discount`);
+      const d = await res.json();
+      setForm({ enabled: d.enabled !== false, minKg: String(d.minKg ?? 50), discountPercent: String(d.discountPercent ?? 10) });
+    } catch (_) { /* ignore */ } finally { setLoaded(true); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await staffApi('/admin/config/bulk-discount', token, { method: 'PUT', body: { enabled: form.enabled, minKg: Number(form.minKg), discountPercent: Number(form.discountPercent) } });
+      showToast('Bulk pricing settings saved.', 'success');
+    } catch (err: any) { showToast(err.message, 'error'); } finally { setSaving(false); }
+  };
+
+  if (!loaded) return <div className={`${cardCls} p-8 text-center text-xs text-slate-400`}>Loading bulk pricing…</div>;
+
+  return (
+    <div className={`${cardCls} p-4 sm:p-6 space-y-4`}>
+      <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2"><Layers className="w-5 h-5 text-emerald-400" /> Bulk Order pricing</h3>
+      <p className="text-[11px] text-slate-500">Controls the &quot;Bulk Order&quot; tab customers use: they pick a rice type and enter the kilograms they need at your normal per-kg price, and this discount applies automatically once they clear the minimum.</p>
+      <label className="flex items-start gap-3 p-3 rounded-2xl bg-slate-950 border border-slate-800 cursor-pointer">
+        <input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} className="mt-1 w-5 h-5 accent-emerald-500" />
+        <span><span className="block text-xs font-extrabold text-white">Bulk discount switched on</span><span className="block text-[11px] text-slate-500">When off, bulk orders still work but at the normal price — no discount.</span></span>
+      </label>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div><label className={labelCls}>Minimum kg to qualify</label><input inputMode="numeric" value={form.minKg} onChange={(e) => setForm({ ...form, minKg: e.target.value.replace(/\D/g, '') })} placeholder="50" className={inputCls} /></div>
+        <div><label className={labelCls}>Discount percentage</label><input inputMode="decimal" value={form.discountPercent} onChange={(e) => setForm({ ...form, discountPercent: e.target.value.replace(/[^0-9.]/g, '') })} placeholder="10" className={inputCls} /></div>
+      </div>
+      <button onClick={save} disabled={saving} className="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-extrabold cursor-pointer">{saving ? 'Saving…' : 'Save bulk pricing'}</button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // PROMO CODES
 // ---------------------------------------------------------------------------
 function AdminPromosPanel({ token, showToast }: { token: string | null; showToast: ToastFn }) {
@@ -4161,7 +4425,7 @@ const ADMIN_TABS: AdminTabDef[] = [
 
 export default function PremiumRiceStore() {
   // ROUTING & VIEW STATES
-  const [view, setView] = useState<'home' | 'shop' | 'cart' | 'login' | 'admin' | 'profile' | 'agent' | 'support'>('home');
+  const [view, setView] = useState<'home' | 'shop' | 'bulk' | 'cart' | 'login' | 'admin' | 'profile' | 'agent' | 'support'>('home');
   const [user, setUser] = useState<UserAccount | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -4974,15 +5238,15 @@ export default function PremiumRiceStore() {
   };
 
   // CART CALCULATIONS
-  const addToCart = (product: Product, qty: number = 1) => {
+  const addToCart = (product: Product, qty: number = 1, bulk: boolean = false) => {
     setCart(prevCart => {
-      const existing = prevCart.find(item => item.productId === product.id);
+      const existing = prevCart.find(item => item.productId === product.id && !!item.bulk === bulk);
       if (existing) {
-        return prevCart.map(item => item.productId === product.id ? { ...item, quantity: item.quantity + qty } : item);
+        return prevCart.map(item => (item.productId === product.id && !!item.bulk === bulk) ? { ...item, quantity: item.quantity + qty } : item);
       }
-      return [...prevCart, { productId: product.id, quantity: qty, product }];
+      return [...prevCart, { productId: product.id, quantity: qty, product, bulk }];
     });
-    showToast(`Added ${product.brandName} (${product.weightKg}kg) to cart!`, 'success');
+    showToast(bulk ? `Added bulk order: ${product.brandName} (${qty} bags) to cart!` : `Added ${product.brandName} (${product.weightKg}kg) to cart!`, 'success');
   };
 
   const updateCartQuantity = (productId: number, qty: number) => {
@@ -5265,7 +5529,7 @@ export default function PremiumRiceStore() {
 
     try {
       const payload = {
-        cartItems: cart.map(i => ({ productId: i.productId, quantity: i.quantity })),
+        cartItems: cart.map(i => ({ productId: i.productId, quantity: i.quantity, bulk: !!i.bulk })),
         paymentMethod: checkoutData.paymentMethod,
         mpesaPhoneNumber: stkPhone || checkoutData.stkPhoneNumber,
         referralCode: referralInput || undefined,
@@ -5824,6 +6088,12 @@ export default function PremiumRiceStore() {
             >
               Grain Catalog
             </button>
+            <button 
+              onClick={() => setView('bulk')} 
+              className={`transition-all py-1.5 flex items-center gap-1.5 ${view === 'bulk' ? 'text-emerald-700 border-b-2 border-emerald-600' : 'text-slate-600 hover:text-emerald-700'}`}
+            >
+              <Layers className="w-3.5 h-3.5" /> Bulk Order
+            </button>
             {user && (
               <button 
                 onClick={() => setView('profile')} 
@@ -5918,6 +6188,10 @@ export default function PremiumRiceStore() {
             </button>
             <button onClick={() => { setView('shop'); setMobileMenuOpen(false); }} className="text-left font-bold py-2.5 text-slate-700 border-b border-slate-100 flex items-center justify-between">
               <span>Grain Catalog</span>
+              <ChevronRight className="w-4 h-4 text-slate-400" />
+            </button>
+            <button onClick={() => { setView('bulk'); setMobileMenuOpen(false); }} className="text-left font-bold py-2.5 text-slate-700 border-b border-slate-100 flex items-center justify-between">
+              <span>Bulk Order</span>
               <ChevronRight className="w-4 h-4 text-slate-400" />
             </button>
             {user ? (
@@ -6237,6 +6511,13 @@ export default function PremiumRiceStore() {
         )}
 
         {/* =================================================================== */}
+        {/* VIEW: BULK RICE ORDERS                                              */}
+        {/* =================================================================== */}
+        {view === 'bulk' && (
+          <BulkOrderView products={products} addToCart={addToCart} setView={setView} showToast={showToast} />
+        )}
+
+        {/* =================================================================== */}
         {/* VIEW: SHOPPING CART & REGIONAL CHECKOUT                             */}
         {/* =================================================================== */}
         {view === 'cart' && (
@@ -6427,7 +6708,7 @@ export default function PremiumRiceStore() {
                           </button>
                         )}
                         {paymentMethods.tillEnabled && (
-                          <button type="button" onClick={() => setCheckoutData(prev => ({ ...prev, paymentMethod: 'mpesa_till' }))}
+                          <button type="button" onClick={() => { setCheckoutData(prev => ({ ...prev, paymentMethod: 'mpesa_till' })); setPromoState(null); setPromoInput(''); }}
                             className={`p-3.5 rounded-2xl border-2 text-left flex items-center gap-3 cursor-pointer transition-all ${checkoutData.paymentMethod === 'mpesa_till' ? 'border-emerald-600 bg-emerald-50/60' : 'border-slate-200 bg-white hover:border-emerald-300'}`}>
                             <CreditCard className="w-6 h-6 text-emerald-600 shrink-0" />
                             <div className="min-w-0"><p className="font-extrabold text-xs text-slate-900">Pay to Till {paymentMethods.tillNumber}</p><p className="text-[10px] text-slate-500">Buy Goods, then enter your M-Pesa code</p></div>
@@ -6474,25 +6755,32 @@ export default function PremiumRiceStore() {
                       </div>
                     )}
 
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Promo Code <span className="text-slate-400 font-medium">(optional)</span></label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={promoInput}
-                          disabled={!!promoState}
-                          onChange={(e) => setPromoInput(e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 24))}
-                          placeholder="Enter code"
-                          className="flex-1 min-w-0 px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-mono font-bold tracking-widest focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50"
-                        />
-                        {promoState ? (
-                          <button type="button" onClick={() => { setPromoState(null); setPromoInput(''); }} className="px-4 rounded-xl bg-slate-100 text-slate-700 text-xs font-extrabold cursor-pointer">Remove</button>
-                        ) : (
-                          <button type="button" onClick={() => applyPromo()} disabled={promoChecking || promoInput.length < 3} className="px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-extrabold cursor-pointer">{promoChecking ? '…' : 'Apply'}</button>
-                        )}
+                    {checkoutData.paymentMethod === 'mpesa_till' ? (
+                      <div className="p-3.5 rounded-2xl bg-sky-50 border border-sky-100 text-[11px] text-sky-900 space-y-1">
+                        <p className="font-black flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5" /> M-Pesa code verification</p>
+                        <p>Promo codes aren't used with Till payments. Place your order, pay the Till above, then you'll be asked for your 10-character M-Pesa code (e.g. SJK4L9XQ2P) so we can confirm the payment straight away.</p>
                       </div>
-                      {promoState && <p className="text-[11px] font-bold text-emerald-600 mt-1">{promoState.message}</p>}
-                    </div>
+                    ) : (
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Promo Code <span className="text-slate-400 font-medium">(optional)</span></label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={promoInput}
+                            disabled={!!promoState}
+                            onChange={(e) => setPromoInput(e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 24))}
+                            placeholder="Enter code"
+                            className="flex-1 min-w-0 px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-mono font-bold tracking-widest focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50"
+                          />
+                          {promoState ? (
+                            <button type="button" onClick={() => { setPromoState(null); setPromoInput(''); }} className="px-4 rounded-xl bg-slate-100 text-slate-700 text-xs font-extrabold cursor-pointer">Remove</button>
+                          ) : (
+                            <button type="button" onClick={() => applyPromo()} disabled={promoChecking || promoInput.length < 3} className="px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-extrabold cursor-pointer">{promoChecking ? '…' : 'Apply'}</button>
+                          )}
+                        </div>
+                        {promoState && <p className="text-[11px] font-bold text-emerald-600 mt-1">{promoState.message}</p>}
+                      </div>
+                    )}
 
                     {/* Price Breakdown */}
                     <div className="border-t border-slate-100 pt-4 space-y-2 text-xs">
@@ -7410,7 +7698,12 @@ export default function PremiumRiceStore() {
                   {adminTab === 'expenses' && <AdminExpensesPanel token={token} showToast={showToast} />}
                   {adminTab === 'campaigns' && <AdminCampaignsPanel token={token} showToast={showToast} />}
                   {adminTab === 'reviews' && <AdminReviewsPanel token={token} showToast={showToast} />}
-                  {adminTab === 'payments' && <AdminPaymentsPanel token={token} showToast={showToast} />}
+                  {adminTab === 'payments' && (
+                    <div className="space-y-5">
+                      <AdminPaymentsPanel token={token} showToast={showToast} />
+                      <AdminBulkPricingPanel token={token} showToast={showToast} />
+                    </div>
+                  )}
                   {adminTab === 'promos' && <AdminPromosPanel token={token} showToast={showToast} />}
                   {adminTab === 'dispatch' && <AdminDispatchPanel token={token} showToast={showToast} />}
                   {adminTab === 'system' && <AdminSystemPanel token={token} showToast={showToast} />}
@@ -8419,6 +8712,7 @@ export default function PremiumRiceStore() {
       </div>
 
       {/* FOOTER */}
+      <ShoppingAssistantWidget token={token} user={user} />
       {twoFactor && <TwoFactorModal challenge={twoFactor} onSuccess={finishTwoFactorSignIn} onClose={() => setTwoFactor(null)} showToast={showToast} />}
       {reviewProduct && <ReviewsModal product={reviewProduct} token={token} user={user} onClose={() => setReviewProduct(null)} showToast={showToast} onChanged={fetchProducts} />}
 
