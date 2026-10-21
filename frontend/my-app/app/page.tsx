@@ -4571,9 +4571,6 @@ export default function PremiumRiceStore() {
     });
   }, [paymentMethods.tillEnabled, paymentMethods.stkEnabled]);
 
-  // If the cart changes, the promo discount is checked again against the new subtotal
-  useEffect(() => { if (promoState) applyPromo(promoState.code, true); }, [cartSubtotal]);
-
   // If the phone number or email changes after a code was sent, the old code no longer applies
   const otpIdentityRef = useRef('');
   useEffect(() => {
@@ -5029,6 +5026,9 @@ export default function PremiumRiceStore() {
   const cartGrandTotal = useMemo(() => {
     return Math.max(0, cartSubtotal - promoDiscount) + (cart.length > 0 ? activeShippingFee : 0);
   }, [cartSubtotal, promoDiscount, cart.length, activeShippingFee]);
+
+  // If the cart changes, the promo discount is checked again against the new subtotal
+  useEffect(() => { if (promoState) applyPromo(promoState.code, true); }, [cartSubtotal]);
 
   const expectedRewardPoints = useMemo(() => {
     return Number((totalCartWeightKg * 0.2).toFixed(2));
