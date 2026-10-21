@@ -2222,6 +2222,17 @@ async function getPaymentConfig() {
   };
 }
 
+// ---------- Bulk rice orders (customer enters a kg amount; admin sets the % off) ----------
+async function getBulkConfig() {
+  let v = {};
+  try { const row = await SystemConfig.findOne({ where: { key: 'bulk_discount' } }); v = (row && row.value) || {}; } catch (_) { /* table not ready */ }
+  return {
+    enabled: v.enabled !== false,
+    minKg: Number.isFinite(Number(v.minKg)) && Number(v.minKg) > 0 ? Number(v.minKg) : 50,
+    discountPercent: Number.isFinite(Number(v.discountPercent)) ? Math.min(60, Math.max(0, Number(v.discountPercent))) : 10
+  };
+}
+
 // ---------- Till payments ----------
 const MPESA_CODE_RE = /^[A-Z0-9]{10}$/;
 const cleanMpesaCode = (raw) => String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -4184,6 +4195,145 @@ async function startServer() {
       } catch (err) { res.status(500).json({ error: err.message }); }
     });
 
+    // --- BULK RICE (public: what the "Bulk Order" tab may offer) ---
+    expressApp.get('/api/config/bulk-discount', async (req, res) => {
+      try { res.json(await getBulkConfig()); } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    expressApp.put('/api/admin/config/bulk-discount', authenticateToken, requireAdmin, async (req, res) => {
+      try {
+        const b = req.body || {};
+        const discountPercent = Math.min(60, Math.max(0, Number(b.discountPercent)));
+        const minKg = Math.max(1, Number(b.minKg));
+        if (!Number.isFinite(discountPercent) || !Number.isFinite(minKg)) return res.status(400).json({ error: 'Enter a valid minimum kg and discount percentage.' });
+        const [row] = await SystemConfig.findOrCreate({ where: { key: 'bulk_discount' }, defaults: { value: {} } });
+        row.value = { enabled: b.enabled !== false, minKg, discountPercent };
+        row.changed('value', true);
+        await row.save();
+        await logEvent({ req, action: 'BULK_DISCOUNT_SETTINGS_CHANGED', category: 'settings', severity: 'info', summary: `${req.adminUser.fullName} set bulk pricing: ${row.value.enabled ? 'ON' : 'OFF'}, ${row.value.discountPercent}% off ${row.value.minKg}kg+` });
+        res.json(await getBulkConfig());
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // Live quote for the Bulk Order tab: pick a product + enter kg, get the discounted total back
+    expressApp.get('/api/bulk/quote', async (req, res) => {
+      try {
+        const cfg = await getBulkConfig();
+        const productId = Number(req.query.productId);
+        const kg = Number(req.query.kg);
+        const product = await RiceProduct.findByPk(productId);
+        if (!product) return res.status(404).json({ error: 'Choose a rice type.' });
+        if (!Number.isFinite(kg) || kg <= 0) return res.status(400).json({ error: 'Enter how many kilograms you need.' });
+        const weightKg = Number(product.weightKg) || 1;
+        const sacks = Math.max(1, Math.round(kg / weightKg));
+        const actualKg = sacks * weightKg;
+        let unitPrice = Number(product.basePrice) || 0;
+        if (flashSaleState.active && product.flashSalePrice !== null && product.flashSalePrice !== undefined) unitPrice = Number(product.flashSalePrice);
+        const pricePerKg = weightKg > 0 ? unitPrice / weightKg : 0;
+        const grossTotal = round2(pricePerKg * actualKg);
+        const qualifies = cfg.enabled && actualKg >= cfg.minKg;
+        const discountPercent = qualifies ? cfg.discountPercent : 0;
+        const discountAmount = round2(grossTotal * (discountPercent / 100));
+        res.json({
+          productId: product.id, brandName: product.brandName, variety: product.variety, weightKg,
+          requestedKg: kg, sacks, actualKg, pricePerKg: round2(pricePerKg),
+          grossTotal, discountPercent, discountAmount, netTotal: round2(grossTotal - discountAmount),
+          qualifies, minKgForDiscount: cfg.minKg, inStock: (product.stockQuantity || 0) >= sacks, stockQuantity: product.stockQuantity || 0
+        });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // ====================================================================================
+    // AI SHOPPING ASSISTANT — answers from the live product catalog, prices & the
+    // signed-in customer's own orders. Requires ANTHROPIC_API_KEY in the environment;
+    // if it's missing the endpoint says so instead of failing silently.
+    // ====================================================================================
+    const chatRateLimit = new Map(); // ip -> [timestamps]
+    const CHAT_RATE_LIMIT_PER_MIN = 12;
+
+    // Reads the Bearer token if present but never rejects the request — guests can chat too.
+    function softAuth(req) {
+      const authHeader = req.headers['authorization'];
+      const raw = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+      if (!raw) return null;
+      try { return jwt.verify(raw, JWT_SECRET); } catch (_) { return null; }
+    }
+
+    expressApp.post('/api/chat', async (req, res) => {
+      try {
+        const ip = req.ip || 'unknown';
+        const now = Date.now();
+        const hits = (chatRateLimit.get(ip) || []).filter(t => now - t < 60000);
+        if (hits.length >= CHAT_RATE_LIMIT_PER_MIN) return res.status(429).json({ error: 'Too many messages — please wait a moment before sending another.' });
+        hits.push(now); chatRateLimit.set(ip, hits);
+
+        const apiKey = process.env.ANTHROPIC_API_KEY;
+        if (!apiKey) return res.status(503).json({ error: 'The shopping assistant is not configured yet (missing ANTHROPIC_API_KEY on the server).' });
+
+        const message = String((req.body || {}).message || '').slice(0, 1000).trim();
+        if (!message) return res.status(400).json({ error: 'Type a message first.' });
+        const history = Array.isArray((req.body || {}).history) ? (req.body || {}).history.slice(-10) : [];
+
+        const decoded = softAuth(req);
+        let customerLine = 'The visitor is browsing as a guest (not signed in).';
+        let recentOrdersLine = '';
+        if (decoded && decoded.id) {
+          const dbUser = await User.findByPk(decoded.id, { attributes: ['id', 'fullName', 'phoneNumber', 'rewardPoints'] }).catch(() => null);
+          if (dbUser) {
+            customerLine = `Signed-in customer: ${dbUser.fullName}, phone ${dbUser.phoneNumber}, ${dbUser.rewardPoints || 0} reward points.`;
+            const myOrders = await Order.findAll({ where: { userId: dbUser.id }, order: [['createdAt', 'DESC']], limit: 5 }).catch(() => []);
+            if (myOrders.length) {
+              recentOrdersLine = 'Their most recent orders:\n' + myOrders.map(o =>
+                `- Order #${o.id}: ${o.status}, KES ${o.grandTotal}, paid: ${o.paymentDetails?.isPaid ? 'yes' : 'no'}, placed ${new Date(o.createdAt).toLocaleDateString('en-KE')}`
+              ).join('\n');
+            }
+          }
+        }
+
+        const products = await RiceProduct.findAll({ attributes: ['id', 'brandName', 'variety', 'weightKg', 'basePrice', 'flashSalePrice', 'stockQuantity', 'description', 'millingGrade', 'isOrganic'] });
+        const catalogLines = products.map(p =>
+          `- #${p.id} ${p.brandName} ${p.variety || ''} (${p.weightKg}kg sack): KES ${p.basePrice}` +
+          (flashSaleState.active && p.flashSalePrice ? ` (flash sale: KES ${p.flashSalePrice})` : '') +
+          `, stock: ${p.stockQuantity > 0 ? p.stockQuantity + ' bags available' : 'out of stock'}` +
+          (p.isOrganic ? ', organic' : '') + (p.millingGrade ? `, grade ${p.millingGrade}` : '')
+        ).join('\n');
+
+        const bulkCfg = await getBulkConfig();
+        const payCfg = await getPaymentConfig();
+        const nowNairobi = new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi', dateStyle: 'full', timeStyle: 'short' });
+
+        const systemPrompt = [
+          `You are the customer-service assistant for Mwea Rice Hub, an online rice store in Kenya.`,
+          `Current date/time (Africa/Nairobi): ${nowNairobi}.`,
+          `${customerLine}`,
+          recentOrdersLine,
+          `\nFull product catalog right now:\n${catalogLines || '(no products listed yet)'}`,
+          `\nPayment: STK push ${payCfg.stkEnabled ? 'is available' : 'is off right now'}; Till payment ${payCfg.tillEnabled ? `is available (Till ${payCfg.tillNumber})` : 'is off right now'}.`,
+          `\nBulk orders: customers can order in bulk kg on the "Bulk Order" tab; orders of ${bulkCfg.minKg}kg or more of one rice type get ${bulkCfg.enabled ? bulkCfg.discountPercent + '% off' : '(bulk pricing currently off)'}.`,
+          `\nBe concise, friendly and accurate. Only quote prices, stock and policies from the information above — never invent a price, product or order detail. If something isn't in your information, say you'll have a human from customer care follow up, and don't guess at order statuses or receipts.`
+        ].filter(Boolean).join('\n');
+
+        const anthropicRes = await axios.post('https://api.anthropic.com/v1/messages', {
+          model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5',
+          max_tokens: 600,
+          system: systemPrompt,
+          messages: [
+            ...history.filter(h => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string').map(h => ({ role: h.role, content: h.content.slice(0, 1000) })),
+            { role: 'user', content: message }
+          ]
+        }, {
+          headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+          timeout: 20000
+        });
+
+        const reply = (anthropicRes.data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim() || "Sorry, I didn't catch that — could you rephrase?";
+        res.json({ reply });
+      } catch (err) {
+        console.error('❌ Chat assistant error:', err.response?.data || err.message);
+        res.status(500).json({ error: 'The shopping assistant is unavailable right now. Please try again shortly, or contact customer care.' });
+      }
+    });
+
     // --- SAFARICOM C2B FEED: every payment made to the Till arrives here, so codes are checked with no human involved ---
     const c2bGuard = (req, res, next) => {
       if (!process.env.MPESA_C2B_SECRET || req.params.secret !== process.env.MPESA_C2B_SECRET) return res.status(404).json({ error: 'Not found' });
@@ -4589,6 +4739,7 @@ async function startServer() {
         let totalWeightKg = 0;
         const builtOrderLineItems = [];
         const wholesaleTiers = await getWholesaleTiers();
+        const bulkCfg = await getBulkConfig();
 
         for (const item of cartItems) {
           const targetId = item.productId || item.laptopId || item.id;
@@ -4608,7 +4759,14 @@ async function startServer() {
           let wholesaleApplied = false;
           if (tier && Number(tier.price) < Number(purchasePrice)) { purchasePrice = Number(tier.price); wholesaleApplied = true; }
 
+          // "Bulk Order" tab: customer entered a kg amount; if it clears the admin-set threshold, the % off applies here too
           const itemKg = (product.weightKg || 0) * item.quantity;
+          let bulkApplied = false;
+          if (item.bulk === true && bulkCfg.enabled && itemKg >= bulkCfg.minKg) {
+            const bulkPrice = round2(purchasePrice * (1 - bulkCfg.discountPercent / 100));
+            if (bulkPrice < purchasePrice) { purchasePrice = bulkPrice; bulkApplied = true; }
+          }
+
           totalWeightKg += itemKg;
 
           calculatedSubtotal += (purchasePrice * item.quantity);
@@ -4624,6 +4782,7 @@ async function startServer() {
             quantity: item.quantity, 
             priceAtPurchase: purchasePrice,
             wholesaleApplied,
+            bulkApplied,
             buyingPrice: product.buyingPrice || (purchasePrice * 0.75),
             imageUrl: product.imageUrl || product.image || null
           });
