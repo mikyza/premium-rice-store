@@ -4257,7 +4257,7 @@ function AdminBulkOrdersPanel({ token, showToast, products, countyFees }: { toke
     setSaving(true);
     try {
       const pp: Record<string, any> = {};
-      Object.entries(perProduct).forEach(([id, r]: [string, { discountPercent: string; minKg: string }]) => {
+      Object.entries(perProduct as Record<string, { discountPercent: string; minKg: string }>).forEach(([id, r]) => {
         if (r.discountPercent !== '' || r.minKg !== '') pp[id] = { discountPercent: r.discountPercent === '' ? null : Number(r.discountPercent), minKg: r.minKg === '' ? null : Number(r.minKg) };
       });
       const tr: Record<string, number> = {};
@@ -4269,7 +4269,10 @@ function AdminBulkOrdersPanel({ token, showToast, products, countyFees }: { toke
   };
 
   const setProd = (id: number, patch: Partial<{ discountPercent: string; minKg: string }>) =>
-    setPerProduct(prev => ({ ...prev, [String(id)]: { discountPercent: '', minKg: '', ...(prev[String(id)] || {}), ...patch } }));
+    setPerProduct(prev => {
+      const cur = prev[String(id)] || { discountPercent: '', minKg: '' };
+      return { ...prev, [String(id)]: { ...cur, ...patch } };
+    });
 
   const counties = Object.keys(countyFees || {}).sort((a, b) => a.localeCompare(b));
   const shownCounties = counties.filter(c => c.toLowerCase().includes(countySearch.trim().toLowerCase()));
