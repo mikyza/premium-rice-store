@@ -4134,27 +4134,53 @@ function AdminPaymentsPanel({ token, showToast }: { token: string | null; showTo
 }
 
 // ---------------------------------------------------------------------------
-// AI SHOPPING ASSISTANT — floating chat, backed by /api/chat on the server,
-// which feeds the live product catalog, prices and (if signed in) the
-// customer's own recent orders to the model. See server.js for the prompt.
+// AI SHOPPING ASSISTANT — floating chat backed by /api/chat (see chatAssistant.js).
+// The server gives the AI live tools (prices, stock, delivery, bulk quotes, the
+// signed-in customer's own orders). When the AI adds rice to the cart, the server
+// sends back "actions" and this widget performs them on the customer's screen.
 // ---------------------------------------------------------------------------
-interface ChatMsg { role: 'user' | 'assistant'; content: string; }
+interface ChatMsg { role: 'user' | 'assistant'; content: string; cta?: 'cart'; }
+interface ChatAction { type: 'add_to_cart' | 'open_cart'; productId?: number; quantity?: number; bulk?: boolean; }
 
-function ShoppingAssistantWidget({ token, user }: { token: string | null; user: UserAccount | null }) {
+const CHAT_STORAGE_KEY = 'riceHubChatV2';
+const CHAT_QUICK_REPLIES = ['What rice do you sell?', 'Delivery to my area', 'I want a bulk order', 'Track my order'];
+
+function ShoppingAssistantWidget({ token, user, onAddToCart, onOpenCart }: {
+  token: string | null;
+  user: UserAccount | null;
+  onAddToCart: (productId: number, quantity: number, bulk: boolean) => void;
+  onOpenCart: () => void;
+}) {
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<ChatMsg[]>([
-    { role: 'assistant', content: "Hi! I'm the Mwea Rice Hub assistant. Ask me about rice types, prices, bulk orders, delivery fees or your order status." }
-  ]);
+  const [assistantName, setAssistantName] = useState('Wanjiru');
+  const [messages, setMessages] = useState<ChatMsg[]>(() => {
+    try { const raw = sessionStorage.getItem(CHAT_STORAGE_KEY); return raw ? JSON.parse(raw).slice(-40) : []; } catch (_) { return []; }
+  });
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const lastUserId = useRef<number | string | null>(user ? (user as any).id : null);
 
-  useEffect(() => { if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, open]);
+  const firstName = user && (user as any).fullName ? String((user as any).fullName).trim().split(/\s+/)[0] : '';
+  const greeting = `Hi${firstName ? ' ' + firstName : ''}! 👋 I'm ${assistantName} from Mwea Rice Hub. Ask me about our rice, prices, delivery, bulk orders, or your order, and I can also help you buy.`;
 
-  const send = async () => {
-    const text = input.trim();
+  // Which name the shop gave its assistant (admin can change it)
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/config/chat-assistant`).then(r => r.json()).then(d => { if (d && d.assistantName) setAssistantName(d.assistantName); }).catch(() => {});
+  }, []);
+
+  // Keep the conversation while browsing, but never carry one customer's chat over to another account
+  useEffect(() => {
+    const id = user ? (user as any).id : null;
+    if (lastUserId.current !== id) { lastUserId.current = id; setMessages([]); try { sessionStorage.removeItem(CHAT_STORAGE_KEY); } catch (_) { /* ignore */ } }
+  }, [user]);
+  useEffect(() => { try { sessionStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages.slice(-40))); } catch (_) { /* ignore */ } }, [messages]);
+  useEffect(() => { if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, open, sending]);
+
+  const send = async (override?: string) => {
+    const text = (override ?? input).trim();
     if (!text || sending) return;
-    const nextMessages = [...messages, { role: 'user' as const, content: text }];
+    const nextMessages: ChatMsg[] = [...messages, { role: 'user', content: text }];
     setMessages(nextMessages);
     setInput('');
     setSending(true);
@@ -4162,13 +4188,16 @@ function ShoppingAssistantWidget({ token, user }: { token: string | null; user: 
       const res = await fetch(`${API_BASE_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ message: text, history: nextMessages.slice(-10) })
+        body: JSON.stringify({ message: text, history: nextMessages.slice(-12).map(m => ({ role: m.role, content: m.content })) })
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.reply) {
-        setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
+        const actions: ChatAction[] = Array.isArray(data.actions) ? data.actions : [];
+        actions.forEach(a => { if (a.type === 'add_to_cart' && a.productId) onAddToCart(a.productId, a.quantity || 1, !!a.bulk); });
+        const wantsCart = actions.some(a => a.type === 'open_cart');
+        setMessages(prev => [...prev, { role: 'assistant', content: data.reply, cta: wantsCart ? 'cart' : undefined }]);
       } else {
-        setMessages(prev => [...prev, { role: 'assistant', content: data.error || "Sorry, I'm having trouble replying right now — please try again shortly, or reach customer care directly." }]);
+        setMessages(prev => [...prev, { role: 'assistant', content: data.error || "Sorry, I'm having trouble replying right now. Please try again shortly, or reach customer care directly." }]);
       }
     } catch (_) {
       setMessages(prev => [...prev, { role: 'assistant', content: "I couldn't reach the server. Please check your connection and try again." }]);
@@ -4186,20 +4215,36 @@ function ShoppingAssistantWidget({ token, user }: { token: string | null; user: 
       </button>
 
       {open && (
-        <div className="fixed z-[70] bottom-36 md:bottom-24 right-4 md:right-6 w-[calc(100vw-2rem)] sm:w-96 max-w-sm h-[28rem] bg-white rounded-3xl shadow-2xl border border-emerald-100 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4">
+        <div className="fixed z-[70] bottom-36 md:bottom-24 right-4 md:right-6 w-[calc(100vw-2rem)] sm:w-96 max-w-sm h-[30rem] bg-white rounded-3xl shadow-2xl border border-emerald-100 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4">
           <div className="px-4 py-3 bg-gradient-to-r from-emerald-700 to-teal-700 text-white flex items-center gap-2">
             <Leaf className="w-4 h-4" />
-            <div className="min-w-0"><p className="text-xs font-black leading-tight">Rice Hub Assistant</p><p className="text-[10px] text-emerald-100">Products, prices & your orders</p></div>
+            <div className="min-w-0 flex-1"><p className="text-xs font-black leading-tight">{assistantName} · Rice Hub</p><p className="text-[10px] text-emerald-100">Rice, prices, delivery & your orders</p></div>
+            {messages.length > 0 && (
+              <button onClick={() => setMessages([])} className="text-[10px] text-emerald-100 hover:text-white underline cursor-pointer" aria-label="Start a new chat">New chat</button>
+            )}
           </div>
           <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2 bg-slate-50">
+            <div className="flex justify-start">
+              <div className="max-w-[85%] px-3 py-2 rounded-2xl text-[12px] leading-relaxed whitespace-pre-wrap bg-white text-slate-800 border border-slate-100 rounded-bl-sm">{greeting}</div>
+            </div>
+            {messages.length === 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {CHAT_QUICK_REPLIES.map(q => (
+                  <button key={q} onClick={() => send(q)} className="px-2.5 py-1.5 rounded-full bg-white border border-emerald-200 text-emerald-700 text-[11px] font-bold hover:bg-emerald-50 cursor-pointer">{q}</button>
+                ))}
+              </div>
+            )}
             {messages.map((m, i) => (
-              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
                 <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-[12px] leading-relaxed whitespace-pre-wrap ${m.role === 'user' ? 'bg-emerald-600 text-white rounded-br-sm' : 'bg-white text-slate-800 border border-slate-100 rounded-bl-sm'}`}>
                   {m.content}
                 </div>
+                {m.cta === 'cart' && (
+                  <button onClick={() => { onOpenCart(); setOpen(false); }} className="mt-1.5 px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-black cursor-pointer">Open my cart & checkout</button>
+                )}
               </div>
             ))}
-            {sending && <div className="flex justify-start"><div className="px-3 py-2 rounded-2xl bg-white border border-slate-100 text-[11px] text-slate-400 flex items-center gap-1.5"><RefreshCw className="w-3 h-3 animate-spin" /> Typing…</div></div>}
+            {sending && <div className="flex justify-start"><div className="px-3 py-2 rounded-2xl bg-white border border-slate-100 text-[11px] text-slate-400 flex items-center gap-1.5"><RefreshCw className="w-3 h-3 animate-spin" /> {assistantName} is typing…</div></div>}
             <div ref={bottomRef} />
           </div>
           <div className="p-2.5 border-t border-slate-100 flex gap-2">
@@ -4208,9 +4253,10 @@ function ShoppingAssistantWidget({ token, user }: { token: string | null; user: 
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
               placeholder={user ? 'Ask about rice, prices, your orders…' : 'Ask about rice, prices, delivery…'}
+              maxLength={1000}
               className="flex-1 min-w-0 px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-emerald-500"
             />
-            <button onClick={send} disabled={sending || !input.trim()} className="px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white cursor-pointer" aria-label="Send">
+            <button onClick={() => send()} disabled={sending || !input.trim()} className="px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white cursor-pointer" aria-label="Send">
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -8895,7 +8941,16 @@ export default function PremiumRiceStore() {
       </div>
 
       {/* FOOTER */}
-      <ShoppingAssistantWidget token={token} user={user} />
+      <ShoppingAssistantWidget
+        token={token}
+        user={user}
+        onAddToCart={(productId, qty, bulk) => {
+          const p = products.find(x => x.id === productId);
+          if (p) addToCart(p, qty, bulk);
+          else showToast('That item is not loaded yet. Please refresh the page and try again.', 'error');
+        }}
+        onOpenCart={() => setView('cart')}
+      />
       {twoFactor && <TwoFactorModal challenge={twoFactor} onSuccess={finishTwoFactorSignIn} onClose={() => setTwoFactor(null)} showToast={showToast} />}
       {reviewProduct && <ReviewsModal product={reviewProduct} token={token} user={user} onClose={() => setReviewProduct(null)} showToast={showToast} onChanged={fetchProducts} />}
 
