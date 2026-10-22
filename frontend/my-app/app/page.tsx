@@ -36,6 +36,7 @@ export interface Product {
   isOrganic?: boolean;
   ratingAvg?: number;
   ratingCount?: number;
+  hasRating?: boolean;
   wholesaleTiers?: { minQty: number; price: number }[];
   createdAt?: string;
   updatedAt?: string;
@@ -1510,6 +1511,39 @@ const FinancialGrowthChart: React.FC<FinancialGrowthChartProps> = ({
 // Prioritizes phone screen priority (2 items per row on small devices, 4 on desktop)
 // ============================================================================
 
+/** Bulk-order settings the ADMIN controls: default discount, per-rice overrides and the delivery cost per county. */
+export interface BulkConfig {
+  enabled: boolean;
+  minKg: number;
+  discountPercent: number;
+  perProduct: Record<string, { discountPercent?: number; minKg?: number }>;
+  transport: Record<string, number>;
+}
+
+/** The minimum kg and discount that apply to one rice type (its own setting, otherwise the default). Mirrors the server. */
+export const bulkRuleFor = (cfg: BulkConfig | null, productId: number) => {
+  const o: { discountPercent?: number; minKg?: number } = (cfg && cfg.perProduct && cfg.perProduct[String(productId)]) || {};
+  return { minKg: o.minKg ?? cfg?.minKg ?? 50, discountPercent: o.discountPercent ?? cfg?.discountPercent ?? 0 };
+};
+
+/** True when the quantity clears that rice type's bulk minimum (kg). */
+export const isBulkQualified = (cfg: BulkConfig | null, p: any, qty: number) => {
+  const kg = (Number(p?.weightKg) || 0) * Number(qty);
+  return kg > 0 && kg >= bulkRuleFor(cfg, p?.id).minKg;
+};
+
+/** Price per bag for a cart line, including the admin's bulk % off for lines placed from the Bulk Order tab (mirrors the server). */
+export const getCartLineUnit = (item: CartItem, flashActive: boolean, cfg: BulkConfig | null): { price: number; bulk: boolean; base: number; bulkPercent?: number } => {
+  const p: any = item.product || {};
+  const unit: { price: number; bulk: boolean; base: number; bulkPercent?: number } = getUnitPrice(p, item.quantity, flashActive);
+  if (item.bulk && cfg && cfg.enabled && isBulkQualified(cfg, p, item.quantity)) {
+    const pct = bulkRuleFor(cfg, p.id).discountPercent;
+    const discounted = Math.round(unit.price * (1 - pct / 100) * 100) / 100;
+    if (pct > 0 && discounted < unit.price) return { ...unit, price: discounted, bulk: true, bulkPercent: pct };
+  }
+  return unit;
+};
+
 /** Price per bag for a quantity: the best of the normal/flash price and any bulk tier (mirrors the server). */
 export const getUnitPrice = (p: any, qty: number, flashActive: boolean) => {
   const base = flashActive && p.flashSalePrice ? p.flashSalePrice : (p.basePrice || p.price || 0);
@@ -1594,8 +1628,8 @@ const ProductCard: React.FC<ProductCardProps> = ({
           </h3>
           {onReviews && (
             <button type="button" onClick={onReviews} className="flex items-center gap-1 mt-1 text-[11px] cursor-pointer hover:underline" aria-label="See reviews">
-              {(product.ratingCount || 0) > 0 ? (
-                <><StarRating value={product.ratingAvg || 0} size={12} /><span className="font-bold text-slate-700">{(product.ratingAvg || 0).toFixed(1)}</span><span className="text-slate-400">({product.ratingCount})</span></>
+              {(product.hasRating ?? ((product.ratingCount || 0) > 0)) ? (
+                <><StarRating value={product.ratingAvg || 0} size={12} /><span className="font-bold text-slate-700">{(product.ratingAvg || 0).toFixed(1)}</span></>
               ) : (
                 <span className="px-1.5 py-0.5 rounded-full bg-sky-50 text-sky-700 font-bold text-[10px]">New · Be the first to review</span>
               )}
@@ -2467,11 +2501,11 @@ function ReviewsModal({ product, token, user, onClose, showToast, onChanged }: {
       <div className="bg-white rounded-3xl w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
         <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
           <div><h3 className="font-black text-slate-900 text-base">{product.brandName}</h3>
-            {sum && <div className="flex items-center gap-2 mt-1"><StarRating value={sum.average} /><span className="text-xs font-bold text-slate-700">{sum.count ? sum.average.toFixed(1) : 'No reviews yet'}</span>{sum.count > 0 && <span className="text-[11px] text-slate-400">({sum.count} review{sum.count > 1 ? 's' : ''})</span>}</div>}</div>
+            {sum && <div className="flex items-center gap-2 mt-1"><StarRating value={sum.average} /><span className="text-xs font-bold text-slate-700">{sum.hasReviews ? sum.average.toFixed(1) : 'No reviews yet'}</span>{typeof sum.count === 'number' && sum.count > 0 && <span className="text-[11px] text-amber-600 font-bold" title="Only administrators can see how many people rated">({sum.count} rating{sum.count > 1 ? 's' : ''} · admin only)</span>}</div>}</div>
           <button onClick={onClose} className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 cursor-pointer" aria-label="Close"><X className="w-4 h-4" /></button>
         </div>
         <div className="px-6 py-4 overflow-y-auto space-y-4">
-          {sum && sum.count > 0 && (
+          {sum && typeof sum.count === 'number' && sum.count > 0 && (
             <div className="space-y-1">{[5, 4, 3, 2, 1].map(n => (<div key={n} className="flex items-center gap-2 text-[11px] text-slate-500"><span className="w-3">{n}</span><Star className="w-3 h-3 text-amber-400 fill-amber-400" /><div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-amber-400" style={{ width: `${(sum.distribution[n] / sum.count) * 100}%` }} /></div><span className="w-6 text-right">{sum.distribution[n]}</span></div>))}</div>
           )}
           {data && (data.canReview ? (
@@ -2512,7 +2546,7 @@ interface BulkQuote {
   productId: number; brandName: string; variety?: string; weightKg: number;
   requestedKg: number; sacks: number; actualKg: number; pricePerKg: number;
   grossTotal: number; discountPercent: number; discountAmount: number; netTotal: number;
-  qualifies: boolean; minKgForDiscount: number; inStock: boolean; stockQuantity: number;
+  qualifies: boolean; minKgForDiscount: number; ruleDiscountPercent: number; isBulk: boolean; inStock: boolean; stockQuantity: number;
 }
 
 function BulkOrderView({ products, addToCart, setView, showToast }: {
@@ -2525,7 +2559,7 @@ function BulkOrderView({ products, addToCart, setView, showToast }: {
   const [kg, setKg] = useState<string>('');
   const [quote, setQuote] = useState<BulkQuote | null>(null);
   const [loading, setLoading] = useState(false);
-  const [bulkCfg, setBulkCfg] = useState<{ enabled: boolean; minKg: number; discountPercent: number } | null>(null);
+  const [bulkCfg, setBulkCfg] = useState<BulkConfig | null>(null);
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/config/bulk-discount`).then(r => r.json()).then(setBulkCfg).catch(() => {});
@@ -2545,10 +2579,11 @@ function BulkOrderView({ products, addToCart, setView, showToast }: {
   }, [productId, kg]);
 
   const selectedProduct = products.find(p => p.id === productId) || null;
+  const rule = bulkRuleFor(bulkCfg, selectedProduct ? selectedProduct.id : 0);
 
   const handleAddBulkToCart = () => {
     if (!selectedProduct || !quote) return;
-    if (!quote.inStock) { showToast('Not enough stock for that many bags right now.', 'error'); return; }
+    if (!quote.inStock) { showToast(`Only ${quote.stockQuantity} sacks are in stock for an order this small. Order ${quote.minKgForDiscount}kg or more for a bulk order with no stock limit.`, 'error'); return; }
     addToCart(selectedProduct, quote.sacks, true);
     setView('cart');
   };
@@ -2559,7 +2594,8 @@ function BulkOrderView({ products, addToCart, setView, showToast }: {
         <h2 className="text-2xl sm:text-3xl font-black text-slate-900 flex items-center gap-2"><Layers className="w-7 h-7 text-emerald-600" /> Bulk Rice Order</h2>
         <p className="text-slate-500 text-xs sm:text-sm">
           Tell us how many kilograms you need and we'll work out the nearest sack count at our normal price.
-          {bulkCfg?.enabled ? ` Orders of ${bulkCfg.minKg}kg or more of one rice type get ${bulkCfg.discountPercent}% off automatically.` : ' Bulk discount pricing is currently off — you still get the normal price.'}
+          {bulkCfg?.enabled ? (rule.discountPercent > 0 ? ` Orders of ${rule.minKg}kg or more ${selectedProduct ? 'of this rice' : 'of one rice type'} get ${rule.discountPercent}% off automatically.` : ` Orders of ${rule.minKg}kg or more ${selectedProduct ? 'of this rice' : 'of one rice type'} are treated as bulk orders.`) : ' Bulk discount pricing is currently off — you still get the normal price.'}
+          {' '}Bulk orders are not limited by shelf stock, and delivery is charged by county at checkout.
         </p>
       </div>
 
@@ -2616,14 +2652,15 @@ function BulkOrderView({ products, addToCart, setView, showToast }: {
               <div className="flex justify-between text-slate-400"><span>Subtotal:</span><span className="font-bold text-white">{formatKES(quote.grossTotal)}</span></div>
               {quote.qualifies ? (
                 <div className="flex justify-between text-emerald-400 font-bold"><span>Bulk discount ({quote.discountPercent}%):</span><span>-{formatKES(quote.discountAmount)}</span></div>
-              ) : bulkCfg?.enabled ? (
-                <p className="text-[11px] text-amber-400">Add {Math.max(0, bulkCfg.minKg - quote.actualKg)}kg more to unlock {bulkCfg.discountPercent}% off.</p>
+              ) : bulkCfg?.enabled && quote.ruleDiscountPercent > 0 ? (
+                <p className="text-[11px] text-amber-400">Add {Math.max(0, quote.minKgForDiscount - quote.actualKg)}kg more to unlock {quote.ruleDiscountPercent}% off.</p>
               ) : null}
+              {quote.isBulk && <p className="text-[11px] text-emerald-300">Bulk order: not limited by shelf stock.</p>}
               <div className="border-t border-slate-800 pt-2 flex justify-between text-base font-black">
                 <span>Total:</span><span className="text-emerald-400">{formatKES(quote.netTotal)}</span>
               </div>
-              {!quote.inStock && <p className="text-[11px] text-rose-400 font-bold">Only {quote.stockQuantity} sacks in stock — reduce the kg or pick another rice type.</p>}
-              <p className="text-[10px] text-slate-500 pt-2">Checkout, delivery and M-Pesa payment work exactly the same as a normal order — this just adds a discounted bulk line to your cart.</p>
+              {!quote.inStock && <p className="text-[11px] text-rose-400 font-bold">Only {quote.stockQuantity} sacks in stock for an order this small — order {quote.minKgForDiscount}kg or more for a bulk order with no stock limit, or pick another rice type.</p>}
+              <p className="text-[10px] text-slate-500 pt-2">Checkout and M-Pesa payment work like a normal order. Bulk delivery is charged by county at checkout — this just adds a bulk line to your cart.</p>
             </div>
           ) : (
             <p className="text-xs text-slate-400 py-8 text-center">No quote yet.</p>
@@ -2637,11 +2674,25 @@ function BulkOrderView({ products, addToCart, setView, showToast }: {
 function AdminReviewsPanel({ token, showToast }: { token: string | null; showToast: ToastFn }) {
   const [rows, setRows] = useState<any[]>([]);
   const [status, setStatus] = useState<'all' | 'published' | 'hidden'>('all');
+  const [summary, setSummary] = useState<any[]>([]);
   const load = useCallback(async () => { try { setRows(await staffApi(`/admin/reviews${status !== 'all' ? `?status=${status}` : ''}`, token)); } catch (err: any) { showToast(err.message, 'error'); } }, [token, status]);
   useEffect(() => { load(); }, [load]);
+  // How many people rated each rice: only the admin ever sees these numbers
+  useEffect(() => { staffApi('/admin/reviews/summary', token).then((d: any) => setSummary(Array.isArray(d) ? d : [])).catch(() => {}); }, [token, rows]);
   const update = async (id: number, body: any) => { try { await staffApi(`/admin/reviews/${id}`, token, { method: 'PUT', body }); load(); } catch (err: any) { showToast(err.message, 'error'); } };
   return (
     <div className="space-y-4">
+      {summary.length > 0 && (
+        <div className={`${cardCls} p-4 space-y-2`}>
+          <p className="text-[11px] font-black uppercase text-slate-400">Ratings per rice · only you can see how many people rated</p>
+          {summary.map((s: any) => (
+            <div key={s.productId} className="flex items-center justify-between gap-3 text-xs">
+              <span className="text-slate-200 font-bold truncate">{s.product}</span>
+              <span className="flex items-center gap-2 shrink-0"><StarRating value={s.average} size={12} /><span className="font-black text-white">{Number(s.average).toFixed(1)}</span><span className="text-slate-400">· {s.count} rating{s.count === 1 ? '' : 's'}</span></span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="flex gap-2">{(['all', 'published', 'hidden'] as const).map(s => <button key={s} onClick={() => setStatus(s)} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold capitalize cursor-pointer ${status === s ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{s}</button>)}</div>
       <div className="space-y-3">
         {rows.length === 0 && <p className="text-xs text-slate-500 font-bold p-6 text-center bg-slate-900 rounded-2xl border border-slate-800">No reviews yet.</p>}
@@ -4170,10 +4221,16 @@ function ShoppingAssistantWidget({ token, user }: { token: string | null; user: 
 }
 
 // ---------------------------------------------------------------------------
-// BULK RICE PRICING — admin sets the % off and the minimum kg to qualify
+// BULK ORDERS (admin) — the admin dictates the discount per rice and the bulk delivery cost per county
 // ---------------------------------------------------------------------------
-function AdminBulkPricingPanel({ token, showToast }: { token: string | null; showToast: ToastFn }) {
-  const [form, setForm] = useState({ enabled: true, minKg: '50', discountPercent: '10' });
+function AdminBulkOrdersPanel({ token, showToast, products, countyFees }: { token: string | null; showToast: ToastFn; products: Product[]; countyFees: { [key: string]: number } }) {
+  const [enabled, setEnabled] = useState(true);
+  const [minKg, setMinKg] = useState('50');
+  const [discount, setDiscount] = useState('10');
+  const [perProduct, setPerProduct] = useState<Record<string, { discountPercent: string; minKg: string }>>({});
+  const [transport, setTransport] = useState<Record<string, string>>({});
+  const [countySearch, setCountySearch] = useState('');
+  const [fillAll, setFillAll] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -4181,7 +4238,17 @@ function AdminBulkPricingPanel({ token, showToast }: { token: string | null; sho
     try {
       const res = await fetch(`${API_BASE_URL}/config/bulk-discount`);
       const d = await res.json();
-      setForm({ enabled: d.enabled !== false, minKg: String(d.minKg ?? 50), discountPercent: String(d.discountPercent ?? 10) });
+      setEnabled(d.enabled !== false);
+      setMinKg(String(d.minKg ?? 50));
+      setDiscount(String(d.discountPercent ?? 10));
+      const pp: Record<string, { discountPercent: string; minKg: string }> = {};
+      Object.entries(d.perProduct || {}).forEach(([id, r]: [string, any]) => {
+        pp[id] = { discountPercent: r.discountPercent !== undefined ? String(r.discountPercent) : '', minKg: r.minKg !== undefined ? String(r.minKg) : '' };
+      });
+      setPerProduct(pp);
+      const tr: Record<string, string> = {};
+      Object.entries(d.transport || {}).forEach(([c, f]) => { tr[c] = String(f); });
+      setTransport(tr);
     } catch (_) { /* ignore */ } finally { setLoaded(true); }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -4189,26 +4256,88 @@ function AdminBulkPricingPanel({ token, showToast }: { token: string | null; sho
   const save = async () => {
     setSaving(true);
     try {
-      await staffApi('/admin/config/bulk-discount', token, { method: 'PUT', body: { enabled: form.enabled, minKg: Number(form.minKg), discountPercent: Number(form.discountPercent) } });
-      showToast('Bulk pricing settings saved.', 'success');
+      const pp: Record<string, any> = {};
+      Object.entries(perProduct).forEach(([id, r]: [string, { discountPercent: string; minKg: string }]) => {
+        if (r.discountPercent !== '' || r.minKg !== '') pp[id] = { discountPercent: r.discountPercent === '' ? null : Number(r.discountPercent), minKg: r.minKg === '' ? null : Number(r.minKg) };
+      });
+      const tr: Record<string, number> = {};
+      Object.entries(transport).forEach(([c, f]) => { if (f !== '') tr[c] = Number(f); });
+      await staffApi('/admin/config/bulk-discount', token, { method: 'PUT', body: { enabled, minKg: Number(minKg), discountPercent: Number(discount), perProduct: pp, transport: tr } });
+      showToast('Bulk order settings saved. Customers see them immediately.', 'success');
+      await load();
     } catch (err: any) { showToast(err.message, 'error'); } finally { setSaving(false); }
   };
 
-  if (!loaded) return <div className={`${cardCls} p-8 text-center text-xs text-slate-400`}>Loading bulk pricing…</div>;
+  const setProd = (id: number, patch: Partial<{ discountPercent: string; minKg: string }>) =>
+    setPerProduct(prev => ({ ...prev, [String(id)]: { discountPercent: '', minKg: '', ...(prev[String(id)] || {}), ...patch } }));
+
+  const counties = Object.keys(countyFees || {}).sort((a, b) => a.localeCompare(b));
+  const shownCounties = counties.filter(c => c.toLowerCase().includes(countySearch.trim().toLowerCase()));
+  const customCount = Object.values(transport).filter(v => v !== '').length;
+  const digitsOnly = (v: string) => v.replace(/[^0-9.]/g, '');
+
+  if (!loaded) return <div className={`${cardCls} p-8 text-center text-xs text-slate-400`}>Loading bulk orders…</div>;
 
   return (
-    <div className={`${cardCls} p-4 sm:p-6 space-y-4`}>
-      <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2"><Layers className="w-5 h-5 text-emerald-400" /> Bulk Order pricing</h3>
-      <p className="text-[11px] text-slate-500">Controls the &quot;Bulk Order&quot; tab customers use: they pick a rice type and enter the kilograms they need at your normal per-kg price, and this discount applies automatically once they clear the minimum.</p>
-      <label className="flex items-start gap-3 p-3 rounded-2xl bg-slate-950 border border-slate-800 cursor-pointer">
-        <input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} className="mt-1 w-5 h-5 accent-emerald-500" />
-        <span><span className="block text-xs font-extrabold text-white">Bulk discount switched on</span><span className="block text-[11px] text-slate-500">When off, bulk orders still work but at the normal price — no discount.</span></span>
-      </label>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div><label className={labelCls}>Minimum kg to qualify</label><input inputMode="numeric" value={form.minKg} onChange={(e) => setForm({ ...form, minKg: e.target.value.replace(/\D/g, '') })} placeholder="50" className={inputCls} /></div>
-        <div><label className={labelCls}>Discount percentage</label><input inputMode="decimal" value={form.discountPercent} onChange={(e) => setForm({ ...form, discountPercent: e.target.value.replace(/[^0-9.]/g, '') })} placeholder="10" className={inputCls} /></div>
+    <div className="space-y-5">
+      <div className={`${cardCls} p-4 sm:p-6 space-y-4`}>
+        <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2"><Layers className="w-5 h-5 text-emerald-400" /> Bulk Orders</h3>
+        <p className="text-[11px] text-slate-500">You decide what bulk customers pay. A customer who uses the &quot;Bulk Order&quot; tab and reaches the minimum kg gets your discount, is <b className="text-slate-300">not limited by the shelf stock</b> of that rice, and pays the bulk delivery cost you set for their county (blank = the normal county fee).</p>
+        <label className="flex items-start gap-3 p-3 rounded-2xl bg-slate-950 border border-slate-800 cursor-pointer">
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="mt-1 w-5 h-5 accent-emerald-500" />
+          <span><span className="block text-xs font-extrabold text-white">Bulk discount switched on</span><span className="block text-[11px] text-slate-500">When off, bulk orders still work (no stock limit, county bulk delivery) but at the normal price.</span></span>
+        </label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div><label className={labelCls}>Default minimum kg to count as bulk</label><input inputMode="numeric" value={minKg} onChange={(e) => setMinKg(e.target.value.replace(/\D/g, ''))} placeholder="50" className={inputCls} /></div>
+          <div><label className={labelCls}>Default discount for bulk (%)</label><input inputMode="decimal" value={discount} onChange={(e) => setDiscount(digitsOnly(e.target.value))} placeholder="10" className={inputCls} /></div>
+        </div>
       </div>
-      <button onClick={save} disabled={saving} className="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-extrabold cursor-pointer">{saving ? 'Saving…' : 'Save bulk pricing'}</button>
+
+      <div className={`${cardCls} p-4 sm:p-6 space-y-3`}>
+        <h4 className="text-sm font-black text-white flex items-center gap-2"><Percent className="w-4 h-4 text-emerald-400" /> Discount per rice type</h4>
+        <p className="text-[11px] text-slate-500">Leave a box empty to use the default above. Type 0 to give no bulk discount on that rice.</p>
+        <div className="space-y-2">
+          {products.length === 0 && <p className="text-xs text-slate-500 text-center py-4">No rice products yet.</p>}
+          {products.map(p => {
+            const r = perProduct[String(p.id)] || { discountPercent: '', minKg: '' };
+            const pct = r.discountPercent !== '' ? Number(r.discountPercent) : Number(discount);
+            const bulkBag = Number.isFinite(pct) ? Math.round((p.basePrice || 0) * (1 - pct / 100)) : p.basePrice;
+            return (
+              <div key={p.id} className="grid grid-cols-2 sm:grid-cols-12 gap-2 items-end p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                <div className="col-span-2 sm:col-span-5">
+                  <p className="text-xs font-extrabold text-white truncate">{p.brandName}{p.variety ? ` · ${p.variety}` : ''}</p>
+                  <p className="text-[11px] text-slate-500">{p.weightKg}kg sack · normal {formatKES(p.basePrice)}{enabled ? <> → bulk <b className="text-emerald-400">{formatKES(bulkBag as number)}</b></> : null}</p>
+                </div>
+                <div className="sm:col-span-3"><label className="block text-[10px] font-bold text-slate-500 mb-0.5">Discount %</label><input inputMode="decimal" value={r.discountPercent} onChange={(e) => setProd(p.id, { discountPercent: digitsOnly(e.target.value) })} placeholder={`default ${discount || 0}`} className={inputCls} /></div>
+                <div className="sm:col-span-4"><label className="block text-[10px] font-bold text-slate-500 mb-0.5">Minimum kg</label><input inputMode="numeric" value={r.minKg} onChange={(e) => setProd(p.id, { minKg: e.target.value.replace(/\D/g, '') })} placeholder={`default ${minKg || 0}`} className={inputCls} /></div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className={`${cardCls} p-4 sm:p-6 space-y-3`}>
+        <h4 className="text-sm font-black text-white flex items-center gap-2"><Truck className="w-4 h-4 text-emerald-400" /> Bulk delivery cost per county</h4>
+        <p className="text-[11px] text-slate-500">Charged instead of the normal county fee when the order contains a bulk line. Leave a county empty to use its normal fee. {customCount} of {counties.length} counties have a bulk price.</p>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input value={countySearch} onChange={(e) => setCountySearch(e.target.value)} placeholder="Search county…" className={`${inputCls} sm:flex-1`} />
+          <input inputMode="decimal" value={fillAll} onChange={(e) => setFillAll(digitsOnly(e.target.value))} placeholder="Amount (KES)" className={`${inputCls} sm:w-36`} />
+          <button type="button" onClick={() => { if (fillAll === '') { showToast('Type an amount first.', 'error'); return; } const next = { ...transport }; shownCounties.forEach(c => { next[c] = fillAll; }); setTransport(next); }} className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 text-[11px] font-bold cursor-pointer">Set {countySearch.trim() ? 'shown' : 'all'}</button>
+          <button type="button" onClick={() => { const next = { ...transport }; shownCounties.forEach(c => { delete next[c]; }); setTransport(next); }} className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 text-[11px] font-bold cursor-pointer">Clear {countySearch.trim() ? 'shown' : 'all'}</button>
+        </div>
+        <div className="max-h-[28rem] overflow-y-auto rounded-2xl border border-slate-800 divide-y divide-slate-800">
+          {shownCounties.length === 0 && <p className="text-xs text-slate-500 text-center py-6">No county matches.</p>}
+          {shownCounties.map(c => (
+            <div key={c} className="flex items-center gap-3 px-3 py-2 bg-slate-950">
+              <span className="flex-1 text-xs font-bold text-slate-200 truncate">{c}</span>
+              <span className="text-[11px] text-slate-500 shrink-0">normal {formatKES(Number(countyFees[c]) || 0)}</span>
+              <input inputMode="decimal" value={transport[c] ?? ''} onChange={(e) => setTransport(prev => ({ ...prev, [c]: digitsOnly(e.target.value) }))} placeholder="bulk KES" className="w-28 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-bold text-white" />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <button onClick={save} disabled={saving} className="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-extrabold cursor-pointer">{saving ? 'Saving…' : 'Save bulk order settings'}</button>
     </div>
   );
 }
@@ -4405,6 +4534,7 @@ const ADMIN_TABS: AdminTabDef[] = [
   { id: 'inventory', label: 'Grain Catalog', icon: Package, desc: 'Edit all products', group: 'Shop' },
   { id: 'orders', label: 'Order Dispatch', icon: ShoppingBag, desc: 'Real-time pipeline', group: 'Shop' },
   { id: 'dispatch', label: 'Delivery Board', icon: Truck, desc: 'Riders & deliveries', group: 'Shop' },
+  { id: 'bulk', label: 'Bulk Orders', icon: Layers, desc: 'Discount & county delivery', group: 'Shop' },
   { id: 'payments', label: 'Payments', icon: Wallet, desc: 'Till, STK & checks', group: 'Money' },
   { id: 'promos', label: 'Promo Codes', icon: Percent, desc: 'Discount codes', group: 'Money' },
   { id: 'finances', label: 'Financial Engine', icon: DollarSign, desc: 'Real DB growth graph', group: 'Money' },
@@ -4466,6 +4596,7 @@ export default function PremiumRiceStore() {
   
   const [flashSale, setFlashSale] = useState({ active: false, endTime: null as string | null, msRemaining: 0 });
   const [baseTransportFee, setBaseTransportFee] = useState(250);
+  const [bulkCfg, setBulkCfg] = useState<BulkConfig | null>(null);
   const [countyOverrides, setCountyOverrides] = useState<{ [key: string]: number }>({});
   const [serverLocations, setServerLocations] = useState<{ [county: string]: string[] }>({});
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -4527,6 +4658,8 @@ export default function PremiumRiceStore() {
   const [resetStep, setResetStep] = useState<'request' | 'reset'>('request');
   const [formData, setFormData] = useState({ phoneNumber: '', email: '', password: '', fullName: '', resetToken: '', newPassword: '' });
   const [signupOtpStep, setSignupOtpStep] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);     // true while a sign-in / register / verify request is running
+  const [resendWait, setResendWait] = useState(0);     // seconds before "Resend code" can be used again
   const [referralInput, setReferralInput] = useState('');
   const [referralCheck, setReferralCheck] = useState<{ state: 'idle' | 'checking' | 'valid' | 'invalid'; agentName?: string }>({ state: 'idle' });
   const [signupOtp, setSignupOtp] = useState('');
@@ -4538,7 +4671,7 @@ export default function PremiumRiceStore() {
   const [showTerms, setShowTerms] = useState(false);
   
   // ADMIN PANEL NAVIGATION & DATA STATES
-  const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'finances' | 'users' | 'config' | 'carousel' | 'logs' | 'agents' | 'activity' | 'reports' | 'stock' | 'expenses' | 'campaigns' | 'reviews' | 'system' | 'payments' | 'promos' | 'dispatch'>('inventory');
+  const [adminTab, setAdminTab] = useState<'inventory' | 'orders' | 'finances' | 'users' | 'config' | 'carousel' | 'logs' | 'agents' | 'activity' | 'reports' | 'stock' | 'expenses' | 'campaigns' | 'reviews' | 'system' | 'payments' | 'promos' | 'dispatch' | 'bulk'>('inventory');
   const [newProduct, setNewProduct] = useState({ 
     brandName: '', variety: '', weightKg: '', basePrice: '', buyingPrice: '', flashSalePrice: '', stockQuantity: '', imageUrl: '', description: '', isOrganic: false 
   });
@@ -4680,6 +4813,7 @@ export default function PremiumRiceStore() {
     fetchLocations();
     fetchFlashSale();
     fetchPaymentMethods();
+    fetchBulkConfig();
 
     let newSocket: Socket | null = null;
     try {
@@ -4711,6 +4845,10 @@ export default function PremiumRiceStore() {
 
       newSocket.on('countyFeesUpdated', (fees: any) => {
         if (fees && typeof fees === 'object') setCountyOverrides(fees);
+      });
+
+      newSocket.on('bulkConfigUpdated', (cfg: any) => {
+        if (cfg && typeof cfg === 'object') setBulkCfg(cfg);
       });
 
       newSocket.on('heroUpdated', (newHero: any) => {
@@ -4788,10 +4926,10 @@ export default function PremiumRiceStore() {
     return () => { window.fetch = originalFetch; };
   }, []);
 
-  // IDLE LOGOUT: after a stretch with no activity (admin 15 min, everyone else 30 min) the person must log in again.
+  // IDLE LOGOUT: after a stretch with no activity (admin 6 hours, customers 24 hours, agents/support 30 min) the person must log in again.
   useEffect(() => {
     if (!token || !user) return;
-    const minutes = ({ admin: 15, support: 30, agent: 30 } as Record<string, number>)[user.role] || 30;
+    const minutes = ({ admin: 360, support: 30, agent: 30 } as Record<string, number>)[user.role] || 1440;
     const idleMs = minutes * 60 * 1000;
     const WARN_MS = 60 * 1000;
     const KEY = 'mwea_last_activity';
@@ -4883,6 +5021,9 @@ export default function PremiumRiceStore() {
     if (view === 'agent' && user?.role !== 'agent') setView(user ? 'home' : 'login');
     if (view === 'support' && user?.role !== 'support') setView(user ? 'home' : 'login');
   }, [view, user?.role]);
+
+  // Always price the cart with the admin's latest bulk settings when the customer opens the cart or the bulk tab
+  useEffect(() => { if (view === 'cart' || view === 'bulk') fetchBulkConfig(); }, [view]);
 
   // Cart lines use the newest product details (stock, bulk prices) whenever the catalog reloads
   useEffect(() => {
@@ -5075,6 +5216,15 @@ export default function PremiumRiceStore() {
     }
   };
 
+  const fetchBulkConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/config/bulk-discount`);
+      if (res.ok) setBulkCfg(await res.json());
+    } catch (err) {
+      console.error("Failed to load bulk order settings:", err);
+    }
+  };
+
   const fetchPaymentMethods = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/config/payment-methods`);
@@ -5249,25 +5399,24 @@ export default function PremiumRiceStore() {
     showToast(bulk ? `Added bulk order: ${product.brandName} (${qty} bags) to cart!` : `Added ${product.brandName} (${product.weightKg}kg) to cart!`, 'success');
   };
 
-  const updateCartQuantity = (productId: number, qty: number) => {
+  const updateCartQuantity = (productId: number, qty: number, bulk: boolean = false) => {
     if (qty <= 0) {
-      removeFromCart(productId);
+      removeFromCart(productId, bulk);
       return;
     }
-    setCart(prev => prev.map(item => item.productId === productId ? { ...item, quantity: qty } : item));
+    setCart(prev => prev.map(item => (item.productId === productId && !!item.bulk === bulk) ? { ...item, quantity: qty } : item));
   };
 
-  const removeFromCart = (productId: number) => {
-    setCart(prev => prev.filter(item => item.productId !== productId));
+  const removeFromCart = (productId: number, bulk: boolean = false) => {
+    setCart(prev => prev.filter(item => !(item.productId === productId && !!item.bulk === bulk)));
     showToast('Item removed from cart.', 'info');
   };
 
   const cartSubtotal = useMemo(() => {
     return cart.reduce((sum, item) => {
-      const p = item.product || {};
-      return sum + (getUnitPrice(p, item.quantity, flashSale.active).price * item.quantity);
+      return sum + (getCartLineUnit(item, flashSale.active, bulkCfg).price * item.quantity);
     }, 0);
-  }, [cart, flashSale.active]);
+  }, [cart, flashSale.active, bulkCfg]);
 
   const totalCartWeightKg = useMemo(() => {
     return cart.reduce((sum, item) => {
@@ -5276,15 +5425,24 @@ export default function PremiumRiceStore() {
     }, 0);
   }, [cart]);
 
+  // When the cart holds a bulk order, the admin's BULK delivery cost for the county replaces the normal fee (if one is set)
+  const bulkFreightFee = useMemo(() => {
+    if (!checkoutData.county || !bulkCfg) return undefined;
+    if (!cart.some(i => i.bulk && isBulkQualified(bulkCfg, i.product, i.quantity))) return undefined;
+    const f = getCountyFee(bulkCfg.transport || {}, checkoutData.county);
+    return f !== undefined && Number.isFinite(f) ? f : undefined;
+  }, [cart, bulkCfg, checkoutData.county]);
+
   const activeShippingFee = useMemo(() => {
     const selectedCounty = checkoutData.county;
     if (!selectedCounty) return 0;
+    if (bulkFreightFee !== undefined) return bulkFreightFee;
     const overrideFee = getCountyFee(countyOverrides, selectedCounty);
     if (overrideFee !== undefined && Number.isFinite(overrideFee)) {
       return overrideFee;
     }
     return baseTransportFee;
-  }, [checkoutData.county, countyOverrides, baseTransportFee]);
+  }, [checkoutData.county, countyOverrides, baseTransportFee, bulkFreightFee]);
 
   const promoDiscount = promoState ? Math.min(promoState.discount, cartSubtotal) : 0;
   const cartGrandTotal = useMemo(() => {
@@ -5317,8 +5475,16 @@ export default function PremiumRiceStore() {
     setView('admin');
   };
 
+  // Resend cooldown ticks down once a second
+  useEffect(() => {
+    if (resendWait <= 0) return;
+    const t = setTimeout(() => setResendWait(w => Math.max(0, w - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [resendWait]);
+
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (authBusy) return; // a second tap while the first request is still running is ignored (it used to send twice)
     const identifier = (formData.phoneNumber || formData.email || '').trim();
     const identity = buildIdentityPayload(identifier);
 
@@ -5343,6 +5509,7 @@ export default function PremiumRiceStore() {
       }
     }
     
+    setAuthBusy(true);
     try {
       let endpoint = '/user/login';
       let payload: any = { ...identity, identifier, password: formData.password };
@@ -5368,6 +5535,7 @@ export default function PremiumRiceStore() {
         const shownPhone = String(data.phoneNumber || identifier || '').replace(/\D/g, '');
         setOtpSentTo(data.smsSent === false && data.emailSent ? (data.email || 'your email') : (shownPhone.length >= 9 ? `0${shownPhone.slice(-9, -6)}***${shownPhone.slice(-3)}`.replace(/^0(\d{3})/, '0$1') : (data.email || 'your phone')));
         setSignupOtpStep(true);
+        setResendWait(30);
         showToast(data.message || 'Verification code sent. Check your phone or email.', 'success');
         return;
       }
@@ -5400,11 +5568,15 @@ export default function PremiumRiceStore() {
       }
     } catch (err: any) {
       showToast(err.message || 'Server authentication error', 'error');
+    } finally {
+      setAuthBusy(false);
     }
   };
 
   const handleResendSignupOtp = async () => {
+    if (authBusy || resendWait > 0) return;
     const identifier = (formData.phoneNumber || formData.email || '').trim();
+    setAuthBusy(true);
     try {
       const res = await fetch(`${API_BASE_URL}/user/signup/resend-otp`, {
         method: 'POST',
@@ -5419,6 +5591,9 @@ export default function PremiumRiceStore() {
       }
     } catch (err: any) {
       showToast(err.message || 'Failed to resend verification code', 'error');
+    } finally {
+      setAuthBusy(false);
+      setResendWait(30);
     }
   };
 
@@ -6556,12 +6731,13 @@ export default function PremiumRiceStore() {
                     <div className="divide-y divide-slate-100">
                       {cart.map(item => {
                         const p = item.product || {};
-                        const unit = getUnitPrice(p, item.quantity, flashSale.active);
+                        const unit = getCartLineUnit(item, flashSale.active, bulkCfg);
+                        const lineIsBulk = !!item.bulk && isBulkQualified(bulkCfg, p, item.quantity);
                         const effectivePrice = unit.price;
                         const nextTier = (Array.isArray(p.wholesaleTiers) ? p.wholesaleTiers : []).filter((t: any) => t.minQty > item.quantity).sort((a: any, b: any) => a.minQty - b.minQty)[0];
 
                         return (
-                          <div key={item.productId} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div key={`${item.productId}-${item.bulk ? 'bulk' : 'shop'}`} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                             <div className="flex items-center gap-3">
                               <img 
                                 src={p.imageUrl || 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=300&q=80'} 
@@ -6571,7 +6747,9 @@ export default function PremiumRiceStore() {
                               <div>
                                 <h4 className="font-extrabold text-slate-900 text-xs sm:text-sm">{p.brandName}</h4>
                                 <p className="text-[11px] text-slate-500">{p.variety} • {p.weightKg}kg Sack</p>
-                                <p className="text-emerald-700 font-black text-xs sm:text-sm mt-0.5">{formatKES(effectivePrice)} {unit.bulk && <span className="ml-1 px-1.5 py-0.5 rounded-md bg-sky-100 text-sky-800 text-[9px] font-black uppercase">Bulk price</span>}</p>
+                                <p className="text-emerald-700 font-black text-xs sm:text-sm mt-0.5">{formatKES(effectivePrice)} {unit.bulk && <span className="ml-1 px-1.5 py-0.5 rounded-md bg-sky-100 text-sky-800 text-[9px] font-black uppercase">{unit.bulkPercent ? `Bulk -${unit.bulkPercent}%` : 'Bulk price'}</span>}</p>
+                                {lineIsBulk && <p className="text-[10px] font-bold text-emerald-700">Bulk order · not limited by shelf stock</p>}
+                                {item.bulk && !lineIsBulk && <p className="text-[10px] font-bold text-amber-600">Below {bulkRuleFor(bulkCfg, p.id).minKg}kg this is a normal order (normal price, stock limits apply)</p>}
                                 {nextTier && <p className="text-[10px] font-bold text-sky-700">Add {nextTier.minQty - item.quantity} more to pay {formatKES(nextTier.price)} each</p>}
                               </div>
                             </div>
@@ -6580,14 +6758,14 @@ export default function PremiumRiceStore() {
                             <div className="flex items-center justify-between sm:justify-end gap-3">
                               <div className="flex items-center border border-slate-200 rounded-xl overflow-hidden bg-slate-50">
                                 <button 
-                                  onClick={() => updateCartQuantity(item.productId, item.quantity - 1)}
+                                  onClick={() => updateCartQuantity(item.productId, item.quantity - 1, !!item.bulk)}
                                   className="px-3 py-1 text-slate-600 hover:bg-slate-200 font-bold cursor-pointer"
                                 >
                                   -
                                 </button>
                                 <span className="px-3 py-1 font-bold text-xs text-slate-800">{item.quantity}</span>
                                 <button 
-                                  onClick={() => updateCartQuantity(item.productId, item.quantity + 1)}
+                                  onClick={() => updateCartQuantity(item.productId, item.quantity + 1, !!item.bulk)}
                                   className="px-3 py-1 text-slate-600 hover:bg-slate-200 font-bold cursor-pointer"
                                 >
                                   +
@@ -6595,7 +6773,7 @@ export default function PremiumRiceStore() {
                               </div>
 
                               <button 
-                                onClick={() => removeFromCart(item.productId)}
+                                onClick={() => removeFromCart(item.productId, !!item.bulk)}
                                 className="p-2 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -6793,7 +6971,7 @@ export default function PremiumRiceStore() {
                         <span className="font-extrabold text-slate-800">{totalCartWeightKg} kg</span>
                       </div>
                       <div className="flex justify-between text-slate-600 font-semibold">
-                        <span>Freight Delivery ({checkoutData.county}):</span>
+                        <span>Freight Delivery ({checkoutData.county}){bulkFreightFee !== undefined ? ' · bulk rate' : ''}:</span>
                         <span className="font-extrabold text-slate-800">{checkoutData.county ? formatKES(activeShippingFee) : 'Choose county'}</span>
                       </div>
                       {promoDiscount > 0 && (
@@ -7175,9 +7353,10 @@ export default function PremiumRiceStore() {
                       <button 
                         type="button"
                         onClick={handleResendSignupOtp}
-                        className="text-emerald-600 font-bold hover:underline cursor-pointer"
+                        disabled={authBusy || resendWait > 0}
+                        className="text-emerald-600 font-bold hover:underline cursor-pointer disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed"
                       >
-                        Resend code
+                        {resendWait > 0 ? `Resend in ${resendWait}s` : 'Resend code'}
                       </button>
                     </div>
                   )}
@@ -7196,9 +7375,10 @@ export default function PremiumRiceStore() {
 
                   <button 
                     type="submit"
-                    className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-md shadow-emerald-600/20 cursor-pointer"
+                    disabled={authBusy}
+                    className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-wait text-white font-bold text-xs transition-all shadow-md shadow-emerald-600/20 cursor-pointer"
                   >
-                    {isLogin ? 'Sign In' : (signupOtpStep ? 'Verify & Create Account' : 'Register Account')}
+                    {authBusy ? (isLogin ? 'Signing in…' : (signupOtpStep ? 'Verifying…' : 'Sending your code…')) : (isLogin ? 'Sign In' : (signupOtpStep ? 'Verify & Create Account' : 'Register Account'))}
                   </button>
 
                   <div className="text-center pt-2">
@@ -7701,9 +7881,9 @@ export default function PremiumRiceStore() {
                   {adminTab === 'payments' && (
                     <div className="space-y-5">
                       <AdminPaymentsPanel token={token} showToast={showToast} />
-                      <AdminBulkPricingPanel token={token} showToast={showToast} />
                     </div>
                   )}
+                  {adminTab === 'bulk' && <AdminBulkOrdersPanel token={token} showToast={showToast} products={products} countyFees={countyOverrides} />}
                   {adminTab === 'promos' && <AdminPromosPanel token={token} showToast={showToast} />}
                   {adminTab === 'dispatch' && <AdminDispatchPanel token={token} showToast={showToast} />}
                   {adminTab === 'system' && <AdminSystemPanel token={token} showToast={showToast} />}
@@ -8647,7 +8827,7 @@ export default function PremiumRiceStore() {
                 )}
                 <button type="button" onClick={() => { setReviewProduct(quickViewProduct); setQuickViewProduct(null); }} className="flex items-center gap-1.5 text-[11px] cursor-pointer hover:underline">
                   <StarRating value={quickViewProduct.ratingAvg || 0} size={13} />
-                  <span className="font-bold text-slate-700">{(quickViewProduct.ratingCount || 0) > 0 ? `${(quickViewProduct.ratingAvg || 0).toFixed(1)} (${quickViewProduct.ratingCount} reviews)` : 'No reviews yet'}</span>
+                  <span className="font-bold text-slate-700">{(quickViewProduct.hasRating ?? ((quickViewProduct.ratingCount || 0) > 0)) ? (quickViewProduct.ratingAvg || 0).toFixed(1) : 'No reviews yet'}</span>
                 </button>
 
                 <p className="text-xs text-slate-600 leading-relaxed">
