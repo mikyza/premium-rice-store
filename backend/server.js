@@ -40,6 +40,7 @@ import nodemailer from 'nodemailer';
 // Payment & Webhook Controller Integrations
 import { handlePayHeroWebhook } from './controllers/webhookController.js';
 import { initiatePayHeroPayment } from './controllers/paymentController.js';
+import { registerChatAssistant } from './chatAssistant.js';
 
 // Initialize environment variables from .env file
 dotenv.config();
@@ -4333,94 +4334,14 @@ async function startServer() {
     });
 
     // ====================================================================================
-    // AI SHOPPING ASSISTANT — answers from the live product catalog, prices & the
-    // signed-in customer's own orders. Requires ANTHROPIC_API_KEY in the environment;
-    // if it's missing the endpoint says so instead of failing silently.
+    // AI SHOPPING ASSISTANT (tool-based, reads live data). Code lives in ./chatAssistant.js
+    // Needs ANTHROPIC_API_KEY. Admin can edit its settings at /api/admin/config/chat-assistant
     // ====================================================================================
-    const chatRateLimit = new Map(); // ip -> [timestamps]
-    const CHAT_RATE_LIMIT_PER_MIN = 12;
-
-    // Reads the Bearer token if present but never rejects the request — guests can chat too.
-    function softAuth(req) {
-      const authHeader = req.headers['authorization'];
-      const raw = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
-      if (!raw) return null;
-      try { return jwt.verify(raw, JWT_SECRET); } catch (_) { return null; }
-    }
-
-    expressApp.post('/api/chat', async (req, res) => {
-      try {
-        const ip = req.ip || 'unknown';
-        const now = Date.now();
-        const hits = (chatRateLimit.get(ip) || []).filter(t => now - t < 60000);
-        if (hits.length >= CHAT_RATE_LIMIT_PER_MIN) return res.status(429).json({ error: 'Too many messages — please wait a moment before sending another.' });
-        hits.push(now); chatRateLimit.set(ip, hits);
-
-        const apiKey = process.env.ANTHROPIC_API_KEY;
-        if (!apiKey) return res.status(503).json({ error: 'The shopping assistant is not configured yet (missing ANTHROPIC_API_KEY on the server).' });
-
-        const message = String((req.body || {}).message || '').slice(0, 1000).trim();
-        if (!message) return res.status(400).json({ error: 'Type a message first.' });
-        const history = Array.isArray((req.body || {}).history) ? (req.body || {}).history.slice(-10) : [];
-
-        const decoded = softAuth(req);
-        let customerLine = 'The visitor is browsing as a guest (not signed in).';
-        let recentOrdersLine = '';
-        if (decoded && decoded.id) {
-          const dbUser = await User.findByPk(decoded.id, { attributes: ['id', 'fullName', 'phoneNumber', 'rewardPoints'] }).catch(() => null);
-          if (dbUser) {
-            customerLine = `Signed-in customer: ${dbUser.fullName}, phone ${dbUser.phoneNumber}, ${dbUser.rewardPoints || 0} reward points.`;
-            const myOrders = await Order.findAll({ where: { userId: dbUser.id }, order: [['createdAt', 'DESC']], limit: 5 }).catch(() => []);
-            if (myOrders.length) {
-              recentOrdersLine = 'Their most recent orders:\n' + myOrders.map(o =>
-                `- Order #${o.id}: ${o.status}, KES ${o.grandTotal}, paid: ${o.paymentDetails?.isPaid ? 'yes' : 'no'}, placed ${new Date(o.createdAt).toLocaleDateString('en-KE')}`
-              ).join('\n');
-            }
-          }
-        }
-
-        const products = await RiceProduct.findAll({ attributes: ['id', 'brandName', 'variety', 'weightKg', 'basePrice', 'flashSalePrice', 'stockQuantity', 'description', 'millingGrade', 'isOrganic'] });
-        const catalogLines = products.map(p =>
-          `- #${p.id} ${p.brandName} ${p.variety || ''} (${p.weightKg}kg sack): KES ${p.basePrice}` +
-          (flashSaleState.active && p.flashSalePrice ? ` (flash sale: KES ${p.flashSalePrice})` : '') +
-          `, stock: ${p.stockQuantity > 0 ? p.stockQuantity + ' bags available' : 'out of stock'}` +
-          (p.isOrganic ? ', organic' : '') + (p.millingGrade ? `, grade ${p.millingGrade}` : '')
-        ).join('\n');
-
-        const bulkCfg = await getBulkConfig();
-        const payCfg = await getPaymentConfig();
-        const nowNairobi = new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi', dateStyle: 'full', timeStyle: 'short' });
-
-        const systemPrompt = [
-          `You are the customer-service assistant for Mwea Rice Hub, an online rice store in Kenya.`,
-          `Current date/time (Africa/Nairobi): ${nowNairobi}.`,
-          `${customerLine}`,
-          recentOrdersLine,
-          `\nFull product catalog right now:\n${catalogLines || '(no products listed yet)'}`,
-          `\nPayment: STK push ${payCfg.stkEnabled ? 'is available' : 'is off right now'}; Till payment ${payCfg.tillEnabled ? `is available (Till ${payCfg.tillNumber})` : 'is off right now'}.`,
-          `\nBulk orders: customers can order in bulk kg on the "Bulk Order" tab; orders of ${bulkCfg.minKg}kg or more of one rice type get ${bulkCfg.enabled ? bulkCfg.discountPercent + '% off' : '(bulk pricing currently off)'} (some rice types may have their own bulk discount, shown on the Bulk Order tab; bulk orders are not limited by shelf stock; bulk delivery is charged per county and shown at checkout).`,
-          `\nBe concise, friendly and accurate. Only quote prices, stock and policies from the information above — never invent a price, product or order detail. If something isn't in your information, say you'll have a human from customer care follow up, and don't guess at order statuses or receipts.`
-        ].filter(Boolean).join('\n');
-
-        const anthropicRes = await axios.post('https://api.anthropic.com/v1/messages', {
-          model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5',
-          max_tokens: 600,
-          system: systemPrompt,
-          messages: [
-            ...history.filter(h => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string').map(h => ({ role: h.role, content: h.content.slice(0, 1000) })),
-            { role: 'user', content: message }
-          ]
-        }, {
-          headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-          timeout: 20000
-        });
-
-        const reply = (anthropicRes.data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim() || "Sorry, I didn't catch that — could you rephrase?";
-        res.json({ reply });
-      } catch (err) {
-        console.error('❌ Chat assistant error:', err.response?.data || err.message);
-        res.status(500).json({ error: 'The shopping assistant is unavailable right now. Please try again shortly, or contact customer care.' });
-      }
+    registerChatAssistant(expressApp, {
+      User, Order, RiceProduct, Delivery, SystemConfig, JWT_SECRET, flashSaleState,
+      authenticateToken, requireAdmin, getBulkConfig, bulkRuleFor, bulkTransportFor,
+      getPaymentConfig, getOps, evaluatePromo, getWholesaleTiers, bestTier,
+      resolveLocationName, getOrderItems, round2, countyOverrides, logisticsHierarchy, logEvent
     });
 
     // --- SAFARICOM C2B FEED: every payment made to the Till arrives here, so codes are checked with no human involved ---
