@@ -254,22 +254,25 @@ export function registerChatAssistant(app, deps) {
   };
 
   // ======================================================================== product matching (fuzzy + learned vocabulary)
+  const placeWords = new Set([...Object.keys(countyOverrides || {}), ...Object.entries(logisticsHierarchy || {}).flatMap(([c, a]) => [c, ...(Array.isArray(a) ? a : [])])].flatMap((x) => B.normalize(x).split(' ')));
   const GENERIC = new Set(['rice', 'want', 'buy', 'order', 'bag', 'kg', 'price', 'stock', 'need', 'get', 'add', 'cart', 'please', 'much', 'number', 'location', 'delivery', 'pay', 'yes', 'no', 'best', 'cheap', 'family', 'pilau', 'biryani', 'help', 'total', 'hello']);
   const USE_HINTS = { pilau: ['pishori', 'aromatic', 'pilau', 'basmati'], biryani: ['basmati', 'long', 'aromatic'], ugali: [], brown: ['brown', 'organic'], organic: ['organic'], sticky: ['sticky', 'sushi', 'short'], basmati: ['basmati'], pishori: ['pishori'] };
   function matchProducts(text, products) {
     const pw = new Set(products.flatMap((p) => B.normalize(`${p.brandName || ''} ${p.variety || ''} ${p.description || ''} ${p.millingGrade || ''}`).split(' ')));
-    const q = B.normalize(text).split(' ').filter((w) => w.length > 2 && !/\d/.test(w) && (pw.has(w) || termCache.has(w) || !classifier.vocab.has(B.tokens(w, { keepStop: true })[0] || w)));
-    const qt = q.map((w) => B.tokens(w)[0] || w).filter((w) => !GENERIC.has(w));
+    const q = B.normalize(text).split(' ').filter((w) => w.length > 2 && !/\d/.test(w) && !B.isFiller(w) && (!placeWords.has(w) || pw.has(w)) && (pw.has(w) || termCache.has(w) || !classifier.vocab.has(B.tokens(w, { keepStop: true })[0] || w)));   // filler words and place names must not dilute the product score
+    const near = (w) => pw.has(w) || termCache.has(w) || [...pw].some((h) => h.length >= 4 && B.fuzzyEq(w, h));
+    const cand = q.filter(near); const qs = cand.length ? cand : q;      // words that are clearly not rice names ("kwenda", "quickly") are ignored
+    const qt = qs.map((w) => B.tokens(w)[0] || w).filter((w) => !GENERIC.has(w));
     const scored = products.map((p) => {
       const hay = B.normalize(`${p.brandName || ''} ${p.variety || ''} ${p.description || ''} ${p.millingGrade || ''} ${p.isOrganic ? 'organic' : ''}`).split(' ').filter((w) => w.length > 2);
       const nameWords = B.normalize(`${p.brandName || ''} ${p.variety || ''}`).split(' ');
       let s = 0;
-      for (const w of q) {
+      for (const w of qs) {
         if (termCache.get(w) === p.id) { s += 1.3; continue; }
         if (GENERIC.has(B.tokens(w)[0] || w)) continue;
         if (nameWords.includes(w)) s += 1; else if (nameWords.some((h) => B.fuzzyEq(w, h))) s += 0.85; else if (hay.includes(w)) s += 0.45; else if (hay.some((h) => B.fuzzyEq(w, h))) s += 0.35;
       }
-      return { p, score: qt.length || q.length ? s / Math.max(1, Math.min(2, qt.length || q.length)) : 0 };
+      return { p, score: qt.length || qs.length ? s / Math.max(1, Math.min(2, qt.length || qs.length)) : 0 };
     }).filter((x) => x.score > 0.3).sort((a, b) => b.score - a.score);
     return scored;
   }
@@ -610,11 +613,126 @@ export function registerChatAssistant(app, deps) {
     return R(`${L(ctx, 'My picks for you', 'Ninapendekeza')}${use ? ` (${use})` : ''}${budget ? ` ${L(ctx, 'under', 'chini ya')} ${money(budget)}` : ''}:\n${top.map((p, i) => `${i + 1}. ${p.brandName} ${p.weightKg || ''}kg ${money(effectivePrice(p))} - ${whyFits(p, use)}`).join('\n')}.${note}`, { cards: top.map((p) => cardOf(p)), options: top.map((p) => opt(`${L(ctx, 'Buy', 'Nunua')} ${p.brandName}`, `pick:${p.id}`)) });
   }
 
+  // ---------------------------------------------------------------- understanding helpers: follow-ups, compound questions, quotes, budgets, comparisons
+  const withBack = (ctx, r) => {
+    if (r && SLOT_STAGES.has(ctx.state.stage) && ctx.state.ask && ctx.state.ask.text) {
+      r.reply = `${r.reply}\n\n${L(ctx, 'Back to your order:', 'Turudi kwenye oda yako:')} ${ctx.state.ask.text}`;
+      if (ctx.state.ask.options && ctx.state.ask.options.length) r.options = ctx.state.ask.options;
+    }
+    return r;
+  };
+  const FOLLOWABLE = new Set(['price', 'stock', 'buy', 'compare']);
+  const LEAD_WORDS = new Set(['and', 'what', 'about', 'how', 'then', 'also', 'na', 'vipi', 'je', 'kuhusu', 'or', 'ama', 'the', 'one', 'is', 'there', 'any', 'of', 'ya', 'wa']);
+  /** "and basmati?" right after a price question means "and the price of basmati": reuse the last topic when the message is only a product name */
+  function followUpIntent(ctx) {
+    const li = ctx.state.lastIntent; if (!li || !FOLLOWABLE.has(li.intent) || Date.now() - li.at > 5 * 60 * 1000) return null;
+    const words = B.normalize(ctx.text).split(' ').filter(Boolean);
+    if (!words.length || words.length > 5) return null;
+    const pm = matchProducts(ctx.text, ctx.products);
+    if (!pm[0] || pm[0].score < 0.8) return null;
+    const rest = words.filter((w) => !LEAD_WORDS.has(w) && !ctx.productWords.has(w) && !termCache.has(w) && !GENERIC.has(B.tokens(w, { keepStop: true })[0] || w) && !/\d/.test(w));
+    return rest.length ? null : (li.intent === 'compare' ? 'price' : li.intent);
+  }
+  const MULTI_OK = new Set(['price', 'stock', 'delivery_info', 'payment_info', 'store_info', 'points', 'promo', 'compare']);
+  const TRANSACTIONAL = new Set(['buy', 'bulk', 'cancel', 'proceed', 'change', 'show_cart', 'human', 'complaint', 'payment_check', 'payment_resend', 'order_status']);
+  /** "how much is pishori and do you deliver to nakuru?" -> answer both parts instead of only the louder one */
+  async function compound(ctx) {
+    const parts = B.splitClauses(ctx.text);
+    if (parts.length < 2 || parts.length > 4) return null;
+    const picks = [];
+    for (const part of parts) {
+      const c = classifier.classify(part); let t = c[0];
+      if (!t) continue;
+      const place = (await findPlace(part)).county;                       // "... to nakuru" is a delivery question even when the wording is thin
+      const dl = c.slice(0, 3).find((x) => x.intent === 'delivery_info');
+      if (place && dl && dl.score >= 0.35 && (t.score - dl.score) <= 0.2 && !TRANSACTIONAL.has(t.intent)) t = dl;
+      if (t.score < 0.5 && !(place && t.intent === 'delivery_info')) continue;
+      if (TRANSACTIONAL.has(t.intent)) return null;                       // an order/complaint inside the message: keep the normal single-intent flow
+      if (MULTI_OK.has(t.intent) && ((place && t.intent === 'delivery_info') || t !== c[0] || !c[1] || t.score - c[1].score >= 0.08) && !picks.some((x) => x.intent === t.intent)) picks.push({ intent: t.intent, text: part });
+    }
+    if (picks.length < 2) return null;
+    const replies = [];
+    for (const pk of picks.slice(0, 3)) { const r = await intentReply({ ...ctx, text: pk.text }, pk.intent); if (r) replies.push(r); }
+    if (replies.length < 2) return null;
+    const seen = new Set(); const cards = []; replies.forEach((r) => (r.cards || []).forEach((c) => { const k = c.id != null ? `p${c.id}` : JSON.stringify(c); if (!seen.has(k) && cards.length < 4) { seen.add(k); cards.push(c); } }));
+    const options = []; replies.forEach((r) => (r.options || []).forEach((o) => { if (!options.some((x) => x.value === o.value) && options.length < 5) options.push(o); }));
+    return { intent: picks[0].intent, result: withBack(ctx, R(replies.map((r) => r.reply).join('\n\n'), { cards, options: options.length ? options : mainOptions(ctx) })) };
+  }
+  /** "how much for 3 bags of pishori to nakuru" -> a full quote (rice + delivery + total) without starting an order */
+  async function quoteReply(ctx, product, qty) {
+    const w = Number(product.weightKg) || 1;
+    const bags = qty.unit === 'kg' ? Math.max(1, Math.round(qty.value / w)) : Math.round(qty.value);
+    if (!(bags >= 1) || bags > 1000) return null;
+    const cfg = await getBulkConfig(); const rule = bulkRuleFor(cfg, product.id);
+    const bulk = cfg.enabled && rule.discountPercent > 0 && bags * w >= rule.minKg;
+    const place = await findPlace(ctx.text); const county = place.county || ctx.state.county || null;
+    const q = await priceBasket([{ productId: product.id, name: product.brandName, quantity: bags, bulk }], { county, promoCode: ctx.state.promo, userId: ctx.user && ctx.user.id, settings: ctx.settings });
+    if (!q.lines.length) return null;
+    ctx.meta.productId = product.id; ctx.state.lastShown = [product.id]; ctx.state.focusProductId = product.id;
+    const note = qty.unit === 'kg' && bags * w !== qty.value ? `${L(ctx, `${qty.value}kg rounds to ${bags} bags of ${w}kg.`, `Kilo ${qty.value} ni magunia ${bags} ya kilo ${w}.`)}\n` : '';
+    const tail = q.delivery === undefined ? L(ctx, 'Delivery is extra. Tell me your county for the exact total.', 'Usafiri ni zaidi. Niambie kaunti yako upate jumla kamili.') : (q.eta ? `${L(ctx, 'Delivery time', 'Muda wa kufika')}: ${q.eta}.` : '');
+    const issue = q.issues.length ? `\n${q.issues.join(' ')}` : '';
+    return R(`${note}${summaryText(q, ctx.state.lang)}\n${tail}${issue}`, { options: q.issues.length ? [opt(L(ctx, 'Other rice', 'Mchele mwingine'), 'intent:browse')] : [opt(`${L(ctx, 'Order', 'Agiza')} ${bags} x ${product.brandName}`, `add:${product.id}:${bags}`), opt(L(ctx, 'Other rice', 'Mchele mwingine'), 'intent:browse')] });
+  }
+  /** "I have 5000, what can I get?" / "how many bags of pishori with 3000" -> do the arithmetic for the customer */
+  async function budgetReply(ctx, budget, product) {
+    if (!product) return recommend(ctx, ctx.text, ctx.products);
+    const price = effectivePrice(product); const w = Number(product.weightKg) || 1; const stock = Math.max(0, Number(product.stockQuantity) || 0);
+    const sub = async (n) => (await priceBasket([{ productId: product.id, name: product.brandName, quantity: n, bulk: false }], { settings: ctx.settings })).subtotal;
+    let n = price > 0 ? Math.floor(budget / price) : 0;
+    while (n < 500 && n + 1 <= stock && (await sub(n + 1)) <= budget) n += 1;     // quantity prices can stretch a budget
+    while (n >= 1 && (await sub(n)) > budget) n -= 1;
+    n = Math.min(n, stock);
+    ctx.meta.productId = product.id; ctx.state.focusProductId = product.id;
+    if (n < 1) {
+      const cheaper = ctx.products.filter((p) => Number(p.stockQuantity) > 0 && effectivePrice(p) <= budget).sort((a, b) => effectivePrice(a) - effectivePrice(b))[0];
+      return R(stock <= 0 ? L(ctx, `${product.brandName} is out of stock right now.`, `${product.brandName} haipo kwa sasa.`) : `${product.brandName} ${w}kg is ${money(price)} a bag, which is above ${money(budget)}.${cheaper ? ` ${L(ctx, 'Within your budget I can offer', 'Kwa bajeti yako ninaweza kukupa')} ${cheaper.brandName} ${cheaper.weightKg || ''}kg ${money(effectivePrice(cheaper))}.` : ''}`, { options: [cheaper ? opt(`${L(ctx, 'Buy', 'Nunua')} ${cheaper.brandName}`, `pick:${cheaper.id}`) : null, opt(L(ctx, 'Browse rice', 'Angalia mchele'), 'intent:browse')].filter(Boolean) });
+    }
+    const spent = await sub(n);
+    return R(L(ctx, `With ${money(budget)} you can get ${n} bag${n === 1 ? '' : 's'} of ${product.brandName} (${n * w}kg) for ${money(spent)}, with ${money(budget - spent)} left over. Delivery is extra.`, `Kwa ${money(budget)} unapata magunia ${n} ya ${product.brandName} (kilo ${n * w}) kwa ${money(spent)}, na inabaki ${money(budget - spent)}. Usafiri ni zaidi.`), { options: [opt(`${L(ctx, 'Order', 'Agiza')} ${n} x ${product.brandName}`, `add:${product.id}:${n}`), opt(L(ctx, 'Other rice', 'Mchele mwingine'), 'intent:browse')] });
+  }
+  function budgetIntent(ctx, top) {
+    const st = ctx.state; if (SLOT_STAGES.has(st.stage) && !['pick_product', 'more'].includes(st.stage)) return null;   // never hijack checkout steps
+    const budget = B.extractBudget(ctx.text); if (!budget) return null;
+    if ((B.extractQuantity(ctx.text) || {}).unit) return null;
+    const pm = matchProducts(ctx.text, ctx.products); const product = pm[0] && pm[0].score >= 0.8 ? pm[0].p : null;
+    const UNRELATED = ['order_status', 'payment_check', 'payment_resend', 'complaint', 'human', 'cancel', 'promo', 'delivery_info', 'payment_info', 'store_info'];
+    if (top && top.score >= 0.5 && (product ? UNRELATED.includes(top.intent) : !['browse', 'recommend', 'buy', 'price', 'stock', 'bulk'].includes(top.intent))) return null;
+    return { budget, product };
+  }
+  /** every rice named in the sentence ("pishori or basmati" -> both), scored per word so two names do not dilute each other */
+  function mentionedProducts(ctx) {
+    const words = B.normalize(ctx.text).split(' ').filter((w) => w.length > 2 && !B.isFiller(w));
+    return ctx.products.filter((p) => {
+      const nameWords = B.normalize(`${p.brandName || ''} ${p.variety || ''}`).split(' ').filter((w) => w.length > 2 && !GENERIC.has(w));
+      return words.some((w) => termCache.get(w) === p.id || nameWords.includes(w) || nameWords.some((h) => B.fuzzyEq(w, h)));
+    });
+  }
+  /** "which is cheaper, pishori or basmati?" -> side by side, with the winner per kg */
+  async function compareReply(ctx) {
+    const st = ctx.state; let picks = mentionedProducts(ctx).slice(0, 3);
+    if (picks.length < 2) picks = (st.lastShown || []).map((id) => ctx.products.find((x) => x.id === id)).filter(Boolean).slice(0, 3);
+    if (picks.length < 2) return showProducts(ctx, ctx.products, L(ctx, 'Tell me which two you want to compare, or tap them here:', 'Niambie mbili unazotaka kulinganisha, au bonyeza hapa:'));
+    const rows = picks.map((p) => { const price = effectivePrice(p); const kg = Number(p.weightKg) || 0; return { p, price, kg, perKg: kg > 0 ? round2(price / kg) : null }; });
+    const withKg = rows.filter((r) => r.perKg != null).sort((a, b) => a.perKg - b.perKg);
+    const lines = rows.map((r) => `- ${r.p.brandName}${r.p.variety ? ` (${r.p.variety})` : ''} ${r.kg ? `${r.kg}kg` : ''}: ${money(r.price)}${r.perKg ? `, ${money(r.perKg)} per kg` : ''}, ${stockLabel(r.p.stockQuantity)}`);
+    const win = withKg.length >= 2 && withKg[0].perKg < withKg[1].perKg ? L(ctx, `Cheapest per kg: ${withKg[0].p.brandName} (saves ${money(round2(withKg[1].perKg - withKg[0].perKg))} per kg against ${withKg[1].p.brandName}).`, `Rahisi zaidi kwa kilo: ${withKg[0].p.brandName}.`) : '';
+    st.lastShown = picks.map((p) => p.id); ctx.meta.productId = picks[0].id;
+    return R(`${L(ctx, 'Side by side:', 'Mlinganisho:')}\n${lines.join('\n')}${win ? `\n${win}` : ''}`, { cards: picks.map((p) => cardOf(p)), options: picks.map((p) => opt(`${L(ctx, 'Buy', 'Nunua')} ${p.brandName}`, `pick:${p.id}`)) });
+  }
+  const INTENT_LABELS = {
+    price: ['Prices', 'Bei'], stock: ['Check stock', 'Angalia hisa'], buy: ['Buy rice', 'Nunua mchele'], browse: ['Browse rice', 'Angalia mchele'], recommend: ['Recommend rice', 'Pendekeza mchele'],
+    bulk: ['Bulk order', 'Oda ya jumla'], delivery_info: ['Delivery', 'Usafiri'], payment_info: ['Payment', 'Malipo'], order_status: ['Track my order', 'Fuatilia oda'], store_info: ['Contact and hours', 'Mawasiliano'],
+    points: ['Reward points', 'Pointi'], promo: ['Promo codes', 'Punguzo'], compare: ['Compare rice', 'Linganisha mchele'], human: ['Talk to a person', 'Ongea na mtu'], complaint: ['Report a problem', 'Tatizo'],
+    payment_check: ['Check my payment', 'Angalia malipo'], payment_resend: ['Resend M-Pesa prompt', 'Tuma tena STK']
+  };
+
   // ---------------------------------------------------------------- button commands
   async function handlePayload(ctx) {
     const [cmd, ...rest] = String(ctx.payload).split(':'); const arg = rest.join(':'); const st = ctx.state;
     switch (cmd) {
       case 'pick': { const p = ctx.products.find((x) => x.id === Number(arg)); return p ? cmdPickProduct(ctx, p) : null; }
+      case 'add': { const [pid, n] = arg.split(':'); const p = ctx.products.find((x) => x.id === Number(pid)); if (!p || !(Number(n) >= 1)) return null; ctx.state.pending = { productId: p.id, name: p.brandName }; return cmdSetQty(ctx, { value: Number(n), unit: 'bag' }); }
       case 'qty': return cmdSetQty(ctx, { value: Number(arg), unit: 'bag' });
       case 'kg': return cmdSetQty(ctx, { value: Number(arg), unit: 'kg' });
       case 'checkout': return cmdCheckout(ctx);
@@ -654,9 +772,21 @@ export function registerChatAssistant(app, deps) {
   }
 
   // ---------------------------------------------------------------- stage handlers (fill the slot the bot just asked for)
-  function productFromText(ctx) {
+  /** "how much is it", "the second one", "hiyo" -> the rice we were just talking about (only where a follow-up makes sense) */
+  function refProduct(ctx) {
+    const st = ctx.state; const t = B.normalize(ctx.text); const shown = st.lastShown || [];
+    const byId = (id) => (id ? ctx.products.find((x) => x.id === id) : null);
+    const k = B.ordinalPick(ctx.text, shown.length) || (/\b(?:last|ya mwisho)\b/.test(t) && shown.length ? shown.length : null);
+    if (k && byId(shown[k - 1])) { const p = byId(shown[k - 1]); return { product: p, list: [p] }; }
+    if (/\b(?:it|that|this|that one|this one|same|same one|hiyo|hii|huyo|ile|yake|zake)\b/.test(t)) {
+      const p = byId(st.pending && st.pending.productId) || (shown.length === 1 ? byId(shown[0]) : null) || byId(st.focusProductId);
+      if (p) return { product: p, list: [p] };
+    }
+    return { product: null, list: [] };
+  }
+  function productFromText(ctx, { allowRef = false } = {}) {
     const m = matchProducts(ctx.text, ctx.products);
-    if (!m.length) return { product: null, list: [] };
+    if (!m.length) return allowRef ? refProduct(ctx) : { product: null, list: [] };
     const top = m[0]; const second = m[1];
     if (top.score >= 0.8 && (!second || top.score >= second.score * 1.4)) return { product: top.p, list: [top.p] };
     return { product: null, list: m.slice(0, 4).map((x) => x.p) };
@@ -675,6 +805,8 @@ export function registerChatAssistant(app, deps) {
         return null;
       }
       case 'pick_qty': {
+        const bud = B.extractBudget(text); const pend = st.pending && ctx.products.find((x) => x.id === st.pending.productId);
+        if (bud && pend && !(B.extractQuantity(text) || {}).unit) return askAgain(ctx, await budgetReply(ctx, bud, pend));
         const qty = B.extractQuantity(text);
         if (qty && qty.value) {
           if (!qty.unit && qty.value > 30) return askAgain(ctx, R(L(ctx, `Do you mean ${qty.value} bags or ${qty.value}kg?`, `Unamaanisha magunia ${qty.value} au kilo ${qty.value}?`), { options: [opt(`${qty.value} bags`, `qty:${qty.value}`), opt(`${qty.value}kg`, `kg:${qty.value}`)] }));
@@ -736,7 +868,7 @@ export function registerChatAssistant(app, deps) {
   }
 
   // ---------------------------------------------------------------- intents
-  const INTERRUPTING = new Set(['price', 'stock', 'delivery_info', 'payment_info', 'store_info', 'points', 'promo', 'who_are_you', 'thanks']);
+  const INTERRUPTING = new Set(['price', 'stock', 'delivery_info', 'payment_info', 'store_info', 'points', 'promo', 'who_are_you', 'thanks', 'compare']);
   async function handleIntent(ctx, intent) {
     const r = await intentReply(ctx, intent);
     if (r && INTERRUPTING.has(intent) && SLOT_STAGES.has(ctx.state.stage) && ctx.state.ask && ctx.state.ask.text) {
@@ -759,7 +891,8 @@ export function registerChatAssistant(app, deps) {
       case 'help': return R(L(ctx, 'I can: show our rice and prices, recommend rice for your cooking or budget, quote bulk orders, check delivery to your county, take your order and send the M-Pesa prompt (or give you the Till/Paybill), and track your orders. Just type naturally, English or Swahili.', 'Naweza: kuonyesha mchele na bei, kupendekeza, kuhesabu oda za jumla, usafiri, kuchukua oda na kutuma M-Pesa, na kufuatilia oda. Andika kawaida, Kiswahili au Kiingereza.'), { options: mainOptions(ctx) });
       case 'browse': return showProducts(ctx, products, L(ctx, 'Here is our rice right now:', 'Huu ndio mchele wetu sasa:'));
       case 'price': case 'stock': {
-        const pm = productFromText(ctx);
+        const pm = productFromText(ctx, { allowRef: true });
+        if (pm.product && intent === 'price') { const q = B.extractQuantity(ctx.text); if (q && q.value && q.unit) { const quote = await quoteReply(ctx, pm.product, q); if (quote) return quote; } }
         if (pm.product) {
           ctx.meta.productId = pm.product.id; const p = pm.product; const c = cardOf(p, cfg); const tiers = (await getWholesaleTiers())[p.id];
           const extra = [c.perKg ? `${money(c.perKg)} per kg` : null, c.flash ? 'flash-sale price' : null, c.bulk ? `bulk: ${c.bulk}` : null, Array.isArray(tiers) && tiers.length ? `quantity prices: ${tiers.map((t) => `${t.minQty}+ bags ${money(t.price)}`).join(', ')}` : null].filter(Boolean).join(' | ');
@@ -770,8 +903,13 @@ export function registerChatAssistant(app, deps) {
         return showProducts(ctx, products, intent === 'price' ? L(ctx, 'Here are our prices:', 'Hizi ni bei zetu:') : L(ctx, 'Here is what is available:', 'Hiki ndicho kilichopo:'));
       }
       case 'recommend': return recommend(ctx, ctx.text, products);
+      case 'compare': return compareReply(ctx);
       case 'buy': {
-        const pm = productFromText(ctx); const qty = B.extractQuantity(ctx.text);
+        const pm = productFromText(ctx, { allowRef: true }); const qty = B.extractQuantity(ctx.text);
+        if (pm.product && qty && qty.value && qty.unit) {
+          const tk = B.tokens(ctx.text);
+          if (tk.includes('price') && !tk.some((x) => ['want', 'buy', 'order'].includes(x))) { const quote = await quoteReply(ctx, pm.product, qty); if (quote) return quote; }
+        }
         if (pm.product) {
           ctx.meta.productId = pm.product.id;
           if (qty && qty.value && !(!qty.unit && qty.value > 30)) { st.pending = { productId: pm.product.id, name: pm.product.brandName }; learnTerms(ctx, pm.product.id); return cmdSetQty(ctx, qty.unit ? qty : { value: qty.value, unit: 'bag' }); }
@@ -819,7 +957,9 @@ export function registerChatAssistant(app, deps) {
     const s = ctx.settings;
     const base = L(ctx, 'I am not sure I understood that, and I am still learning. What are you after?', 'Sijaelewa vizuri, bado ninajifunza. Unatafuta nini?');
     const contact = st.unknownStreak >= 2 && (s.supportPhone || s.whatsapp) ? `\n${L(ctx, 'You can also reach customer care', 'Unaweza pia kupiga huduma kwa wateja')}: ${[s.supportPhone, s.whatsapp].filter(Boolean).join(' / ')}.` : '';
-    const r = R(base + contact, { options: [opt(L(ctx, 'Prices', 'Bei'), 'intent:price'), opt(L(ctx, 'Buy rice', 'Nunua mchele'), 'intent:buy'), opt(L(ctx, 'Delivery', 'Usafiri'), 'intent:delivery_info'), opt(L(ctx, 'Payment', 'Malipo'), 'intent:payment_info'), opt(L(ctx, 'Talk to a person', 'Ongea na mtu'), 'intent:human')] });
+    const near = (ctx.cls || []).filter((c) => c.score >= 0.2 && INTENT_LABELS[c.intent]).slice(0, 3);     // closest guesses first, so a tap teaches the bot the new phrasing
+    const guess = near.length ? L(ctx, 'I am not quite sure I understood. Did you mean one of these?', 'Sijaelewa vizuri. Je, unamaanisha mojawapo ya hizi?') : base;
+    const r = R(guess + contact, { options: near.length ? [...near.map((c) => opt(L(ctx, INTENT_LABELS[c.intent][0], INTENT_LABELS[c.intent][1]), `intent:${c.intent}`)), opt(L(ctx, 'Talk to a person', 'Ongea na mtu'), 'intent:human')] : [opt(L(ctx, 'Prices', 'Bei'), 'intent:price'), opt(L(ctx, 'Buy rice', 'Nunua mchele'), 'intent:buy'), opt(L(ctx, 'Delivery', 'Usafiri'), 'intent:delivery_info'), opt(L(ctx, 'Payment', 'Malipo'), 'intent:payment_info'), opt(L(ctx, 'Talk to a person', 'Ongea na mtu'), 'intent:human')] });
     if (st.ask && SLOT_STAGES.has(st.stage)) { r.reply += `\n\n${L(ctx, 'Or continue your order:', 'Au endelea na oda yako:')} ${st.ask.text}`; }
     return r;
   }
@@ -827,7 +967,7 @@ export function registerChatAssistant(app, deps) {
   async function converse(ctx) {
     ctx.products = await loadCatalog(); ctx.meta = {};
     ctx.productWords = new Set(ctx.products.flatMap((p) => B.normalize(`${p.brandName} ${p.variety || ''}`).split(' ')));
-    if (ctx.text) { if (B.isSwahili(ctx.text)) ctx.state.lang = 'sw'; else if (ctx.text.split(' ').length >= 4) ctx.state.lang = 'en'; }
+    if (ctx.text) ctx.state.lang = B.detectLang(ctx.text, ctx.state.lang || 'en');
     if (!classifier.neutral) classifier.neutral = new Set(Object.keys(countyOverrides || {}).flatMap((c) => B.normalize(c).split(' ')));
     ctx.productWords.forEach((w) => { const t = B.tokens(w, { keepStop: true })[0] || w; if (!GENERIC.has(t) && !classifier.vocab.has(t)) classifier.neutral.add(t); });
     ctx.cls = ctx.text ? classifier.classify(ctx.text) : [];
@@ -838,8 +978,16 @@ export function registerChatAssistant(app, deps) {
     if (!result && ctx.text) {
       const kn = bestKnowledge(ctx.text);
       if (kn && kn.score >= 0.8) { ctx.knowledgeId = kn.k.id; ctx.source = 'knowledge'; result = R(kn.k.answer, { options: mainOptions(ctx) }); }
-      else if (top && ((top.score >= 0.6 && (!second || top.score - second.score >= 0.04 || top.score >= 0.85)) || (top.score >= 0.5 && (!second || top.score - second.score >= 0.12)) || (top.score >= 0.45 && (!second || top.score - second.score >= 0.25)))) { ctx.source = 'intent'; result = await handleIntent(ctx, top.intent); }
-      else if (kn && kn.score >= 0.5) { ctx.knowledgeId = kn.k.id; ctx.source = 'knowledge'; result = R(kn.k.answer, { options: mainOptions(ctx) }); }
+      else {
+        const follow = followUpIntent(ctx);                         // "and basmati?" after a price question
+        const bud = follow ? null : budgetIntent(ctx, top);         // "I have 5000, what can I get?"
+        const multi = follow || bud ? null : await compound(ctx);   // "how much is pishori and do you deliver to nakuru?"
+        if (follow) { ctx.source = 'intent'; ctx.intentName = follow; result = await handleIntent(ctx, follow); }
+        else if (bud) { ctx.source = 'intent'; ctx.intentName = 'recommend'; result = withBack(ctx, await budgetReply(ctx, bud.budget, bud.product)); }
+        else if (multi) { ctx.source = 'intent'; ctx.intentName = multi.intent; result = multi.result; }
+        else if (top && ((top.score >= 0.6 && (!second || top.score - second.score >= 0.04 || top.score >= 0.85)) || (top.score >= 0.5 && (!second || top.score - second.score >= 0.12)) || (top.score >= 0.45 && (!second || top.score - second.score >= 0.25)))) { ctx.source = 'intent'; result = await handleIntent(ctx, top.intent); }
+        else if (kn && kn.score >= 0.5) { ctx.knowledgeId = kn.k.id; ctx.source = 'knowledge'; result = R(kn.k.answer, { options: mainOptions(ctx) }); }
+      }
     }
     if (!result && ctx.text) {
       const pm = matchProducts(ctx.text, ctx.products);
@@ -847,6 +995,8 @@ export function registerChatAssistant(app, deps) {
       else { const pl = await findPlace(ctx.text); if (pl.county) { ctx.source = 'intent'; ctx.intentName = 'delivery_info'; result = await handleIntent(ctx, 'delivery_info'); } }
     }
     ctx.handled = !!result;
+    if (result && ctx.source === 'intent' && FOLLOWABLE.has(ctx.intentName)) ctx.state.lastIntent = { intent: ctx.intentName, at: Date.now() };
+    if (ctx.meta && ctx.meta.productId) ctx.state.focusProductId = ctx.meta.productId;
     if (!result) { ctx.intentName = null; result = unknownReply(ctx); } else if (ctx.source !== 'button') ctx.state.unknownStreak = 0;
     if (ctx.state.county) ctx.meta.county = ctx.state.county;
     return result;
