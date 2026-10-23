@@ -2919,15 +2919,20 @@ function AdminSystemPanel({ token, showToast }: { token: string | null; showToas
 type ToastFn = (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
 
 const staffApi = async (path: string, token: string | null, options: { method?: string; body?: any } = {}) => {
+  // Always use the NEWEST saved token (the one the server last renewed), never a stale copy held in React state.
+  let live: string | null = token;
+  try { live = (typeof window !== 'undefined' && window.localStorage.getItem('token')) || token; } catch (_) { /* keep prop token */ }
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method: options.method || 'GET',
-    headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
+    headers: { 'Content-Type': 'application/json', ...(live ? { 'Authorization': `Bearer ${live}` } : {}) },
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    if (res.status === 401 && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('mwea:auth-401')); // the app confirms with the server before signing anyone out
     const err: any = new Error(data.error || `Request failed (${res.status})`);
     err.status = res.status;
+    err.code = data.code;
     throw err;
   }
   return data;
@@ -4134,35 +4139,27 @@ function AdminPaymentsPanel({ token, showToast }: { token: string | null; showTo
 }
 
 // ---------------------------------------------------------------------------
-// CHAT ASSISTANT — floating chat backed by /api/chat (see chatAssistant.js).
-// Self-contained engine on YOUR server (no Claude / no outside AI). The server runs the
-// whole guided purchase: rice -> quantity -> county/town/address -> promo -> M-Pesa prompt
-// (STK) or Till -> confirm -> order. This widget only shows the replies, the tap buttons
-// ("chips") and reacts to server "actions" (open login, refresh orders, watch the payment).
+// SHOPPING ASSISTANT — floating chat backed by /api/chat (see chatAssistant.js). No third-party AI.
+// The server runs the whole sales conversation (rice -> quantity -> location -> payment) and sends back
+// text, tappable options, product cards and "actions". This widget shows them and performs the actions:
+//   require_login   -> opens the login page, then resumes the order automatically after sign-in
+//   payment_started -> opens the page's M-Pesa payment pop-up (STK) or Till/Paybill pop-up
+//   refresh_orders  -> reloads the customer's order history
 // ---------------------------------------------------------------------------
-interface ChatChip { label: string; value: string; }
-interface ChatMsg { role: 'user' | 'assistant'; content: string; chips?: ChatChip[]; turnId?: string; vote?: 'up' | 'down'; }
-interface ChatAction { type: string; orderId?: number; method?: string; status?: string; }
+interface ChatCard { id: number; name: string; variety?: string | null; bagKg: number; priceKes: number; perKg?: number | null; stock: string; inStock: boolean; flash?: boolean; bulk?: string | null; image?: string | null; }
+interface ChatOption { label: string; value: string; }
+interface ChatMsg { role: 'user' | 'assistant'; content: string; options?: ChatOption[]; cards?: ChatCard[]; messageId?: number | null; fb?: 1 | -1; }
+interface ChatAction { type: 'payment_started' | 'require_login' | 'refresh_orders' | 'payment_result' | 'basket'; orderId?: number; method?: 'mpesa_stk' | 'mpesa_till'; phone?: string | null; amount?: number; till?: any; status?: string; }
 
 const CHAT_STORAGE_KEY = 'riceHubChatV3';
-const CHAT_SESSION_KEY = 'riceHubChatSid';
-const CHAT_QUICK_REPLIES: ChatChip[] = [
-  { label: 'What rice do you sell?', value: 'cmd:list' },
-  { label: 'I want to buy rice', value: 'cmd:more' },
-  { label: 'Delivery to my area', value: 'delivery' },
-  { label: 'Track my order', value: 'track my order' }
-];
+const CHAT_SESSION_KEY = 'riceHubChatSession';
 
-const newChatSessionId = () => {
-  try { if (typeof crypto !== 'undefined' && (crypto as any).randomUUID) return (crypto as any).randomUUID() as string; } catch (_) { /* fall through */ }
-  return `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
-};
-
-function ShoppingAssistantWidget({ token, user, onOpenLogin, onOrdersChanged }: {
+function ShoppingAssistantWidget({ token, user, onPaymentStarted, onOrdersChanged, onRequireLogin }: {
   token: string | null;
   user: UserAccount | null;
-  onOpenLogin: () => void;
+  onPaymentStarted: (info: { orderId: number; method: 'mpesa_stk' | 'mpesa_till'; phone?: string | null; amount: number }) => void;
   onOrdersChanged: () => void;
+  onRequireLogin: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [assistantName, setAssistantName] = useState('Wanjiru');
@@ -4171,120 +4168,97 @@ function ShoppingAssistantWidget({ token, user, onOpenLogin, onOrdersChanged }: 
   });
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
-  const [unread, setUnread] = useState(0);
+  const [stage, setStage] = useState('idle');
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastUserId = useRef<number | string | null>(user ? (user as any).id : null);
-  const awaitingLogin = useRef(false);
-  const watcher = useRef<{ orderId: number; method: string; started: number; timer: any } | null>(null);
-  const openRef = useRef(open);
-  openRef.current = open;
-  const sessionId = useRef<string>('');
-  if (!sessionId.current) {
-    try { sessionId.current = sessionStorage.getItem(CHAT_SESSION_KEY) || ''; } catch (_) { /* ignore */ }
-    if (!sessionId.current) { sessionId.current = newChatSessionId(); try { sessionStorage.setItem(CHAT_SESSION_KEY, sessionId.current); } catch (_) { /* ignore */ } }
-  }
+  const sessionRef = useRef<string>((() => { try { return sessionStorage.getItem(CHAT_SESSION_KEY) || ''; } catch (_) { return ''; } })());
+  const waitingForLogin = useRef(false);
+  const sendingRef = useRef(false);
 
   const firstName = user && (user as any).fullName ? String((user as any).fullName).trim().split(/\s+/)[0] : '';
-  const greeting = `Hi${firstName ? ' ' + firstName : ''}! 👋 I'm ${assistantName} from Mwea Rice Hub. I can show you our rice, help you order step by step and send an M-Pesa prompt to your phone, check delivery, or track your order.${user ? '' : ' (You need to be signed in to buy.)'}`;
+  const greeting = `Hi${firstName ? ' ' + firstName : ''}! 👋 I'm ${assistantName} from Mwea Rice Hub. I can help you choose rice, work out delivery, and take your order right here, including M-Pesa payment. English or Swahili, just type.`;
+  const QUICK = ['Show me your rice', 'Delivery to my area', 'I want a bulk order', 'Track my order'];
 
-  useEffect(() => {
-    fetch(`${API_BASE_URL}/config/chat-assistant`).then(r => r.json()).then(d => { if (d && d.assistantName) setAssistantName(d.assistantName); }).catch(() => {});
-  }, []);
+  useEffect(() => { fetch(`${API_BASE_URL}/config/chat-assistant`).then(r => r.json()).then(d => { if (d && d.assistantName) setAssistantName(d.assistantName); }).catch(() => {}); }, []);
 
-  const stopWatching = () => { if (watcher.current) { clearInterval(watcher.current.timer); watcher.current = null; } };
-  useEffect(() => () => stopWatching(), []);
-
-  // never carry one customer's chat over to another account
+  // Signing in keeps the chat (the basket must survive the login). Switching or leaving an account starts a clean chat.
   useEffect(() => {
     const id = user ? (user as any).id : null;
     if (lastUserId.current !== id) {
       const wasSignedIn = lastUserId.current !== null;
       lastUserId.current = id;
-      if (wasSignedIn) {
-        setMessages([]); stopWatching();
-        sessionId.current = newChatSessionId();
-        try { sessionStorage.removeItem(CHAT_STORAGE_KEY); sessionStorage.setItem(CHAT_SESSION_KEY, sessionId.current); } catch (_) { /* ignore */ }
-      }
+      if (wasSignedIn) { setMessages([]); setStage('idle'); sessionRef.current = ''; try { sessionStorage.removeItem(CHAT_STORAGE_KEY); sessionStorage.removeItem(CHAT_SESSION_KEY); } catch (_) { /* ignore */ } }
     }
   }, [user]);
   useEffect(() => { try { sessionStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages.slice(-40))); } catch (_) { /* ignore */ } }, [messages]);
-  useEffect(() => { if (open) { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); setUnread(0); } }, [messages, open, sending]);
-
-  const callChat = async (message: string, silent = false) => {
-    const res = await fetch(`${API_BASE_URL}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ message, sessionId: sessionId.current, silent })
-    });
-    const data = await res.json().catch(() => ({}));
-    return { ok: res.ok, data };
-  };
-
-  const pushAssistant = (data: any) => {
-    setMessages(prev => [...prev.map(m => (m.chips ? { ...m, chips: undefined } : m)), { role: 'assistant', content: data.reply, chips: Array.isArray(data.chips) ? data.chips : [], turnId: data.turnId }]);
-    if (!openRef.current) setUnread(n => n + 1);
-  };
-
-  const startWatching = (orderId: number, method: string) => {
-    stopWatching();
-    const started = Date.now();
-    const timer = setInterval(async () => {
-      const age = Date.now() - started;
-      if (age > 12 * 60 * 1000) { stopWatching(); return; }
-      try {
-        const { ok, data } = await callChat('cmd:check_payment', true);
-        if (!ok) return;
-        if (data.reply) { pushAssistant(data); runActions(Array.isArray(data.actions) ? data.actions : []); }
-        if (data.status && data.status !== 'pending') stopWatching();
-      } catch (_) { /* keep trying */ }
-    }, 6000);
-    watcher.current = { orderId, method, started, timer };
-  };
+  useEffect(() => { if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, open, sending]);
 
   const runActions = (actions: ChatAction[]) => {
     actions.forEach(a => {
-      if (a.type === 'open_login') { awaitingLogin.current = true; setOpen(false); onOpenLogin(); }
-      else if (a.type === 'order_placed' || a.type === 'refresh_orders' || a.type === 'payment_result') onOrdersChanged();
-      else if (a.type === 'watch_payment' && a.orderId) startWatching(a.orderId, a.method || 'mpesa_stk');
+      if (a.type === 'payment_started' && a.orderId && a.method) onPaymentStarted({ orderId: a.orderId, method: a.method, phone: a.phone, amount: Number(a.amount) || 0 });
+      else if (a.type === 'refresh_orders') onOrdersChanged();
+      else if (a.type === 'require_login') { waitingForLogin.current = true; setOpen(false); onRequireLogin(); }
     });
   };
 
-  const send = async (value?: string, label?: string) => {
-    const text = (value ?? input).trim();
-    if (!text || sending) return;
-    setMessages(prev => [...prev.map(m => (m.chips ? { ...m, chips: undefined } : m)), { role: 'user', content: label || text }]);
-    setInput('');
-    setSending(true);
+  const send = async (text: string, payload?: string) => {
+    const shown = text.trim();
+    if ((!shown && !payload) || sendingRef.current) return;
+    sendingRef.current = true;
+    if (shown) setMessages(prev => [...prev.map(m => ({ ...m, options: undefined })), { role: 'user', content: shown }]);
+    setInput(''); setSending(true);
     try {
-      const { ok, data } = await callChat(text);
-      if (ok && data.reply) {
-        pushAssistant(data);
-        if (data.awaitingLogin) awaitingLogin.current = true;
+      const res = await fetch(`${API_BASE_URL}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ message: shown, payload: payload || undefined, sessionId: sessionRef.current || undefined })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.reply) {
+        if (data.sessionId) { sessionRef.current = data.sessionId; try { sessionStorage.setItem(CHAT_SESSION_KEY, data.sessionId); } catch (_) { /* ignore */ } }
+        setStage(data.stage || 'idle');
+        setMessages(prev => [...prev, { role: 'assistant', content: data.reply, options: data.options || [], cards: data.cards || [], messageId: data.messageId }]);
         runActions(Array.isArray(data.actions) ? data.actions : []);
       } else {
         setMessages(prev => [...prev, { role: 'assistant', content: data.error || "Sorry, I'm having trouble replying right now. Please try again shortly, or reach customer care directly." }]);
       }
     } catch (_) {
       setMessages(prev => [...prev, { role: 'assistant', content: "I couldn't reach the server. Please check your connection and try again." }]);
-    } finally { setSending(false); }
+    } finally { setSending(false); sendingRef.current = false; }
   };
 
-  // customer signed in after being asked to: carry on at checkout with the same basket
+  // After the customer signs in from the login page, reopen the chat and carry on with their order
   useEffect(() => {
-    if (token && user && awaitingLogin.current) {
-      awaitingLogin.current = false;
-      setOpen(true);
-      send('cmd:resume', 'I have signed in');
-    }
+    if (token && waitingForLogin.current) { waitingForLogin.current = false; setOpen(true); setTimeout(() => send("I'm signed in", 'login_done'), 300); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, user]);
+  }, [token]);
 
-  const rate = async (i: number, v: 'up' | 'down') => {
-    const m = messages[i];
-    if (!m || !m.turnId || m.vote) return;
-    setMessages(prev => prev.map((x, idx) => (idx === i ? { ...x, vote: v } : x)));
-    try { await fetch(`${API_BASE_URL}/chat/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ turnId: m.turnId, value: v }) }); } catch (_) { /* optional */ }
+  // While a payment is pending, listen for the result so the customer is told the moment M-Pesa confirms
+  useEffect(() => {
+    if (stage !== 'awaiting_payment' || !token || !sessionRef.current) return;
+    const timer = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/chat/poll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ sessionId: sessionRef.current }) });
+        const d = await res.json().catch(() => ({}));
+        if (d && d.message && d.message.reply) {
+          setMessages(prev => [...prev, { role: 'assistant', content: d.message.reply, options: d.message.options || [], messageId: d.message.messageId }]);
+          runActions(Array.isArray(d.message.actions) ? d.message.actions : []);
+          setStage('idle');
+        }
+      } catch (_) { /* try again next tick */ }
+    }, 6000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, token]);
+
+  const rate = (idx: number, value: 1 | -1) => {
+    const m = messages[idx];
+    if (!m || !m.messageId || m.fb) return;
+    setMessages(prev => prev.map((x, i) => (i === idx ? { ...x, fb: value } : x)));
+    fetch(`${API_BASE_URL}/chat/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messageId: m.messageId, sessionId: sessionRef.current, value }) }).catch(() => {});
   };
+  const newChat = () => { setMessages([]); setStage('idle'); sessionRef.current = ''; try { sessionStorage.removeItem(CHAT_STORAGE_KEY); sessionStorage.removeItem(CHAT_SESSION_KEY); } catch (_) { /* ignore */ } };
+  const lastAssistant = (() => { for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === 'assistant') return i; return -1; })();
 
   return (
     <>
@@ -4294,49 +4268,52 @@ function ShoppingAssistantWidget({ token, user, onOpenLogin, onOrdersChanged }: 
         aria-label="Chat with the shopping assistant"
       >
         {open ? <X className="w-6 h-6" /> : <MessageSquare className="w-6 h-6" />}
-        {!open && unread > 0 && <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center">{unread > 9 ? '9+' : unread}</span>}
       </button>
 
       {open && (
-        <div className="fixed z-[70] bottom-36 md:bottom-24 right-4 md:right-6 w-[calc(100vw-2rem)] sm:w-96 max-w-sm h-[32rem] bg-white rounded-3xl shadow-2xl border border-emerald-100 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4">
+        <div className="fixed z-[70] bottom-36 md:bottom-24 right-4 md:right-6 w-[calc(100vw-2rem)] sm:w-96 max-w-sm h-[32rem] max-h-[75vh] bg-white rounded-3xl shadow-2xl border border-emerald-100 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4">
           <div className="px-4 py-3 bg-gradient-to-r from-emerald-700 to-teal-700 text-white flex items-center gap-2">
             <Leaf className="w-4 h-4" />
-            <div className="min-w-0 flex-1"><p className="text-xs font-black leading-tight">{assistantName} · Rice Hub</p><p className="text-[10px] text-emerald-100">Order, pay with M-Pesa & track — right here</p></div>
-            {messages.length > 0 && (
-              <button onClick={() => { setMessages([]); stopWatching(); sessionId.current = newChatSessionId(); try { sessionStorage.setItem(CHAT_SESSION_KEY, sessionId.current); } catch (_) { /* ignore */ } }} className="text-[10px] text-emerald-100 hover:text-white underline cursor-pointer" aria-label="Start a new chat">New chat</button>
-            )}
+            <div className="min-w-0 flex-1"><p className="text-xs font-black leading-tight">{assistantName} · Rice Hub</p><p className="text-[10px] text-emerald-100">{user ? `Signed in as ${firstName || 'you'}` : 'Guest: sign in only when you pay'}</p></div>
+            {messages.length > 0 && <button onClick={newChat} className="text-[10px] text-emerald-100 hover:text-white underline cursor-pointer" aria-label="Start a new chat">New chat</button>}
           </div>
           <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2 bg-slate-50">
-            <div className="flex justify-start">
-              <div className="max-w-[85%] px-3 py-2 rounded-2xl text-[12px] leading-relaxed whitespace-pre-wrap bg-white text-slate-800 border border-slate-100 rounded-bl-sm">{greeting}</div>
-            </div>
+            <div className="flex justify-start"><div className="max-w-[88%] px-3 py-2 rounded-2xl text-[12px] leading-relaxed whitespace-pre-wrap bg-white text-slate-800 border border-slate-100 rounded-bl-sm">{greeting}</div></div>
             {messages.length === 0 && (
               <div className="flex flex-wrap gap-1.5 pt-1">
-                {CHAT_QUICK_REPLIES.map(q => (
-                  <button key={q.value} onClick={() => send(q.value, q.label)} className="px-2.5 py-1.5 rounded-full bg-white border border-emerald-200 text-emerald-700 text-[11px] font-bold hover:bg-emerald-50 cursor-pointer">{q.label}</button>
-                ))}
+                {QUICK.map(q => <button key={q} onClick={() => send(q)} className="px-2.5 py-1.5 rounded-full bg-white border border-emerald-200 text-emerald-700 text-[11px] font-bold hover:bg-emerald-50 cursor-pointer">{q}</button>)}
               </div>
             )}
             {messages.map((m, i) => (
               <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
-                <div className={`max-w-[88%] px-3 py-2 rounded-2xl text-[12px] leading-relaxed whitespace-pre-wrap ${m.role === 'user' ? 'bg-emerald-600 text-white rounded-br-sm' : 'bg-white text-slate-800 border border-slate-100 rounded-bl-sm'}`}>
-                  {m.content}
-                </div>
-                {m.role === 'assistant' && m.turnId && (
-                  <div className="flex items-center gap-1 mt-0.5 ml-1">
-                    {m.vote ? <span className="text-[10px] text-slate-400">Thanks for the feedback</span> : (
-                      <>
-                        <button onClick={() => rate(i, 'up')} className="text-[11px] text-slate-300 hover:text-emerald-600 cursor-pointer" aria-label="Helpful">👍</button>
-                        <button onClick={() => rate(i, 'down')} className="text-[11px] text-slate-300 hover:text-rose-600 cursor-pointer" aria-label="Not helpful">👎</button>
-                      </>
-                    )}
+                <div className={`max-w-[88%] px-3 py-2 rounded-2xl text-[12px] leading-relaxed whitespace-pre-wrap ${m.role === 'user' ? 'bg-emerald-600 text-white rounded-br-sm' : 'bg-white text-slate-800 border border-slate-100 rounded-bl-sm'}`}>{m.content}</div>
+                {m.role === 'assistant' && m.cards && m.cards.length > 0 && (
+                  <div className="mt-1.5 flex gap-2 overflow-x-auto max-w-full pb-1">
+                    {m.cards.map(c => (
+                      <div key={c.id} className="shrink-0 w-36 bg-white rounded-2xl border border-emerald-100 overflow-hidden shadow-sm">
+                        {c.image ? <img src={c.image} alt={c.name} className="w-full h-16 object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /> : null}
+                        <div className="p-2 space-y-0.5">
+                          <p className="text-[11px] font-black text-slate-800 leading-tight">{c.name}</p>
+                          <p className="text-[10px] text-slate-500">{c.variety ? `${c.variety} · ` : ''}{c.bagKg}kg bag</p>
+                          <p className="text-xs font-black text-emerald-700">{formatKES(c.priceKes)}{c.flash ? ' ⚡' : ''}</p>
+                          <p className={`text-[10px] font-bold ${c.inStock ? 'text-slate-500' : 'text-rose-500'}`}>{c.stock}{c.perKg ? ` · ${formatKES(c.perKg)}/kg` : ''}</p>
+                          {c.bulk && <p className="text-[10px] text-amber-600 font-bold">Bulk: {c.bulk}</p>}
+                          <button onClick={() => send(`Buy ${c.name}`, `pick:${c.id}`)} className="mt-1 w-full py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black cursor-pointer">Choose</button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
-                {m.chips && m.chips.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-1.5 max-w-[95%]">
-                    {m.chips.map((c, ci) => (
-                      <button key={ci} disabled={sending} onClick={() => send(c.value, c.label)} className="px-2.5 py-1.5 rounded-full bg-white border border-emerald-300 text-emerald-800 text-[11px] font-bold hover:bg-emerald-50 disabled:opacity-50 cursor-pointer text-left">{c.label}</button>
-                    ))}
+                {m.role === 'assistant' && i === lastAssistant && m.options && m.options.length > 0 && !sending && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5 max-w-[92%]">
+                    {m.options.map(o => <button key={o.value + o.label} onClick={() => send(o.label, o.value)} className="px-2.5 py-1.5 rounded-full bg-white border border-emerald-300 text-emerald-700 text-[11px] font-bold hover:bg-emerald-50 cursor-pointer">{o.label}</button>)}
+                  </div>
+                )}
+                {m.role === 'assistant' && m.messageId && (
+                  <div className="mt-0.5 flex gap-1 text-[10px] text-slate-400">
+                    <button onClick={() => rate(i, 1)} disabled={!!m.fb} className={`px-1 cursor-pointer ${m.fb === 1 ? 'opacity-100' : 'opacity-50 hover:opacity-100'}`} aria-label="Helpful">👍</button>
+                    <button onClick={() => rate(i, -1)} disabled={!!m.fb} className={`px-1 cursor-pointer ${m.fb === -1 ? 'opacity-100' : 'opacity-50 hover:opacity-100'}`} aria-label="Not helpful">👎</button>
+                    {m.fb === -1 && <span className="text-slate-400">Thanks, I'll learn from this</span>}
                   </div>
                 )}
               </div>
@@ -4348,14 +4325,12 @@ function ShoppingAssistantWidget({ token, user, onOpenLogin, onOrdersChanged }: 
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-              placeholder={user ? 'Type here, e.g. "2 bags of pishori"…' : 'Ask about rice, prices, delivery…'}
-              maxLength={500}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }}
+              placeholder={stage === 'ask_phone' ? 'M-Pesa number e.g. 0712345678' : stage === 'awaiting_payment' ? 'Paste M-Pesa code, or ask a question' : 'Type here, e.g. "2 bags pishori to Nakuru"'}
+              maxLength={1000}
               className="flex-1 min-w-0 px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-emerald-500"
             />
-            <button onClick={() => send()} disabled={sending || !input.trim()} className="px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white cursor-pointer" aria-label="Send">
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            <button onClick={() => send(input)} disabled={sending || !input.trim()} className="px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white cursor-pointer" aria-label="Send"><ArrowRight className="w-4 h-4" /></button>
           </div>
         </div>
       )}
@@ -4364,242 +4339,123 @@ function ShoppingAssistantWidget({ token, user, onOpenLogin, onOrdersChanged }: 
 }
 
 // ---------------------------------------------------------------------------
-// AI ASSISTANT (admin) — see what customers ask, teach it, approve what it learned,
-// handle hand-offs, and APPROVE (with your password) any new database tables it asks for.
+// CHAT AI (admin) — what customers ask, what the assistant could not answer, what it learned,
+// and the database tables it is asking permission to add.
 // ---------------------------------------------------------------------------
 function AdminChatPanel({ token, showToast }: { token: string | null; showToast: ToastFn }) {
-  const [sub, setSub] = useState<'overview' | 'approvals' | 'teach' | 'learned' | 'handoffs' | 'settings'>('overview');
   const [overview, setOverview] = useState<any>(null);
   const [proposals, setProposals] = useState<any[]>([]);
-  const [unanswered, setUnanswered] = useState<any[]>([]);
-  const [requests, setRequests] = useState<any[]>([]);
-  const [intents, setIntents] = useState<any[]>([]);
-  const [learned, setLearned] = useState<any[]>([]);
-  const [learnedStatus, setLearnedStatus] = useState<'candidate' | 'active' | 'rejected'>('candidate');
-  const [handoffs, setHandoffs] = useState<any[]>([]);
+  const [knowledge, setKnowledge] = useState<any[]>([]);
   const [settings, setSettings] = useState<any>(null);
-  const [countyText, setCountyText] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [passwords, setPasswords] = useState<Record<string, string>>({});
-  const [teachIntent, setTeachIntent] = useState<Record<string, string>>({});
-  const [teachAnswer, setTeachAnswer] = useState<Record<string, string>>({});
-  const [faq, setFaq] = useState({ triggers: '', answer: '', answerSw: '' });
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [confirm, setConfirm] = useState<Record<number, string>>({});
+  const [newQ, setNewQ] = useState(''); const [newA, setNewA] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const card = 'bg-slate-900/70 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3';
+  const input = 'w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500';
+  const btn = 'px-3 py-2 rounded-xl text-[11px] font-extrabold cursor-pointer disabled:opacity-50';
 
-  const loadOverview = useCallback(async () => { try { setOverview(await staffApi('/admin/chat/overview', token)); } catch (e: any) { showToast(e.message, 'error'); } }, [token]);
-  const loadProposals = useCallback(async () => { try { setProposals(await staffApi('/admin/chat/proposals', token)); } catch (e: any) { showToast(e.message, 'error'); } }, [token]);
-  const loadTeach = useCallback(async () => {
+  const load = useCallback(async () => {
     try {
-      const [u, r, i] = await Promise.all([staffApi('/admin/chat/unanswered', token), staffApi('/admin/chat/requests', token), staffApi('/admin/chat/intents', token)]);
-      setUnanswered(u); setRequests(r); setIntents(i);
-    } catch (e: any) { showToast(e.message, 'error'); }
+      const [o, p, k, s] = await Promise.all([staffApi('/admin/chat/overview', token), staffApi('/admin/chat/schema-proposals', token), staffApi('/admin/chat/knowledge', token), staffApi('/admin/config/chat-assistant', token)]);
+      setOverview(o); setProposals(Array.isArray(p) ? p : []); setKnowledge(Array.isArray(k) ? k : []); setSettings(s);
+    } catch (err: any) { showToast(err.message, 'error'); }
   }, [token]);
-  const loadLearned = useCallback(async () => { try { setLearned(await staffApi(`/admin/chat/learned?status=${learnedStatus}`, token)); } catch (e: any) { showToast(e.message, 'error'); } }, [token, learnedStatus]);
-  const loadHandoffs = useCallback(async () => { try { setHandoffs(await staffApi('/admin/chat/escalations', token)); } catch (e: any) { showToast(e.message, 'error'); } }, [token]);
-  const loadSettings = useCallback(async () => {
-    try {
-      const s = await staffApi('/admin/config/chat-assistant', token);
-      setSettings(s);
-      setCountyText(Object.entries((s.deliveryTimes && s.deliveryTimes.byCounty) || {}).map(([k, v]) => `${k}: ${v}`).join('\n'));
-    } catch (e: any) { showToast(e.message, 'error'); }
-  }, [token]);
+  useEffect(() => { load(); }, [load]);
 
-  useEffect(() => { loadOverview(); loadProposals(); }, [loadOverview, loadProposals]);
-  useEffect(() => { if (sub === 'teach') loadTeach(); if (sub === 'learned') loadLearned(); if (sub === 'handoffs') loadHandoffs(); if (sub === 'settings') loadSettings(); if (sub === 'approvals') loadProposals(); if (sub === 'overview') loadOverview(); }, [sub, loadTeach, loadLearned, loadHandoffs, loadSettings, loadProposals, loadOverview]);
-
-  const act = async (fn: () => Promise<any>, okMsg: string, reload: () => any) => {
-    setBusy(true);
-    try { await fn(); showToast(okMsg, 'success'); await reload(); loadOverview(); } catch (e: any) { showToast(e.message, 'error'); } finally { setBusy(false); }
+  const act = async (key: string, fn: () => Promise<any>, ok: string) => {
+    setBusy(key);
+    try { await fn(); showToast(ok, 'success'); await load(); } catch (err: any) { showToast(err.message, 'error'); } finally { setBusy(null); }
   };
-
-  const pending = proposals.filter(p => p.status === 'pending' || p.status === 'failed').length;
-  const tabs: { id: typeof sub; label: string; badge?: number }[] = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'approvals', label: 'Approvals', badge: pending },
-    { id: 'teach', label: 'Teach it', badge: overview?.counts?.unanswered || 0 },
-    { id: 'learned', label: 'What it learned', badge: overview?.counts?.candidates || 0 },
-    { id: 'handoffs', label: 'Hand-offs', badge: overview?.counts?.escalations || 0 },
-    { id: 'settings', label: 'Settings' }
-  ];
-  const intentLabel = (id: string) => (intents.find(i => i.id === id)?.label) || id;
+  const pending = proposals.filter(p => p.status === 'pending');
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap gap-2">
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setSub(t.id)} className={`px-3.5 py-2 rounded-xl text-[11px] font-extrabold cursor-pointer flex items-center gap-1.5 ${sub === t.id ? 'bg-emerald-700 text-white' : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white'}`}>
-            {t.label}{t.badge ? <span className="bg-rose-600 text-white text-[9px] font-black rounded-full px-1.5 py-0.5">{t.badge}</span> : null}
-          </button>
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        {[['Messages (7 days)', overview?.messages ?? '…'], ['Answered', overview ? `${overview.handledRate}%` : '…'], ['Orders via chat', overview?.ordersPlaced ?? '…'], ['👍 / 👎', overview ? `${overview.helpful} / ${overview.notHelpful}` : '…'], ['Waiting for you', overview ? overview.pendingProposals + overview.unanswered.length : '…']].map(([l, v]) => (
+          <div key={String(l)} className="bg-slate-900/70 border border-slate-800 rounded-2xl p-3"><p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">{l}</p><p className="text-xl font-black text-white">{v as any}</p></div>
         ))}
       </div>
 
-      {sub === 'overview' && (!overview ? <p className="text-xs text-slate-500 font-bold">Loading…</p> : (
-        <div className="space-y-4">
-          {pending > 0 && <button onClick={() => setSub('approvals')} className="w-full text-left p-4 rounded-2xl bg-amber-950/50 border border-amber-700 text-amber-200 text-xs font-bold cursor-pointer">⚠️ The assistant is asking your permission to add database tables ({pending} waiting). Tap to review.</button>}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {[
-              ['Messages handled', overview.stats.total],
-              ['Understood', overview.stats.handledRate === null ? '—' : `${overview.stats.handledRate}%`],
-              ['Orders placed in chat', overview.stats.orders],
-              ['Paid in chat', overview.stats.paid],
-              ['Questions it missed', overview.counts.unanswered],
-              ['Phrases learned', overview.counts.learned],
-              ['Waiting for approval', overview.counts.candidates],
-              ['Open hand-offs', overview.counts.escalations]
-            ].map(([k, v]) => (
-              <div key={String(k)} className="rounded-2xl p-4 bg-slate-900 border border-slate-800"><p className="text-[10px] font-black uppercase tracking-wider text-slate-500">{k}</p><p className="text-xl font-black text-emerald-400 mt-1">{v as any}</p></div>
+      <div className={card}>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div><h3 className="text-sm font-black text-white">Database tables the assistant is asking to add {pending.length > 0 && <span className="ml-2 px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px]">{pending.length} waiting</span>}</h3>
+            <p className="text-[11px] text-slate-400">As chat usage grows, the assistant proposes extra tables to stay fast. Nothing is created until you approve it, and it can only ever create new "chat_" tables.</p></div>
+          <div className="flex gap-2">
+            <button disabled={busy === 'scan'} onClick={() => act('scan', () => staffApi('/admin/chat/schema-proposals/scan', token, { method: 'POST', body: { force: false } }), 'Checked current usage')} className={`${btn} bg-slate-800 text-white`}>Check now</button>
+            <button disabled={busy === 'scanf'} onClick={() => act('scanf', () => staffApi('/admin/chat/schema-proposals/scan', token, { method: 'POST', body: { force: true } }), 'Prepared all proposals for review')} className={`${btn} bg-slate-800 text-slate-300`}>Prepare all in advance</button>
+          </div>
+        </div>
+        {pending.length === 0 && <p className="text-[11px] text-slate-500">Nothing waiting. The assistant has all the tables it needs for today's usage.</p>}
+        {pending.map(p => (
+          <div key={p.id} className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+            <p className="text-xs font-black text-amber-300">{p.title} <span className="font-mono text-slate-400 font-medium">({p.tableName})</span></p>
+            <p className="text-[11px] text-slate-300">{p.reason}</p>
+            <pre className="text-[10px] text-emerald-300 bg-slate-950 rounded-lg p-2 overflow-x-auto">{p.sqlPreview}</pre>
+            <div className="flex flex-wrap gap-2 items-center">
+              <input value={confirm[p.id] || ''} onChange={e => setConfirm(prev => ({ ...prev, [p.id]: e.target.value }))} placeholder={`Type ${p.tableName} to approve`} className={`${input} sm:w-72`} />
+              <button disabled={busy === `a${p.id}` || (confirm[p.id] || '').trim() !== p.tableName} onClick={() => act(`a${p.id}`, () => staffApi(`/admin/chat/schema-proposals/${p.id}/approve`, token, { method: 'POST', body: { confirmTable: (confirm[p.id] || '').trim() } }), `Table ${p.tableName} created`)} className={`${btn} bg-emerald-600 hover:bg-emerald-500 text-white`}>Approve & create</button>
+              <button disabled={busy === `r${p.id}`} onClick={() => act(`r${p.id}`, () => staffApi(`/admin/chat/schema-proposals/${p.id}/reject`, token, { method: 'POST', body: {} }), 'Declined')} className={`${btn} bg-slate-800 text-slate-200`}>Decline</button>
+            </div>
+          </div>
+        ))}
+        {proposals.filter(p => p.status !== 'pending').length > 0 && (
+          <div className="text-[10px] text-slate-500 space-y-0.5">{proposals.filter(p => p.status !== 'pending').slice(0, 8).map(p => <p key={p.id}><span className="font-mono">{p.tableName}</span> · {p.status}{p.note ? ` · ${p.note}` : ''}</p>)}</div>
+        )}
+      </div>
+
+      <div className={card}>
+        <h3 className="text-sm font-black text-white">Questions customers asked that I could not answer</h3>
+        <p className="text-[11px] text-slate-400">Type the answer once. The assistant uses it straight away and for similar wording.</p>
+        {(overview?.unanswered || []).length === 0 && <p className="text-[11px] text-slate-500">Nothing unanswered right now.</p>}
+        {(overview?.unanswered || []).map((u: any) => (
+          <div key={u.signature} className="rounded-xl bg-slate-950/60 border border-slate-800 p-3 space-y-2">
+            <p className="text-xs text-white font-bold">"{u.example}" <span className="text-slate-500 font-medium">asked {u.n}×</span></p>
+            <div className="flex gap-2"><input value={answers[u.signature] || ''} onChange={e => setAnswers(prev => ({ ...prev, [u.signature]: e.target.value }))} placeholder="Your answer…" className={input} />
+              <button disabled={busy === u.signature || (answers[u.signature] || '').trim().length < 2} onClick={() => act(u.signature, () => staffApi('/admin/chat/knowledge', token, { method: 'POST', body: { question: u.example, answer: answers[u.signature], signature: u.signature } }), 'Taught. I will answer this from now on.')} className={`${btn} bg-emerald-600 text-white shrink-0`}>Teach</button></div>
+          </div>
+        ))}
+      </div>
+
+      {(overview?.candidates || []).length > 0 && (
+        <div className={card}>
+          <h3 className="text-sm font-black text-white">New phrases I picked up from customers</h3>
+          <p className="text-[11px] text-slate-400">Seen once so far. They go live automatically when a second customer confirms them; you can also approve or block them now.</p>
+          {overview.candidates.map((c: any) => (
+            <div key={c.id} className="flex items-center justify-between gap-2 text-[11px] text-slate-300 bg-slate-950/60 rounded-xl p-2.5">
+              <span>"{c.question}" → <b className="text-emerald-300">{c.intent}</b></span>
+              <span className="flex gap-1.5"><button onClick={() => act(`c${c.id}`, () => staffApi(`/admin/chat/knowledge/${c.id}`, token, { method: 'PUT', body: { status: 'active' } }), 'Approved')} className={`${btn} bg-emerald-700 text-white`}>Approve</button><button onClick={() => act(`d${c.id}`, () => staffApi(`/admin/chat/knowledge/${c.id}`, token, { method: 'PUT', body: { status: 'off' } }), 'Blocked')} className={`${btn} bg-slate-800 text-slate-200`}>Block</button></span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className={card}>
+        <h3 className="text-sm font-black text-white">What I have been taught</h3>
+        <div className="grid sm:grid-cols-2 gap-2"><input value={newQ} onChange={e => setNewQ(e.target.value)} placeholder="Question customers ask" className={input} /><input value={newA} onChange={e => setNewA(e.target.value)} placeholder="Answer to give" className={input} /></div>
+        <button disabled={busy === 'new' || newQ.trim().length < 4 || newA.trim().length < 2} onClick={() => act('new', async () => { await staffApi('/admin/chat/knowledge', token, { method: 'POST', body: { question: newQ, answer: newA } }); setNewQ(''); setNewA(''); }, 'Added')} className={`${btn} bg-emerald-600 text-white`}>Add answer</button>
+        <div className="space-y-1.5 max-h-72 overflow-y-auto">
+          {knowledge.filter(k => k.answer).map(k => (
+            <div key={k.id} className="flex items-start justify-between gap-2 text-[11px] bg-slate-950/60 rounded-xl p-2.5">
+              <div className="min-w-0"><p className="text-white font-bold">{k.question}</p><p className="text-slate-400">{k.answer}</p><p className="text-slate-600">used {k.hits}× · 👍{k.upVotes} 👎{k.downVotes} · {k.status}</p></div>
+              <span className="flex gap-1.5 shrink-0"><button onClick={() => act(`t${k.id}`, () => staffApi(`/admin/chat/knowledge/${k.id}`, token, { method: 'PUT', body: { status: k.status === 'active' ? 'off' : 'active' } }), 'Updated')} className={`${btn} bg-slate-800 text-slate-200`}>{k.status === 'active' ? 'Turn off' : 'Turn on'}</button><button onClick={() => act(`x${k.id}`, () => staffApi(`/admin/chat/knowledge/${k.id}`, token, { method: 'DELETE' }), 'Deleted')} className={`${btn} bg-rose-900/60 text-rose-200`}>Delete</button></span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {settings && (
+        <div className={card}>
+          <h3 className="text-sm font-black text-white">Assistant settings</h3>
+          <div className="grid sm:grid-cols-2 gap-2">
+            {([['assistantName', 'Assistant name'], ['businessHours', 'Business hours'], ['supportPhone', 'Support phone'], ['whatsapp', 'WhatsApp number']] as const).map(([k, label]) => (
+              <label key={k} className="text-[10px] text-slate-400 font-bold space-y-1 block">{label}<input value={settings[k] || ''} onChange={e => setSettings((s: any) => ({ ...s, [k]: e.target.value }))} className={input} /></label>
             ))}
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className={`${cardCls} p-5 space-y-2`}>
-              <p className="text-xs font-black text-white">What customers ask most</p>
-              {overview.topIntents.length === 0 && <p className="text-[11px] text-slate-500">No conversations yet.</p>}
-              {overview.topIntents.map((t: any) => <p key={t.intent} className="text-[11px] text-slate-300 flex justify-between"><span>{intentLabel(t.intent)}</span><span className="font-mono text-slate-500">{t.n}</span></p>)}
-              <p className="text-[10px] text-slate-500 pt-1">👍 {overview.stats.thumbsUp || 0} · 👎 {overview.stats.thumbsDown || 0}</p>
-            </div>
-            <div className={`${cardCls} p-5 space-y-2`}>
-              <p className="text-xs font-black text-white">Where its memory lives</p>
-              {Object.entries(overview.storage).map(([t, m]) => <p key={t} className="text-[11px] flex justify-between"><span className="font-mono text-slate-400">{t}</span><span className={m === 'table' ? 'text-emerald-400 font-bold' : 'text-slate-500'}>{m === 'table' ? 'own SQL table' : 'built-in (SystemConfig)'}</span></p>)}
-              <p className="text-[10px] text-slate-500 pt-1">It only moves to its own tables after you approve them in the Approvals tab.</p>
-            </div>
-          </div>
-          {overview.flagged.length > 0 && (
-            <div className={`${cardCls} p-5 space-y-2`}>
-              <p className="text-xs font-black text-white">Answers customers marked 👎</p>
-              {overview.flagged.map((f: any, i: number) => <p key={i} className="text-[11px] text-slate-300">“{f.text}” <span className="text-slate-500">→ understood as {intentLabel(f.intent)}</span></p>)}
-            </div>
-          )}
-        </div>
-      ))}
-
-      {sub === 'approvals' && (
-        <div className="space-y-4">
-          <div className={`${cardCls} p-5`}>
-            <p className="text-xs font-black text-white flex items-center gap-2"><Shield className="w-4 h-4 text-sky-400" /> Database changes the assistant is asking for</p>
-            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">Nothing is created until you approve here and type your password. Approving only creates NEW tables named <span className="font-mono text-slate-300">chat_*</span>; it never edits or deletes any existing table. Declining is safe: the assistant keeps working with its small built-in memory.</p>
-          </div>
-          {proposals.length === 0 && <p className="text-xs text-slate-500 font-bold">No requests right now.</p>}
-          {proposals.map(p => (
-            <div key={p.id} className={`${cardCls} p-5 space-y-3 ${p.status === 'pending' ? 'border-amber-700' : ''}`}>
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-sm font-black text-white flex-1">{p.title}</p>
-                <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-full ${p.status === 'pending' ? 'bg-amber-900 text-amber-300' : p.status === 'applied' ? 'bg-emerald-900 text-emerald-300' : p.status === 'failed' ? 'bg-rose-900 text-rose-300' : 'bg-slate-800 text-slate-400'}`}>{p.status}</span>
-              </div>
-              <p className="text-[11px] text-slate-300 leading-relaxed"><b>Why:</b> {p.why}</p>
-              <div className="space-y-1.5">
-                {p.tables.map((t: any) => (
-                  <details key={t.table} className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-                    <summary className="text-[11px] text-slate-200 cursor-pointer"><span className="font-mono text-emerald-400">{t.table}</span> — {t.purpose}</summary>
-                    <pre className="text-[10px] text-slate-400 mt-2 overflow-x-auto whitespace-pre-wrap">{t.sql}</pre>
-                  </details>
-                ))}
-              </div>
-              <p className="text-[10px] text-slate-500">Asked {formatWhen(p.createdAt)}{p.decidedBy ? ` · ${p.status} by ${p.decidedBy} on ${formatWhen(p.decidedAt)}` : ''}. {p.note}</p>
-              {p.error && <p className="text-[11px] text-rose-400 font-bold">Last attempt failed: {p.error}</p>}
-              {(p.status === 'pending' || p.status === 'failed') && (
-                <div className="flex flex-wrap gap-2 items-center">
-                  <input type="password" autoComplete="current-password" placeholder="Your admin password" value={passwords[p.id] || ''} onChange={(e) => setPasswords(s => ({ ...s, [p.id]: e.target.value }))} className={`${inputCls} max-w-[14rem]`} />
-                  <button disabled={busy || !(passwords[p.id] || '').length} onClick={() => act(async () => { await staffApi(`/admin/chat/proposals/${p.id}/approve`, token, { method: 'POST', body: { confirmPassword: passwords[p.id] } }); setPasswords(s => ({ ...s, [p.id]: '' })); }, 'Tables created. The assistant is using them now.', loadProposals)} className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-[11px] font-extrabold cursor-pointer">Approve & create tables</button>
-                  <button disabled={busy} onClick={() => { if (confirm('Decline? The assistant keeps working without these tables.')) act(() => staffApi(`/admin/chat/proposals/${p.id}/reject`, token, { method: 'POST' }), 'Declined.', loadProposals); }} className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-extrabold cursor-pointer">Decline</button>
-                </div>
-              )}
-            </div>
-          ))}
+          <label className="text-[10px] text-slate-400 font-bold space-y-1 block">Quick answers, one per line as: question | answer<textarea rows={3} value={settings.extraKnowledge || ''} onChange={e => setSettings((s: any) => ({ ...s, extraKnowledge: e.target.value }))} className={input} /></label>
+          <button disabled={busy === 'save'} onClick={() => act('save', () => staffApi('/admin/config/chat-assistant', token, { method: 'PUT', body: settings }), 'Settings saved')} className={`${btn} bg-emerald-600 text-white`}>Save settings</button>
         </div>
       )}
-
-      {sub === 'teach' && (
-        <div className="space-y-4">
-          <div className={`${cardCls} p-5 space-y-3`}>
-            <p className="text-xs font-black text-white">Add a question and answer yourself</p>
-            <textarea value={faq.triggers} onChange={(e) => setFaq(f => ({ ...f, triggers: e.target.value }))} rows={3} placeholder={'Example questions, one per line\nDo you sell in 1kg packs?\nMna pakiti za kilo moja?'} className={inputCls} />
-            <textarea value={faq.answer} onChange={(e) => setFaq(f => ({ ...f, answer: e.target.value }))} rows={2} placeholder="Answer (English)" className={inputCls} />
-            <textarea value={faq.answerSw} onChange={(e) => setFaq(f => ({ ...f, answerSw: e.target.value }))} rows={2} placeholder="Answer in Swahili (optional)" className={inputCls} />
-            <button disabled={busy} onClick={() => act(async () => { await staffApi('/admin/chat/faqs', token, { method: 'POST', body: faq }); setFaq({ triggers: '', answer: '', answerSw: '' }); }, 'Saved. The assistant knows it now.', loadTeach)} className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-[11px] font-extrabold cursor-pointer">Save answer</button>
-          </div>
-          <p className="text-xs font-black text-white">Questions it could not understand (most asked first)</p>
-          {unanswered.length === 0 && <p className="text-xs text-slate-500 font-bold">Nothing missed. 🎉</p>}
-          {unanswered.map(u => (
-            <div key={u.key} className={`${cardCls} p-4 space-y-2`}>
-              <p className="text-[11px] text-slate-200">{u.samples.map((s: string, i: number) => <span key={i} className="block">“{s}”</span>)}</p>
-              <p className="text-[10px] text-slate-500">Asked {u.count} time(s) by {u.chats} chat(s) · last {formatWhen(u.lastSeenAt)}</p>
-              <div className="flex flex-wrap gap-2 items-center">
-                <select value={teachIntent[u.key] || ''} onChange={(e) => setTeachIntent(s => ({ ...s, [u.key]: e.target.value }))} className={`${inputCls} max-w-[15rem]`}>
-                  <option value="">It means…</option>
-                  {intents.map(i => <option key={i.id} value={i.id}>{i.label}</option>)}
-                </select>
-                <button disabled={busy || !teachIntent[u.key]} onClick={() => act(() => staffApi('/admin/chat/teach', token, { method: 'POST', body: { key: u.key, intent: teachIntent[u.key] } }), 'Learned.', loadTeach)} className="px-3 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white text-[11px] font-extrabold cursor-pointer">Teach</button>
-              </div>
-              <div className="flex flex-wrap gap-2 items-center">
-                <input value={teachAnswer[u.key] || ''} onChange={(e) => setTeachAnswer(s => ({ ...s, [u.key]: e.target.value }))} placeholder="…or type the answer to give" className={`${inputCls} flex-1 min-w-[12rem]`} />
-                <button disabled={busy || (teachAnswer[u.key] || '').trim().length < 3} onClick={() => act(() => staffApi('/admin/chat/teach', token, { method: 'POST', body: { key: u.key, answer: teachAnswer[u.key] } }), 'Answer saved.', loadTeach)} className="px-3 py-2 rounded-xl bg-sky-700 hover:bg-sky-600 disabled:opacity-40 text-white text-[11px] font-extrabold cursor-pointer">Save answer</button>
-                <button disabled={busy} onClick={() => act(() => staffApi('/admin/chat/unanswered/dismiss', token, { method: 'POST', body: { key: u.key } }), 'Dismissed.', loadTeach)} className="px-3 py-2 rounded-xl bg-slate-800 text-slate-400 text-[11px] font-extrabold cursor-pointer">Ignore</button>
-              </div>
-            </div>
-          ))}
-          <p className="text-xs font-black text-white pt-2">Rice customers asked for that you do not list</p>
-          {requests.length === 0 && <p className="text-xs text-slate-500 font-bold">None yet.</p>}
-          {requests.map(r => <p key={r.key} className="text-[11px] text-slate-300"><span className="font-bold text-emerald-400">{r.key}</span> · asked {r.count}× <span className="text-slate-500">{(r.samples || []).slice(0, 2).map((s: string) => `“${s}”`).join(' ')}</span></p>)}
-        </div>
-      )}
-
-      {sub === 'learned' && (
-        <div className="space-y-3">
-          <div className="flex gap-2">
-            {(['candidate', 'active', 'rejected'] as const).map(s => <button key={s} onClick={() => setLearnedStatus(s)} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer ${learnedStatus === s ? 'bg-slate-700 text-white' : 'bg-slate-900 text-slate-500'}`}>{s === 'candidate' ? 'Waiting for you' : s === 'active' ? 'In use' : 'Rejected'}</button>)}
-          </div>
-          <p className="text-[11px] text-slate-500">Harmless things (prices, delivery, greetings, rice nicknames) are used automatically after 3 votes from 2 different customers. Anything about orders or payments always waits here for you.</p>
-          {learned.length === 0 && <p className="text-xs text-slate-500 font-bold">Nothing here.</p>}
-          {learned.map(l => (
-            <div key={l.key} className={`${cardCls} p-4 flex flex-wrap items-center gap-3`}>
-              <div className="flex-1 min-w-[12rem]">
-                <p className="text-[11px] text-slate-200">{l.type === 'faq' ? '💬 ' : l.type === 'alias' ? '🏷️ ' : '🗣️ '}“{l.text}” {l.type === 'phrase' && <span className="text-slate-500">→ {intentLabel(l.intent)}</span>}{l.type === 'alias' && <span className="text-slate-500">→ rice #{l.productId}</span>}</p>
-                {l.type === 'faq' && <p className="text-[10px] text-slate-500 mt-0.5">{l.answer}</p>}
-                <p className="text-[10px] text-slate-600 mt-0.5">{l.votes} vote(s) from {l.chats} chat(s){l.auto ? ' · learned automatically' : ''}{l.adminTaught ? ' · taught by admin' : ''}</p>
-              </div>
-              {l.status !== 'active' && <button disabled={busy} onClick={() => act(() => staffApi('/admin/chat/learned/decision', token, { method: 'POST', body: { key: l.key, action: 'approve' } }), 'Approved.', loadLearned)} className="px-3 py-1.5 rounded-lg bg-emerald-700 text-white text-[11px] font-extrabold cursor-pointer">Approve</button>}
-              {l.status !== 'rejected' && <button disabled={busy} onClick={() => act(() => staffApi('/admin/chat/learned/decision', token, { method: 'POST', body: { key: l.key, action: 'reject' } }), 'Rejected. It will not be learned again.', loadLearned)} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-[11px] font-extrabold cursor-pointer">Reject</button>}
-              <button disabled={busy} onClick={() => act(() => staffApi('/admin/chat/learned/decision', token, { method: 'POST', body: { key: l.key, action: 'delete' } }), 'Removed.', loadLearned)} className="px-3 py-1.5 rounded-lg bg-rose-900 text-rose-200 text-[11px] font-extrabold cursor-pointer">Delete</button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {sub === 'handoffs' && (
-        <div className="space-y-3">
-          {handoffs.length === 0 && <p className="text-xs text-slate-500 font-bold">No customers waiting for a person.</p>}
-          {handoffs.map(h => (
-            <div key={h.key} className={`${cardCls} p-4 space-y-2`}>
-              <p className="text-xs font-black text-white">{h.name || 'Guest'} {h.phone ? <span className="font-mono text-emerald-400">· {h.phone}</span> : null} <span className="text-[10px] text-slate-500 font-normal">· {h.reason} · {formatWhen(h.at)}{h.lastOrderId ? ` · last order #${h.lastOrderId}` : ''}</span></p>
-              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3 space-y-1">
-                {(h.recent || []).map((r: any, i: number) => <p key={i} className={`text-[11px] ${r.r === 'u' ? 'text-slate-200' : 'text-slate-500'}`}>{r.r === 'u' ? 'Customer' : 'Assistant'}: {r.t}</p>)}
-              </div>
-              <button disabled={busy} onClick={() => act(() => staffApi('/admin/chat/escalations/resolve', token, { method: 'POST', body: { key: h.key } }), 'Marked as handled.', loadHandoffs)} className="px-3 py-2 rounded-xl bg-emerald-700 text-white text-[11px] font-extrabold cursor-pointer">Mark handled</button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {sub === 'settings' && (!settings ? <p className="text-xs text-slate-500 font-bold">Loading…</p> : (
-        <div className={`${cardCls} p-5 space-y-3`}>
-          {[
-            ['assistantName', 'Assistant name'], ['businessHours', 'Business hours'], ['supportPhone', 'Support phone'], ['whatsapp', 'WhatsApp number']
-          ].map(([k, label]) => (
-            <label key={k} className="block"><span className="text-[10px] font-black uppercase tracking-wider text-slate-500">{label}</span>
-              <input value={settings[k] || ''} onChange={(e) => setSettings((s: any) => ({ ...s, [k]: e.target.value }))} className={`${inputCls} mt-1`} /></label>
-          ))}
-          <label className="block"><span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Default delivery time</span>
-            <input value={settings.deliveryTimes?.default || ''} onChange={(e) => setSettings((s: any) => ({ ...s, deliveryTimes: { ...s.deliveryTimes, default: e.target.value } }))} className={`${inputCls} mt-1`} /></label>
-          <label className="block"><span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Delivery time per county (one per line, “County: time”)</span>
-            <textarea value={countyText} onChange={(e) => setCountyText(e.target.value)} rows={6} className={`${inputCls} mt-1 font-mono`} /></label>
-          <label className="block"><span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Extra information the assistant should share (policies, returns…)</span>
-            <textarea value={settings.extraKnowledge || ''} onChange={(e) => setSettings((s: any) => ({ ...s, extraKnowledge: e.target.value }))} rows={4} className={`${inputCls} mt-1`} /></label>
-          <button disabled={busy} onClick={() => act(async () => {
-            const byCounty: Record<string, string> = {};
-            countyText.split('\n').forEach(line => { const i = line.indexOf(':'); if (i > 0) { const k = line.slice(0, i).trim(); const v = line.slice(i + 1).trim(); if (k && v) byCounty[k] = v; } });
-            await staffApi('/admin/config/chat-assistant', token, { method: 'PUT', body: { ...settings, deliveryTimes: { default: settings.deliveryTimes?.default, byCounty } } });
-          }, 'Settings saved.', loadSettings)} className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-[11px] font-extrabold cursor-pointer">Save settings</button>
-        </div>
-      ))}
     </div>
   );
 }
@@ -4922,6 +4778,7 @@ const ADMIN_TABS: AdminTabDef[] = [
   { id: 'orders', label: 'Order Dispatch', icon: ShoppingBag, desc: 'Real-time pipeline', group: 'Shop' },
   { id: 'dispatch', label: 'Delivery Board', icon: Truck, desc: 'Riders & deliveries', group: 'Shop' },
   { id: 'bulk', label: 'Bulk Orders', icon: Layers, desc: 'Discount & county delivery', group: 'Shop' },
+  { id: 'chat', label: 'Chat AI', icon: MessageSquare, desc: 'Teach it, approve new tables', group: 'Shop' },
   { id: 'payments', label: 'Payments', icon: Wallet, desc: 'Till, STK & checks', group: 'Money' },
   { id: 'promos', label: 'Promo Codes', icon: Percent, desc: 'Discount codes', group: 'Money' },
   { id: 'finances', label: 'Financial Engine', icon: DollarSign, desc: 'Real DB growth graph', group: 'Money' },
@@ -4934,7 +4791,6 @@ const ADMIN_TABS: AdminTabDef[] = [
   { id: 'reviews', label: 'Reviews', icon: Star, desc: 'Moderate customer reviews', group: 'People' },
   { id: 'config', label: 'Regional Freight', icon: MapPin, desc: '47 county shipping rates', group: 'Settings' },
   { id: 'carousel', label: 'Hero Backdrop', icon: Sliders, desc: 'UI/UX & advert control', group: 'Settings' },
-  { id: 'chat', label: 'AI Assistant', icon: MessageSquare, desc: 'Teach it, approve tables, hand-offs', group: 'Settings' },
   { id: 'system', label: 'System & Security', icon: Shield, desc: 'Health, 2-step, permissions', group: 'Settings' },
   { id: 'activity', label: 'Live Activity', icon: Activity, desc: 'Everything that happens', group: 'Settings' },
   { id: 'logs', label: 'Audit Logs', icon: FileText, desc: 'User account logs', group: 'Settings' }
@@ -5304,11 +5160,25 @@ export default function PremiumRiceStore() {
           if (hdrs.has('Authorization')) { hdrs.set('Authorization', `Bearer ${latest}`); nextInit = { ...(init || {}), headers: hdrs }; }
         }
       } catch (_) { /* keep original request */ }
-      const res = await originalFetch(input, nextInit);
+      let res = await originalFetch(input, nextInit);
       try {
         const fresh = res.headers.get('x-refresh-token');
         if (isApi && fresh && localStorage.getItem('token')) localStorage.setItem('token', fresh);
       } catch (_) { /* ignore */ }
+      // A 401 can be a request that left with an older token while a newer one was already saved. Retry once with the newest token before anyone is told to sign in again.
+      try {
+        if (isApi && res.status === 401 && typeof input === 'string') {
+          const latest2 = localStorage.getItem('token');
+          const sentAuth = new Headers((nextInit && nextInit.headers) || undefined).get('Authorization');
+          if (latest2 && sentAuth && sentAuth !== `Bearer ${latest2}`) {
+            const hdrs2 = new Headers((nextInit && nextInit.headers) || undefined);
+            hdrs2.set('Authorization', `Bearer ${latest2}`);
+            res = await originalFetch(input, { ...(nextInit || {}), headers: hdrs2 });
+            const fresh2 = res.headers.get('x-refresh-token');
+            if (fresh2 && localStorage.getItem('token')) localStorage.setItem('token', fresh2);
+          }
+        }
+      } catch (_) { /* keep first response */ }
       return res;
     };
     return () => { window.fetch = originalFetch; };
@@ -5331,7 +5201,7 @@ export default function PremiumRiceStore() {
       const idle = Date.now() - last;
       if (idle >= idleMs) {
         idleWarningRef.current = null; setIdleWarning(null);
-        handleSessionExpired('You were away for a while, so you were signed out for your security. Please log in again.');
+        handleSessionExpired('You were away for a while, so you were signed out for your security. Please log in again.', true);
       } else if (idleMs - idle <= WARN_MS) {
         const secs = Math.ceil((idleMs - idle) / 1000);
         idleWarningRef.current = secs; setIdleWarning(secs);
@@ -5439,7 +5309,7 @@ export default function PremiumRiceStore() {
         const res = await fetch(`${API_BASE_URL}/user/profile`, { headers: { 'Authorization': `Bearer ${token}` } });
         if (cancelled) return;
         if (res.status === 401 || res.status === 403 || res.status === 404) {
-          handleSessionExpired('Your session is no longer valid. Please log in again.');
+          handleSessionExpired('Your session is no longer valid. Please log in again.', true);
           return;
         }
         if (res.ok) {
@@ -6045,7 +5915,10 @@ export default function PremiumRiceStore() {
   };
 
   // Called when the server says the saved login is no longer valid
-  const handleSessionExpired = (message: string = 'Your session has expired. Please log in again.') => {
+  // Signs the person out. A stray 401 from one screen (for example a request that raced a token renewal) must NOT
+  // sign anybody out, so unless the caller is certain (`force`), the server is asked first whether the login is really dead.
+  const sessionCheckRef = useRef<boolean>(false);
+  const signOutNow = (message: string) => {
     setToken(null);
     setUser(null);
     localStorage.removeItem('token');
@@ -6054,6 +5927,33 @@ export default function PremiumRiceStore() {
     setView('login');
     showToast(message, 'warning');
   };
+  const handleSessionExpired = (message: string = 'Your session has expired. Please log in again.', force: boolean = false) => {
+    if (force || !localStorage.getItem('token')) { signOutNow(message); return; }
+    if (sessionCheckRef.current) return; // many requests failing together = one check
+    sessionCheckRef.current = true;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/user/profile`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } });
+        if (res.status === 401 || res.status === 403 || res.status === 404) {
+          let code = '';
+          try { code = (await res.clone().json()).code || ''; } catch (_) { /* ignore */ }
+          console.warn('Session confirmed invalid by the server:', res.status, code);
+          signOutNow(message);
+        } else {
+          console.warn('Ignored a stray 401: the session is still valid.');
+        }
+      } catch (_) { /* network problem: keep the session */ }
+      finally { setTimeout(() => { sessionCheckRef.current = false; }, 4000); }
+    })();
+  };
+
+  const handleExpiredRef = useRef(handleSessionExpired);
+  handleExpiredRef.current = handleSessionExpired;
+  useEffect(() => {
+    const h = () => handleExpiredRef.current();
+    window.addEventListener('mwea:auth-401', h);
+    return () => window.removeEventListener('mwea:auth-401', h);
+  }, []);
 
   // ORDER CREATION & STK PUSH INITIATION
   const handlePlaceOrder = async () => {
@@ -8272,10 +8172,10 @@ export default function PremiumRiceStore() {
                     </div>
                   )}
                   {adminTab === 'bulk' && <AdminBulkOrdersPanel token={token} showToast={showToast} products={products} countyFees={countyOverrides} />}
+                  {adminTab === 'chat' && <AdminChatPanel token={token} showToast={showToast} />}
                   {adminTab === 'promos' && <AdminPromosPanel token={token} showToast={showToast} />}
                   {adminTab === 'dispatch' && <AdminDispatchPanel token={token} showToast={showToast} />}
                   {adminTab === 'system' && <AdminSystemPanel token={token} showToast={showToast} />}
-                  {adminTab === 'chat' && <AdminChatPanel token={token} showToast={showToast} />}
 
                   {adminTab === 'agents' && (
                     <AdminAgentsPanel token={token} showToast={showToast} adminUsers={adminUsers} onUsersChanged={fetchAdminUsers} />
@@ -9284,8 +9184,12 @@ export default function PremiumRiceStore() {
       <ShoppingAssistantWidget
         token={token}
         user={user}
-        onOpenLogin={() => setView('login')}
-        onOrdersChanged={() => { fetchMyOrders(); }}
+        onRequireLogin={() => { showToast('Please sign in or create an account to place your order. Your chat will continue afterwards.', 'info'); setView('login'); }}
+        onOrdersChanged={() => { if (token) fetchMyOrders(); }}
+        onPaymentStarted={({ orderId, method, phone, amount }) => {
+          if (method === 'mpesa_till') { openTillModal({ id: orderId, grandTotal: amount, paymentDetails: {} }); return; }
+          setActivePaymentModal({ isOpen: true, orderId, status: 'PENDING', receipt: null, reason: null, phoneNumber: phone || user?.phoneNumber || '', amount, isPolling: true, method: 'mpesa_stk' });
+        }}
       />
       {twoFactor && <TwoFactorModal challenge={twoFactor} onSuccess={finishTwoFactorSignIn} onClose={() => setTwoFactor(null)} showToast={showToast} />}
       {reviewProduct && <ReviewsModal product={reviewProduct} token={token} user={user} onClose={() => setReviewProduct(null)} showToast={showToast} onChanged={fetchProducts} />}
