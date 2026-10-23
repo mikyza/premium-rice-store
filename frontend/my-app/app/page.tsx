@@ -51,6 +51,7 @@ export interface UserAccount {
   referralCode?: string;
   rewardPoints: number;
   isSuspended?: boolean;
+  isMainAdmin?: boolean;
   createdAt?: string;
   lastLoginAt?: string;
   ordersCount?: number;
@@ -5184,10 +5185,12 @@ export default function PremiumRiceStore() {
     return () => { window.fetch = originalFetch; };
   }, []);
 
-  // IDLE LOGOUT: after a stretch with no activity (admin 6 hours, customers 24 hours, agents/support 30 min) the person must log in again.
+  // IDLE LOGOUT: after a stretch with no activity (customers 24 hours, agents/support 30 min) the person must log in again.
+  // Administrators are NEVER signed out automatically; they only leave when they press Log out.
   useEffect(() => {
     if (!token || !user) return;
-    const minutes = ({ admin: 360, support: 30, agent: 30 } as Record<string, number>)[user.role] || 1440;
+    if (user.role === 'admin') { idleWarningRef.current = null; setIdleWarning(null); return; }
+    const minutes = ({ support: 30, agent: 30 } as Record<string, number>)[user.role] || 1440;
     const idleMs = minutes * 60 * 1000;
     const WARN_MS = 60 * 1000;
     const KEY = 'mwea_last_activity';
@@ -6293,6 +6296,32 @@ export default function PremiumRiceStore() {
         fetchAdminUsers();
       } else {
         await showApiError(res, 'Could not change role');
+      }
+    } catch (err: any) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  // Is the person using this screen the main administrator? (only they may make/remove admins)
+  const iAmMainAdmin = !!adminUsers.find(a => a.id === user?.id)?.isMainAdmin;
+
+  const handleSetAdminStatus = async (target: UserAccount, makeAdmin: boolean) => {
+    if (!token) return;
+    const msg = makeAdmin
+      ? `Make ${target.fullName} an administrator? They will be able to manage orders, products, users and settings.`
+      : `Remove administrator rights from ${target.fullName}? They become a normal customer.`;
+    if (!confirm(msg)) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/admin/users/${target.id}/${makeAdmin ? 'make-admin' : 'remove-admin'}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.message || (makeAdmin ? 'Administrator added.' : 'Administrator removed.'), 'success');
+        fetchAdminUsers();
+      } else {
+        await showApiError(res, 'Could not change administrator status');
       }
     } catch (err: any) {
       showToast(err.message, 'error');
@@ -8234,6 +8263,9 @@ export default function PremiumRiceStore() {
                                       }`}>
                                         {u.role}
                                       </span>
+                                      {u.isMainAdmin && (
+                                        <span className="ml-1 px-2 py-0.5 rounded-md font-black uppercase text-[9px] bg-emerald-600 text-white">Main admin</span>
+                                      )}
                                     </td>
                                     <td className="p-4 font-extrabold text-amber-400">{u.rewardPoints || 0} pts</td>
                                     <td className="p-4">
@@ -8248,7 +8280,12 @@ export default function PremiumRiceStore() {
                                       )}
                                     </td>
                                     <td className="p-4 text-right space-x-2">
-                                      {/* Edit Detail */}
+                                      {(() => {
+                                        // Only the main admin can manage other admins; nobody can touch the main admin but themselves.
+                                        const canManage = u.isMainAdmin ? u.id === user?.id : (u.role !== 'admin' || iAmMainAdmin || u.id === user?.id);
+                                        const canSuspendDelete = !u.isMainAdmin && u.id !== user?.id && (u.role !== 'admin' || iAmMainAdmin);
+                                        return (<>
+                                      {canManage && (
                                       <button 
                                         onClick={() => setEditingUser(u)} 
                                         className="p-1.5 text-slate-400 hover:text-emerald-400 cursor-pointer"
@@ -8256,6 +8293,32 @@ export default function PremiumRiceStore() {
                                       >
                                         <Edit className="w-4 h-4" />
                                       </button>
+                                      )}
+
+                                      {/* Make / remove administrator (main admin only) */}
+                                      {iAmMainAdmin && u.role !== 'admin' && !u.isSuspended && (
+                                        <button
+                                          onClick={() => handleSetAdminStatus(u, true)}
+                                          className="p-1.5 text-slate-500 hover:text-amber-300 cursor-pointer"
+                                          title="Make administrator"
+                                        >
+                                          <Shield className="w-4 h-4" />
+                                        </button>
+                                      )}
+                                      {iAmMainAdmin && u.role === 'admin' && !u.isMainAdmin && (
+                                        <button
+                                          onClick={() => handleSetAdminStatus(u, false)}
+                                          className="p-1.5 text-amber-400 hover:text-rose-400 cursor-pointer"
+                                          title="Remove administrator rights"
+                                        >
+                                          <UserX className="w-4 h-4" />
+                                        </button>
+                                      )}
+                                      {u.isMainAdmin && (
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-400" title="The main administrator cannot be suspended or deleted">
+                                          <Lock className="w-3.5 h-3.5" /> Protected
+                                        </span>
+                                      )}
 
                                       {/* Staff roles */}
                                       {u.role !== 'admin' && (
@@ -8278,6 +8341,7 @@ export default function PremiumRiceStore() {
                                       )}
 
                                       {/* Suspend / Reactivate */}
+                                      {canSuspendDelete && (<>
                                       <button 
                                         onClick={() => handleToggleUserSuspension(u.id, u.isSuspended || false)} 
                                         className={`p-1.5 cursor-pointer ${u.isSuspended ? 'text-emerald-400 hover:text-emerald-300' : 'text-amber-400 hover:text-amber-300'}`}
@@ -8294,6 +8358,9 @@ export default function PremiumRiceStore() {
                                       >
                                         <Trash2 className="w-4 h-4" />
                                       </button>
+                                      </>)}
+                                        </>);
+                                      })()}
                                     </td>
                                   </tr>
                                 ))}
@@ -9048,11 +9115,12 @@ export default function PremiumRiceStore() {
                   <label className="block font-bold text-slate-400 mb-1">Role</label>
                   <select 
                     value={editingUser.role} 
+                    disabled={editingUser.role === 'admin'}
                     onChange={(e) => setEditingUser(prev => prev ? { ...prev, role: e.target.value as any } : null)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold cursor-pointer"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-bold cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     <option value="customer">Customer</option>
-                    <option value="admin">Admin</option>
+                    {editingUser.role === 'admin' && <option value="admin">Admin (use the shield buttons to change)</option>}
                     <option value="logistics">Logistics</option>
                     <option value="support">Customer care</option>
                     <option value="agent">Agent</option>
