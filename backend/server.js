@@ -2814,27 +2814,30 @@ const authenticateToken = (req, res, next) => {
   }
 
   if (!token || token === 'null' || token === 'undefined' || token === '') {
-    return res.status(401).json({ error: 'Authentication token is required to access this resource.' });
+    console.log(`AUTH 401 TOKEN_MISSING on ${req.method} ${req.originalUrl}`);
+    return res.status(401).json({ error: 'Authentication token is required to access this resource.', code: 'TOKEN_MISSING' });
   }
 
   jwt.verify(token, JWT_SECRET, async (err, decodedUser) => {
     if (err) {
-      console.log(`DEBUG: Auth Token Verification Failed - ${err.message}`);
-      return res.status(401).json({ error: err.name === 'TokenExpiredError' ? 'You were away for a while, so you have been signed out. Please sign in again.' : 'Token is invalid or expired. Please sign in again.', sessionExpired: true });
+      console.log(`AUTH 401 ${err.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID'} on ${req.method} ${req.originalUrl} - ${err.message}`);
+      return res.status(401).json({ error: err.name === 'TokenExpiredError' ? 'You were away for a while, so you have been signed out. Please sign in again.' : 'Token is invalid or expired. Please sign in again.', sessionExpired: true, code: err.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID' });
     }
     // Hard cap on one continuous session, however active the person is
     {
       const key = sessionRoleKey(decodedUser.role);
       const startedAt = Number(decodedUser.sa) || Number(decodedUser.iat) || 0;
       if (startedAt && Date.now() / 1000 - startedAt > SESSION_POLICY.maxHours[key] * 3600) {
-        return res.status(401).json({ error: 'For your security, please sign in again.', sessionExpired: true });
+        console.log(`AUTH 401 SESSION_CAP on ${req.method} ${req.originalUrl}`);
+        return res.status(401).json({ error: 'For your security, please sign in again.', sessionExpired: true, code: 'SESSION_CAP' });
       }
     }
     try {
       // Always trust the database, not the token: suspended accounts are cut off at once and role changes apply immediately.
       const dbUser = await User.findByPk(decodedUser.id, { attributes: ['id', 'fullName', 'role', 'isActive', 'phoneNumber', 'email'] });
       if (!dbUser) {
-        return res.status(401).json({ error: 'This account no longer exists. Please sign in again.' });
+        console.log(`AUTH 401 ACCOUNT_GONE (user ${decodedUser.id}) on ${req.method} ${req.originalUrl}`);
+        return res.status(401).json({ error: 'This account no longer exists. Please sign in again.', sessionExpired: true, code: 'ACCOUNT_GONE' });
       }
       if (dbUser.isActive === false) {
         return res.status(403).json({ error: 'Your account is suspended. Please contact customer care.' });
@@ -2852,7 +2855,7 @@ const authenticateToken = (req, res, next) => {
         const key = sessionRoleKey(req.user.role);
         const idleSec = SESSION_POLICY.idleMinutes[key] * 60;
         const age = Math.floor(Date.now() / 1000) - (Number(decodedUser.iat) || 0);
-        if (age > 60) res.setHeader('X-Refresh-Token', issueSessionToken(dbUser.id, req.user.role, Number(decodedUser.sa) || Number(decodedUser.iat) || null));
+        if (age > 300) res.setHeader('X-Refresh-Token', issueSessionToken(dbUser.id, req.user.role, Number(decodedUser.sa) || Number(decodedUser.iat) || null));
       } catch (_) { /* renewal is best effort */ }
       next();
     } catch (dbErr) {
@@ -4333,6 +4336,19 @@ async function startServer() {
       } catch (err) { res.status(500).json({ error: err.message }); }
     });
 
+    // ====================================================================================
+    // SELF-HOSTED SHOPPING ASSISTANT (no third-party AI). Code lives in ./chatAssistant.js + ./chatBrain.js
+    // Guides the customer from choosing rice to paying (STK / Till), learns from use, and asks the
+    // admin to approve any new tables it needs (Admin > Chat AI). Settings: /api/admin/config/chat-assistant
+    // ====================================================================================
+    registerChatAssistant(expressApp, {
+      User, Order, RiceProduct, Delivery, SystemConfig, JWT_SECRET, flashSaleState,
+      authenticateToken, requireAdmin, getBulkConfig, bulkRuleFor, bulkTransportFor,
+      getPaymentConfig, getOps, evaluatePromo, getWholesaleTiers, bestTier,
+      resolveLocationName, getOrderItems, round2, countyOverrides, logisticsHierarchy, logEvent,
+      sequelize, DataTypes, Op, port, normalizeKenyanPhone
+    }).catch((e) => console.error('Chat assistant failed to start:', e.message));
+
     // --- SAFARICOM C2B FEED: every payment made to the Till arrives here, so codes are checked with no human involved ---
     const c2bGuard = (req, res, next) => {
       if (!process.env.MPESA_C2B_SECRET || req.params.secret !== process.env.MPESA_C2B_SECRET) return res.status(404).json({ error: 'Not found' });
@@ -4676,7 +4692,7 @@ async function startServer() {
     expressApp.post('/api/payment/stkpush', authenticateToken, handleStkPushRequest);
 
     // --- CREATE ORDER, CALCULATE WEIGHT/POINTS & TRIGGER PAYHERO STK PUSH ---
-    const createOrderHandler = async (req, res) => {
+    expressApp.post('/api/orders/create', authenticateToken, async (req, res) => {
       try {
         let { 
           cartItems, 
@@ -4917,8 +4933,7 @@ async function startServer() {
         console.error("Order Creation Error:", err);
         res.status(500).json({ error: err.message }); 
       }
-    };
-    expressApp.post('/api/orders/create', authenticateToken, createOrderHandler);
+    });
 
     // --- PAYMENT STATUS POLLING API (STK: asks PayHero; Till: reports where the code is) ---
     const handlePayHeroStatusCheck = async (req, res) => {
@@ -4971,21 +4986,6 @@ async function startServer() {
 
     expressApp.get('/api/payments/payhero/status/:orderId', authenticateToken, handlePayHeroStatusCheck);
     expressApp.get('/api/payment-status/:orderId', authenticateToken, handlePayHeroStatusCheck);
-
-    // ====================================================================================
-    // SELF-CONTAINED CHAT ASSISTANT (no external AI, no API key). Code: ./chatAssistant.js + ./chatNlu.js
-    // Guided buying (signed-in customers) -> /api/orders/create logic -> STK prompt -> payment confirmation.
-    // Learns from customers; asks the admin (with password) before creating any new database table.
-    // Registered here, AFTER the order and payment routes, because it reuses them.
-    // ====================================================================================
-    registerChatAssistant(expressApp, {
-      User, Order, RiceProduct, Delivery, SystemConfig, Cart, sequelize, DataTypes, jwt, bcrypt, JWT_SECRET, io, flashSaleState,
-      authenticateToken, requireAdmin, getBulkConfig, bulkRuleFor, bulkTransportFor,
-      getPaymentConfig, getOps, evaluatePromo, getWholesaleTiers, bestTier,
-      getOrderItems, round2, countyOverrides, logisticsHierarchy, logEvent,
-      normalizeKenyanPhone, cleanMpesaCode, MPESA_CODE_RE,
-      createOrderHandler, startPayHeroStk, syncPayHeroPayment, submitTillCode
-    });
 
     // --- PAYHERO PAYMENT WEBHOOK CALLBACK RECEIVER ---
     expressApp.post('/api/payments/payhero/callback', async (req, res) => {
