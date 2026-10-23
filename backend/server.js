@@ -1166,6 +1166,8 @@ async function ensureMainAdmin() {
       user.isActive = true;
       await user.save();
       console.log(`✅ Main administrator ${MAIN_ADMIN_PHONE} (user #${user.id}) set as active admin.`);
+    } else {
+      console.log(`✅ Main administrator ${MAIN_ADMIN_PHONE} (user #${user.id}) verified. Admin sessions never time out.`);
     }
   } catch (err) {
     console.error('⚠️ Could not verify the main administrator account:', err.message);
@@ -2861,11 +2863,19 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ error: 'Authentication token is required to access this resource.', code: 'TOKEN_MISSING' });
   }
 
-  jwt.verify(token, JWT_SECRET, async (err, decodedUser) => {
+  // Expiry is checked by hand below: administrators are NEVER timed out (their old expiring tokens keep working and get
+  // swapped for a non-expiring one), everybody else still expires as before. The signature is always verified.
+  jwt.verify(token, JWT_SECRET, { ignoreExpiration: true }, async (err, decodedUser) => {
     if (err) {
       console.log(`AUTH 401 ${err.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID'} on ${req.method} ${req.originalUrl} - ${err.message}`);
       return res.status(401).json({ error: err.name === 'TokenExpiredError' ? 'You were away for a while, so you have been signed out. Please sign in again.' : 'Token is invalid or expired. Please sign in again.', sessionExpired: true, code: err.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID' });
     }
+    const tokenExpired = !!decodedUser.exp && decodedUser.exp < Math.floor(Date.now() / 1000);
+    const sendExpired = () => {
+      console.log(`AUTH 401 TOKEN_EXPIRED on ${req.method} ${req.originalUrl}`);
+      return res.status(401).json({ error: 'You were away for a while, so you have been signed out. Please sign in again.', sessionExpired: true, code: 'TOKEN_EXPIRED' });
+    };
+    if (tokenExpired && decodedUser.role !== 'admin') return sendExpired();
     // Hard cap on one continuous session, however active the person is
     {
       const key = sessionRoleKey(decodedUser.role);
@@ -2894,6 +2904,8 @@ const authenticateToken = (req, res, next) => {
         email: dbUser.email,
         role: await effectiveRoleFor(dbUser)
       };
+      // A timed-out token only survives if the account is an administrator right now (checked against the database).
+      if (tokenExpired && req.user.role !== 'admin') return sendExpired();
       // Sliding session: while the person keeps using the site, hand back a fresh token so only IDLE time logs them out.
       try {
         const age = Math.floor(Date.now() / 1000) - (Number(decodedUser.iat) || 0);
@@ -3430,7 +3442,7 @@ async function startServer() {
         }
         
         socket.on('joinAdminChannel', (token) => {
-          jwt.verify(token, JWT_SECRET, async (err, decoded) => {
+          jwt.verify(token, JWT_SECRET, { ignoreExpiration: true }, async (err, decoded) => {
             if (!err && decoded && decoded.role === 'admin') {
               socket.join('admin-dashboard-room');
               console.log(`DEBUG: Admin connected to real-time broadcast room. User ID: ${decoded.id}`);
