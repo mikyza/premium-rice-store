@@ -1134,6 +1134,44 @@ async function effectiveRoleFor(user) {
   return user.role || 'customer';
 }
 
+/**
+ * ==========================================
+ * MAIN ADMINISTRATOR
+ * ==========================================
+ * The account that owns MAIN_ADMIN_PHONE is the main administrator. It is always an admin and always active:
+ * it cannot be suspended, deleted, demoted or have its phone number changed by anyone (including itself).
+ * Only the main administrator can make other people administrators, remove administrators, and suspend/reactivate them.
+ * Override the number with the MAIN_ADMIN_PHONE environment variable if it ever has to change.
+ */
+const MAIN_ADMIN_PHONE = process.env.MAIN_ADMIN_PHONE || '0746323229';
+const MAIN_ADMIN_NORMALIZED = normalizeKenyanPhone(MAIN_ADMIN_PHONE);
+const isMainAdminPhone = (phone) => !!MAIN_ADMIN_NORMALIZED && normalizeKenyanPhone(phone) === MAIN_ADMIN_NORMALIZED;
+
+// Safety net at model level: whatever route saves this account, it stays an active admin.
+User.addHook('beforeSave', 'mainAdminAlwaysActive', (user) => {
+  if (isMainAdminPhone(user.phoneNumber) && user.isVerified !== false) {
+    user.role = 'admin';
+    user.isActive = true;
+  }
+});
+
+/** Makes sure the main administrator account exists as an active admin (runs at every start-up). */
+async function ensureMainAdmin() {
+  try {
+    const user = await User.findOne({ where: { phoneNumber: { [Op.in]: phoneVariants(MAIN_ADMIN_PHONE) } } });
+    if (!user) { console.warn(`⚠️ Main administrator ${MAIN_ADMIN_PHONE} has not registered yet. Register and verify this number once; it becomes the main admin automatically.`); return; }
+    if (user.isVerified === false) { console.warn(`⚠️ Main administrator ${MAIN_ADMIN_PHONE} has not verified the account yet.`); return; }
+    if (user.role !== 'admin' || user.isActive === false) {
+      user.role = 'admin';
+      user.isActive = true;
+      await user.save();
+      console.log(`✅ Main administrator ${MAIN_ADMIN_PHONE} (user #${user.id}) set as active admin.`);
+    }
+  } catch (err) {
+    console.error('⚠️ Could not verify the main administrator account:', err.message);
+  }
+}
+
 const requireRoles = (...roles) => (req, res, next) => {
   if (!req.user || !roles.includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied for your account type.' });
@@ -2158,18 +2196,23 @@ function buildXlsx(sheets) {
 // ---------- Session policy: how long a person may stay idle before they must log in again ----------
 // Idle limit (minutes) per role, plus a hard cap on one continuous session (hours).
 const SESSION_POLICY = {
-  // Admin: signed out after 6 hours of NO activity. Customers: after 24 hours of NO activity.
+  // Admin: NEVER signed out automatically (null = no idle limit, no session cap). An admin only leaves when they
+  // press Log out, or when their account is suspended / removed (that is always checked against the database).
+  // Customers: after 24 hours of NO activity.
   // (maxHours is only a safety ceiling on one unbroken session; it is kept well above the idle limit
   //  so an active person is never kicked out while they are still using the site.)
-  idleMinutes: { admin: 360, support: 30, agent: 30, user: 1440 },
-  maxHours: { admin: 168, support: 12, agent: 12, user: 720 }
+  idleMinutes: { admin: null, support: 30, agent: 30, user: 1440 },
+  maxHours: { admin: null, support: 12, agent: 12, user: 720 }
 };
-const sessionRoleKey = (role) => (SESSION_POLICY.idleMinutes[role] ? role : 'user');
+const sessionRoleKey = (role) => ((role === 'admin' || SESSION_POLICY.idleMinutes[role]) ? role : 'user');
 /** Signs a login token that expires after the idle limit. Every request quietly renews it (see authenticateToken). */
 const issueSessionToken = (userId, role, startedAtSec = null) => {
   const key = sessionRoleKey(role);
+  const payload = { id: userId, role, sa: startedAtSec || Math.floor(Date.now() / 1000) };
+  // Administrator tokens carry no expiry at all, so an admin is never logged out by time.
+  if (key === 'admin') return jwt.sign(payload, JWT_SECRET);
   return jwt.sign(
-    { id: userId, role, sa: startedAtSec || Math.floor(Date.now() / 1000) },
+    payload,
     JWT_SECRET,
     { expiresIn: `${SESSION_POLICY.idleMinutes[key] + 2}m` } // +2 min grace so the browser's own idle timer always fires first
   );
@@ -2827,7 +2870,8 @@ const authenticateToken = (req, res, next) => {
     {
       const key = sessionRoleKey(decodedUser.role);
       const startedAt = Number(decodedUser.sa) || Number(decodedUser.iat) || 0;
-      if (startedAt && Date.now() / 1000 - startedAt > SESSION_POLICY.maxHours[key] * 3600) {
+      const capHours = SESSION_POLICY.maxHours[key];
+      if (capHours && startedAt && Date.now() / 1000 - startedAt > capHours * 3600) {
         console.log(`AUTH 401 SESSION_CAP on ${req.method} ${req.originalUrl}`);
         return res.status(401).json({ error: 'For your security, please sign in again.', sessionExpired: true, code: 'SESSION_CAP' });
       }
@@ -2852,10 +2896,12 @@ const authenticateToken = (req, res, next) => {
       };
       // Sliding session: while the person keeps using the site, hand back a fresh token so only IDLE time logs them out.
       try {
-        const key = sessionRoleKey(req.user.role);
-        const idleSec = SESSION_POLICY.idleMinutes[key] * 60;
         const age = Math.floor(Date.now() / 1000) - (Number(decodedUser.iat) || 0);
-        if (age > 300) res.setHeader('X-Refresh-Token', issueSessionToken(dbUser.id, req.user.role, Number(decodedUser.sa) || Number(decodedUser.iat) || null));
+        // Re-issue when the token is getting old, when the person's role changed (a new admin gets a non-expiring token,
+        // a removed admin goes back to a normal expiring one), or when an admin still holds an older expiring token.
+        const roleChanged = decodedUser.role !== req.user.role;
+        const adminOnOldToken = req.user.role === 'admin' && !!decodedUser.exp;
+        if (age > 300 || roleChanged || adminOnOldToken) res.setHeader('X-Refresh-Token', issueSessionToken(dbUser.id, req.user.role, Number(decodedUser.sa) || Number(decodedUser.iat) || null));
       } catch (_) { /* renewal is best effort */ }
       next();
     } catch (dbErr) {
@@ -2885,6 +2931,48 @@ const requireAdmin = async (req, res, next) => {
     res.status(500).json({ error: 'Internal administrative role security evaluation failure.' });
   }
 };
+
+/** Use after requireAdmin: only the main administrator gets through. */
+const requireMainAdmin = (req, res, next) => {
+  if (!req.adminUser || !isMainAdminPhone(req.adminUser.phoneNumber)) {
+    return res.status(403).json({ error: 'Only the main administrator can do this.' });
+  }
+  next();
+};
+
+/**
+ * Throws a 403 when `req.adminUser` may not do `action` to `target`.
+ *  - the main administrator is protected: nobody can suspend, delete, demote or re-number it, and only it can edit itself
+ *  - other administrators can only be managed by the main administrator
+ * action: 'edit' | 'suspend' | 'delete' | 'demote'
+ */
+function guardAdminTarget(req, target, action) {
+  const actor = req.adminUser;
+  const actorIsMain = isMainAdminPhone(actor.phoneNumber);
+  const isSelf = Number(actor.id) === Number(target.id);
+  if (isMainAdminPhone(target.phoneNumber)) {
+    if (['suspend', 'delete', 'demote'].includes(action)) throw httpError(403, 'The main administrator account cannot be suspended, deleted or demoted.');
+    if (!isSelf) throw httpError(403, 'The main administrator account cannot be changed by anyone else.');
+    return;
+  }
+  if (target.role === 'admin' && !actorIsMain && !isSelf) {
+    throw httpError(403, 'Only the main administrator can manage other administrators.');
+  }
+}
+
+/** Shared checks for the two "edit user" routes. Throws before anything is changed. */
+function guardAdminUserEdit(req, user, body) {
+  const { role, isActive, phoneNumber } = body || {};
+  guardAdminTarget(req, user, 'edit');
+  const wasAdmin = user.role === 'admin';
+  if (role !== undefined && ((role === 'admin') !== wasAdmin)) {
+    throw httpError(403, 'Administrator status is changed with the "Make admin" / "Remove admin" buttons, and only the main administrator can use them.');
+  }
+  if (isActive === false || isActive === 'false' || isActive === 0) guardAdminTarget(req, user, 'suspend');
+  if (isMainAdminPhone(user.phoneNumber) && phoneNumber !== undefined && normalizeKenyanPhone(phoneNumber) !== normalizeKenyanPhone(user.phoneNumber)) {
+    throw httpError(403, 'The main administrator phone number cannot be changed.');
+  }
+}
 
 /**
  * ==========================================
@@ -3826,6 +3914,7 @@ async function startServer() {
       try {
         const user = await User.findByPk(req.user.id);
         if (!user) return res.status(404).json({ error: 'User not found.' });
+        if (isMainAdminPhone(user.phoneNumber)) return res.status(403).json({ error: 'The main administrator account cannot be suspended.' });
 
         user.isActive = false;
         await user.save();
@@ -6909,7 +6998,7 @@ async function startServer() {
         res.json(systemRegisteredUsers.map((u) => {
           const o = u.toJSON();
           const sr = staffMap[o.id];
-          return { ...o, role: o.role === 'admin' ? 'admin' : (sr ? sr.role : o.role), referralCode: sr && sr.role === 'agent' ? sr.referralCode : undefined, isSuspended: o.isActive === false };
+          return { ...o, role: o.role === 'admin' ? 'admin' : (sr ? sr.role : o.role), referralCode: sr && sr.role === 'agent' ? sr.referralCode : undefined, isSuspended: o.isActive === false, isMainAdmin: isMainAdminPhone(o.phoneNumber) };
         }));
       } catch (err) { 
         res.status(500).json({ error: err.message }); 
@@ -6937,6 +7026,7 @@ async function startServer() {
             const { fullName, role, isActive, email, phoneNumber } = req.body || {};
             const user = await User.findByPk(req.params.id);
             if (!user) return res.status(404).json({ error: 'User record not found.' });
+            guardAdminUserEdit(req, user, req.body);
             if (fullName !== undefined) user.fullName = fullName;
             if (role !== undefined) {
               const handledAsStaff = await applyRoleChange(req, user, role);
@@ -6973,6 +7063,7 @@ async function startServer() {
             if (String(user.id) === String(req.adminUser.id)) {
               return res.status(400).json({ error: 'You cannot delete your own admin account.' });
             }
+            guardAdminTarget(req, user, 'delete');
             const staffRow = await StaffRole.findOne({ where: { userId: user.id } });
             const hasCommissions = await AgentCommission.findOne({ where: { agentId: user.id } });
             if ((staffRow && STAFF_ROLES.includes(staffRow.role)) || hasCommissions) {
@@ -6989,7 +7080,7 @@ async function startServer() {
             await safeAdminLog({ adminId: req.adminUser.id, action: 'DELETE_USER', targetType: 'user', targetId: req.params.id, ipAddress: req.ip });
             res.json({ message: 'User deleted successfully.' });
           } catch (err) {
-            console.error('❌ Admin route error:', err); res.status(500).json({ error: err.message });
+            console.error('❌ Admin route error:', err); res.status(err.status || 500).json({ error: err.message });
           }
         });
 
@@ -7120,6 +7211,7 @@ async function startServer() {
             const { fullName, role, isActive } = req.body || {};
             const targetUserRecord = await User.findByPk(req.params.id);
             if (!targetUserRecord) return res.status(404).json({ error: 'User record not found.' });
+            guardAdminUserEdit(req, targetUserRecord, req.body);
 
             if (fullName !== undefined) targetUserRecord.fullName = fullName;
             if (role !== undefined) {
@@ -7153,6 +7245,7 @@ async function startServer() {
             if (!user) return res.status(404).json({ error: 'User not found.' });
             
             const wantSuspended = req.body && typeof req.body.isSuspended === 'boolean' ? req.body.isSuspended : user.isActive;
+            guardAdminTarget(req, user, wantSuspended ? 'suspend' : 'edit');
             user.isActive = !wantSuspended;
             await user.save();
             
@@ -7166,7 +7259,52 @@ async function startServer() {
             
             res.json({ message: `User account has been ${user.isActive ? 'activated' : 'suspended'}.`, user });
           } catch (err) {
-            res.status(500).json({ error: err.message });
+            res.status(err.status || 500).json({ error: err.message });
+          }
+        });
+
+        // --- MAIN ADMIN ONLY: MAKE SOMEONE AN ADMINISTRATOR ---
+        expressApp.post('/api/admin/users/:id/make-admin', authenticateToken, requireAdmin, requireMainAdmin, async (req, res) => {
+          try {
+            const user = await User.findByPk(req.params.id);
+            if (!user) return res.status(404).json({ error: 'User not found.' });
+            if (user.role === 'admin') return res.status(400).json({ error: `${user.fullName} is already an administrator.` });
+            if (user.isVerified === false) return res.status(400).json({ error: 'This account has not been verified yet.' });
+            if (user.isActive === false) return res.status(400).json({ error: 'Reactivate this account before making it an administrator.' });
+
+            // An administrator is not also an agent / customer-care member: dismiss that role first (keeps its history and logs).
+            const staffRow = await StaffRole.findOne({ where: { userId: user.id } });
+            if (staffRow && STAFF_ROLES.includes(staffRow.role)) await assignStaffRole(req, user, 'customer', 'Promoted to administrator');
+
+            user.role = 'admin';
+            await user.save();
+            await safeAdminLog({ adminId: req.adminUser.id, action: 'MAKE_ADMIN', targetType: 'user', targetId: user.id, ipAddress: req.ip });
+            await logEvent({ req, action: 'ADMIN_APPOINTED', category: 'users', severity: 'warn', targetType: 'user', targetId: user.id,
+              summary: `${req.adminUser.fullName} made ${user.fullName} (#${user.id}) an administrator` });
+            res.json({ message: `${user.fullName} is now an administrator.`, role: 'admin' });
+          } catch (err) {
+            console.error('❌ Make admin error:', err);
+            res.status(err.status || 500).json({ error: err.message });
+          }
+        });
+
+        // --- MAIN ADMIN ONLY: REMOVE ADMINISTRATOR RIGHTS (back to a normal customer) ---
+        expressApp.post('/api/admin/users/:id/remove-admin', authenticateToken, requireAdmin, requireMainAdmin, async (req, res) => {
+          try {
+            const user = await User.findByPk(req.params.id);
+            if (!user) return res.status(404).json({ error: 'User not found.' });
+            guardAdminTarget(req, user, 'demote');
+            if (user.role !== 'admin') return res.status(400).json({ error: `${user.fullName} is not an administrator.` });
+
+            user.role = 'customer';
+            await user.save();
+            await safeAdminLog({ adminId: req.adminUser.id, action: 'REMOVE_ADMIN', targetType: 'user', targetId: user.id, ipAddress: req.ip });
+            await logEvent({ req, action: 'ADMIN_REMOVED', category: 'users', severity: 'warn', targetType: 'user', targetId: user.id,
+              summary: `${req.adminUser.fullName} removed administrator rights from ${user.fullName} (#${user.id})` });
+            res.json({ message: `${user.fullName} is no longer an administrator.`, role: 'customer' });
+          } catch (err) {
+            console.error('❌ Remove admin error:', err);
+            res.status(err.status || 500).json({ error: err.message });
           }
         });
 
@@ -7183,6 +7321,8 @@ async function startServer() {
           const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : (err.status || err.statusCode || 400);
           res.status(status).json({ error: err.message || 'Unexpected server error.' });
         });
+
+        await ensureMainAdmin();
 
         if (!IS_VERCEL) {
           startBackgroundJobs();
