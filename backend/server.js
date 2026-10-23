@@ -4333,17 +4333,6 @@ async function startServer() {
       } catch (err) { res.status(500).json({ error: err.message }); }
     });
 
-    // ====================================================================================
-    // AI SHOPPING ASSISTANT (tool-based, reads live data). Code lives in ./chatAssistant.js
-    // Needs ANTHROPIC_API_KEY. Admin can edit its settings at /api/admin/config/chat-assistant
-    // ====================================================================================
-    registerChatAssistant(expressApp, {
-      User, Order, RiceProduct, Delivery, SystemConfig, JWT_SECRET, flashSaleState,
-      authenticateToken, requireAdmin, getBulkConfig, bulkRuleFor, bulkTransportFor,
-      getPaymentConfig, getOps, evaluatePromo, getWholesaleTiers, bestTier,
-      resolveLocationName, getOrderItems, round2, countyOverrides, logisticsHierarchy, logEvent
-    });
-
     // --- SAFARICOM C2B FEED: every payment made to the Till arrives here, so codes are checked with no human involved ---
     const c2bGuard = (req, res, next) => {
       if (!process.env.MPESA_C2B_SECRET || req.params.secret !== process.env.MPESA_C2B_SECRET) return res.status(404).json({ error: 'Not found' });
@@ -4687,7 +4676,7 @@ async function startServer() {
     expressApp.post('/api/payment/stkpush', authenticateToken, handleStkPushRequest);
 
     // --- CREATE ORDER, CALCULATE WEIGHT/POINTS & TRIGGER PAYHERO STK PUSH ---
-    expressApp.post('/api/orders/create', authenticateToken, async (req, res) => {
+    const createOrderHandler = async (req, res) => {
       try {
         let { 
           cartItems, 
@@ -4928,7 +4917,8 @@ async function startServer() {
         console.error("Order Creation Error:", err);
         res.status(500).json({ error: err.message }); 
       }
-    });
+    };
+    expressApp.post('/api/orders/create', authenticateToken, createOrderHandler);
 
     // --- PAYMENT STATUS POLLING API (STK: asks PayHero; Till: reports where the code is) ---
     const handlePayHeroStatusCheck = async (req, res) => {
@@ -4981,6 +4971,21 @@ async function startServer() {
 
     expressApp.get('/api/payments/payhero/status/:orderId', authenticateToken, handlePayHeroStatusCheck);
     expressApp.get('/api/payment-status/:orderId', authenticateToken, handlePayHeroStatusCheck);
+
+    // ====================================================================================
+    // SELF-CONTAINED CHAT ASSISTANT (no external AI, no API key). Code: ./chatAssistant.js + ./chatNlu.js
+    // Guided buying (signed-in customers) -> /api/orders/create logic -> STK prompt -> payment confirmation.
+    // Learns from customers; asks the admin (with password) before creating any new database table.
+    // Registered here, AFTER the order and payment routes, because it reuses them.
+    // ====================================================================================
+    registerChatAssistant(expressApp, {
+      User, Order, RiceProduct, Delivery, SystemConfig, Cart, sequelize, DataTypes, jwt, bcrypt, JWT_SECRET, io, flashSaleState,
+      authenticateToken, requireAdmin, getBulkConfig, bulkRuleFor, bulkTransportFor,
+      getPaymentConfig, getOps, evaluatePromo, getWholesaleTiers, bestTier,
+      getOrderItems, round2, countyOverrides, logisticsHierarchy, logEvent,
+      normalizeKenyanPhone, cleanMpesaCode, MPESA_CODE_RE,
+      createOrderHandler, startPayHeroStk, syncPayHeroPayment, submitTillCode
+    });
 
     // --- PAYHERO PAYMENT WEBHOOK CALLBACK RECEIVER ---
     expressApp.post('/api/payments/payhero/callback', async (req, res) => {
